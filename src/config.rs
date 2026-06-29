@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub jwt_secret: String,
     pub server_port: u16,
     pub server_host: String,
+    pub internal_sync_key: String,
 }
 
 impl AppConfig {
@@ -22,6 +23,8 @@ impl AppConfig {
                 .unwrap_or(8088),
             server_host: std::env::var("SERVER_HOST")
                 .unwrap_or_else(|_| "0.0.0.0".into()),
+            internal_sync_key: std::env::var("INTERNAL_SYNC_KEY")
+                .unwrap_or_else(|_| "".into()),
         }
     }
 }
