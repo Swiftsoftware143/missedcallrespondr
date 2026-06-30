@@ -59,6 +59,21 @@ pub async fn portfolio_sync(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .to_string();
 
+    // Check for duplicate email
+    let email_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)",
+    )
+    .bind(&email)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(false);
+
+    if email_exists {
+        return Err(AppError::BadRequest(format!(
+            "User with email '{}' already exists", email
+        )));
+    }
+
     let now = chrono::Utc::now().naive_utc();
     sqlx::query(
         "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 'company_admin', $6, $7)"

@@ -27,3 +27,4 @@ pub mod email_templates_handler;
 pub mod import_logs_handler;
 pub mod export_templates_handler;
 pub mod calendar_events_handler;
+pub mod workflowswift_push;

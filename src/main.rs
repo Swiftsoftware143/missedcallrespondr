@@ -21,9 +21,13 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&pool).await?;
     tracing::info!("Migrations complete");
 
+    let workflowswift_url = std::env::var("WORKFLOWSWIFT_URL")
+        .unwrap_or_else(|_| "http://localhost:8085/api/incoming".into());
+
     let app_state = state::AppState {
         pool,
         config: cfg.clone(),
+        workflowswift_url,
     };
 
     let app = routes::create_router(app_state);

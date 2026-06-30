@@ -31,6 +31,27 @@ pub async fn create_contact(
     Json(req): Json<CreateContactRequest>,
 ) -> Result<Json<Contact>, AppError> {
     features::enforce_feature_limit(&state.pool, claims.tenant_id, "max_contacts", "Contacts").await?;
+
+    // Check for duplicate email within tenant
+    if let Some(ref email) = req.email {
+        if !email.trim().is_empty() {
+            let existing: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM contacts WHERE email = $1 AND tenant_id = $2)",
+            )
+            .bind(email)
+            .bind(claims.tenant_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(false);
+
+            if existing {
+                return Err(AppError::BadRequest(format!(
+                    "A contact with email '{}' already exists", email
+                )));
+            }
+        }
+    }
+
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
 
@@ -54,6 +75,13 @@ pub async fn create_contact(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
+
+    // Best-effort push to WorkflowSwift (never block on failure)
+    let item_clone = item.clone();
+    tokio::spawn(async move {
+        super::workflowswift_push::push_contact_to_workflowswift(&state, &item_clone).await;
+    });
+
     Ok(Json(item))
 }
 
