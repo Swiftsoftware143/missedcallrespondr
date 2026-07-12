@@ -11,3 +11,4 @@ pub mod integration;
 pub mod dashboard;
 pub mod activity;
 pub mod setting;
+pub mod contact_custom_field;

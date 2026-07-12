@@ -13,7 +13,8 @@ use crate::{
         follow_up_handler, integration_handler, portfolio_handler, integration_target_handler,
         import_logs_handler, export_templates_handler, calendar_events_handler,
         message_handler, message_template_handler,
-        response_rule_handler, settings_handler, voicemail_handler,
+        response_rule_handler, settings_handler, voicemail_handler, provider_keys_handler,
+        telnyx_handler, triggers_handler, contact_custom_field_handler,
     },
     state::AppState,
 };
@@ -25,10 +26,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/auth/login", post(auth_handlers::login))
         .route("/api/v1/auth/forgot-password", post(auth_handlers::forgot_password))
         .route("/api/v1/auth/reset-password", post(auth_handlers::reset_password))
-        .route("/api/v1/internal/portfolio-companies", post(portfolio_handler::internal_create_portfolio_company));
+        .route("/api/v1/internal/portfolio-companies", post(portfolio_handler::internal_create_portfolio_company))
+        .route("/api/v1/available-providers", get(provider_keys_handler::list_available_providers))
+        // Telnyx webhook (public — Telnyx sends unauthenticated requests)
+        .route("/api/v1/telnyx/webhook", post(telnyx_handler::webhook));
 
     let protected_routes = Router::new()
         .route("/api/v1/auth/me", get(auth_handlers::me))
+        .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
         // Calls
         .route("/api/v1/calls", get(call_handler::list_calls).post(call_handler::create_call))
@@ -51,6 +56,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/contacts", get(contact_handler::list_contacts).post(contact_handler::create_contact))
         .route("/api/v1/contacts/search", get(contact_handler::search_contacts))
         .route("/api/v1/contacts/:id", get(contact_handler::get_contact).put(contact_handler::update_contact).delete(contact_handler::delete_contact))
+        // Contact Custom Fields
+        .route("/api/v1/contacts/custom-fields", get(contact_custom_field_handler::list_custom_fields).post(contact_custom_field_handler::create_custom_field))
+        .route("/api/v1/contacts/custom-fields/:id", put(contact_custom_field_handler::update_custom_field).delete(contact_custom_field_handler::delete_custom_field))
+        .route("/api/v1/contacts/:id/fields", get(contact_custom_field_handler::get_contact_with_fields))
+        .route("/api/v1/contacts/with-fields", get(contact_custom_field_handler::list_contacts_with_fields))
+        .route("/api/v1/contacts/:contact_id/fields/:field_id", put(contact_custom_field_handler::update_contact_field_value))
         // Voicemails
         .route("/api/v1/voicemails", get(voicemail_handler::list_voicemails))
         .route("/api/v1/voicemails/:id", get(voicemail_handler::get_voicemail).put(voicemail_handler::update_voicemail))
@@ -78,6 +89,19 @@ pub fn create_router(state: AppState) -> Router {
         // Affiliates
         .route("/api/v1/affiliates", get(crate::handlers::affiliates_handler::list).post(crate::handlers::affiliates_handler::create))
         .route("/api/v1/affiliates/:id", get(crate::handlers::affiliates_handler::get).put(crate::handlers::affiliates_handler::update).delete(crate::handlers::affiliates_handler::delete))
+        // Provider Keys
+        .route("/api/v1/provider-keys", get(provider_keys_handler::list_provider_keys).post(provider_keys_handler::upsert_provider_key))
+        .route("/api/v1/provider-keys/:provider", delete(provider_keys_handler::delete_provider_key))
+        // Telnyx numbers (authenticated)
+        .route("/api/v1/telnyx/numbers", get(telnyx_handler::list_numbers).post(telnyx_handler::purchase_number))
+        .route("/api/v1/telnyx/numbers/:id", delete(telnyx_handler::delete_number))
+        // Campaign Triggers
+        .route("/api/v1/triggers/email", get(crate::handlers::triggers_handler::list_email_triggers).post(crate::handlers::triggers_handler::create_email_trigger))
+        .route("/api/v1/triggers/email/:id", get(crate::handlers::triggers_handler::get_email_trigger).put(crate::handlers::triggers_handler::update_email_trigger).delete(crate::handlers::triggers_handler::delete_email_trigger))
+        .route("/api/v1/triggers/redirect", get(crate::handlers::triggers_handler::list_redirect_triggers).post(crate::handlers::triggers_handler::create_redirect_trigger))
+        .route("/api/v1/triggers/redirect/:id", get(crate::handlers::triggers_handler::get_redirect_trigger).put(crate::handlers::triggers_handler::update_redirect_trigger).delete(crate::handlers::triggers_handler::delete_redirect_trigger))
+        // SMTP Config
+        .route("/api/v1/portfolio-companies/:id/smtp", get(crate::handlers::triggers_handler::get_smtp_config).put(crate::handlers::triggers_handler::update_smtp_config))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     Router::new()
@@ -87,12 +111,17 @@ pub fn create_router(state: AppState) -> Router {
         // Admin endpoints (cross-app portfolio sync + impersonation)
         .route("/api/v1/admin/portfolio-sync", post(crate::handlers::admin_handler::portfolio_sync))
         .route("/api/v1/admin/impersonate", post(crate::handlers::admin_handler::impersonate))
+        .route("/api/v1/admin/tenants/:id", delete(crate::handlers::admin_handler::delete_tenant))
         .route("/api/v1/admin/stop-impersonation", post(crate::handlers::admin_handler::stop_impersonation))
+        .route("/api/v1/admin/tenants", get(crate::handlers::admin_handler::list_all_tenants))
+        .route("/api/v1/admin/tenants/:id/credits", post(crate::handlers::admin_handler::add_credits))
         // Admin plan management
         .route("/api/v1/admin/plans", get(crate::handlers::plans_handler::list_plans).post(crate::handlers::plans_handler::create_plan))
         .route("/api/v1/admin/plans/assign", post(crate::handlers::plans_handler::admin_assign_plan))
         .route("/api/v1/admin/plans/:id", get(crate::handlers::plans_handler::get_plan).put(crate::handlers::plans_handler::update_plan).delete(crate::handlers::plans_handler::delete_plan))
         .route("/api/v1/admin/plans/:id/features", put(crate::handlers::plans_handler::admin_update_plan_features))
+        // Admin Telnyx config
+        .route("/api/v1/admin/telnyx-config", get(telnyx_handler::get_admin_config).put(telnyx_handler::put_admin_config))
         .layer(CorsLayer::permissive())
 
         // Leads

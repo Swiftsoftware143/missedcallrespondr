@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Path, State},
     Json,
 };
 use serde_json::{json, Value};
@@ -8,6 +8,7 @@ use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::SaltString;
 use rand::rngs::OsRng;
 
+use chrono::{DateTime, Utc};
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -154,5 +155,156 @@ pub async fn stop_impersonation() -> Result<Json<Value>, AppError> {
     Ok(Json(json!({
         "status": "impersonation_stopped",
         "note": "Drop impersonation token. Restore admin token."
+    })))
+}
+
+/// List all tenants (for super admin)
+pub async fn list_all_tenants(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    // Simple auth check — verify token has admin access
+    let auth_header = headers.get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| AppError::Unauthorized("Missing auth token".into()))?;
+    
+    // Validate token
+    let claims = crate::auth::models::validate_token(auth_header, &state.config.jwt_secret)
+        .map_err(|_| AppError::Unauthorized("Invalid token".into()))?;
+    
+    if claims.role != "agency_admin" && claims.role != "admin" && claims.role != "super_admin" {
+        return Err(AppError::Unauthorized("Not authorized to list tenants".into()));
+    }
+    
+    use sqlx::Row;
+    let rows = sqlx::query(
+        r#"SELECT 
+            t.id, t.name, t.slug, t.created_at,
+            tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
+            tp.credit_balance,
+            p.name as plan_name, p.price_monthly, p.price_yearly,
+            p.features->>'included_credits' as included_credits,
+            (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count
+        FROM tenants t
+        LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id
+        LEFT JOIN plans p ON p.id = tp.plan_id
+        ORDER BY t.created_at DESC"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let tenants: Vec<Value> = rows.iter().map(|r| {
+        json!({
+            "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
+            "name": r.try_get::<String,_>("name").unwrap_or_default(),
+            "slug": r.try_get::<String,_>("slug").unwrap_or_default(),
+            "created_at": r.try_get::<chrono::NaiveDateTime,_>("created_at").map(|d| d.to_string()).unwrap_or_default(),
+            "plan_id": r.try_get::<Option<Uuid>,_>("plan_id").ok().flatten().map(|u| u.to_string()),
+            "sub_status": r.try_get::<Option<String>,_>("sub_status").ok().flatten(),
+            "billing_cycle": r.try_get::<Option<String>,_>("billing_cycle").ok().flatten(),
+            "expires_at": r.try_get::<Option<chrono::DateTime<Utc>>,_>("expires_at").ok().flatten().map(|d| d.to_string()),
+            "plan_name": r.try_get::<Option<String>,_>("plan_name").ok().flatten(),
+            "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
+            "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
+            "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
+            "credit_balance": r.try_get::<Option<i32>,_>("credit_balance").ok().flatten().unwrap_or(0),
+            "included_credits": r.try_get::<Option<String>,_>("included_credits").ok().flatten()
+        })
+    }).collect();
+
+    Ok(Json(json!({
+        "tenants": tenants,
+        "total": tenants.len()
+    })))
+}
+
+/// Admin: add credits to a tenant
+pub async fn add_credits(
+    State(state): State<AppState>,
+    Path(tenant_id_str): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Value>, AppError> {
+    use sqlx::Row;
+    let tenant_id = Uuid::parse_str(&tenant_id_str)
+        .map_err(|_| AppError::BadRequest("Invalid tenant ID".into()))?;
+    let amount = body.get("amount")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| AppError::BadRequest("amount (integer) required".into()))? as i32;
+    
+    if amount <= 0 {
+        return Err(AppError::BadRequest("Amount must be positive".into()));
+    }
+    
+    // Upsert tenant_plan with credit increase
+    let existing = sqlx::query(
+        "SELECT credit_balance FROM tenant_plans WHERE tenant_id = $1"
+    )
+    .bind(tenant_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    
+    match existing {
+        Some(row) => {
+            let current: i32 = row.try_get("credit_balance").unwrap_or(0);
+            let new_balance = current.checked_add(amount).unwrap_or(i32::MAX);
+            sqlx::query(
+                "UPDATE tenant_plans SET credit_balance = $1, lifetime_credits = lifetime_credits + $2, updated_at = NOW() WHERE tenant_id = $3"
+            )
+            .bind(new_balance)
+            .bind(amount)
+            .bind(tenant_id)
+            .execute(&state.pool)
+            .await?;
+        },
+        None => {
+            // Try to find any plan to associate, or use a dummy fallback
+            let plan = sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM plans ORDER BY sort_order ASC LIMIT 1"
+            )
+            .fetch_optional(&state.pool)
+            .await?;
+            if let Some(pid) = plan {
+                sqlx::query(
+                    "INSERT INTO tenant_plans (tenant_id, plan_id, credit_balance, lifetime_credits, status, billing_cycle) VALUES ($1, $2, $3, $4, 'active', 'manual')"
+                )
+                .bind(tenant_id)
+                .bind(pid)
+                .bind(amount)
+                .bind(amount)
+                .execute(&state.pool)
+                .await?;
+            } else {
+                return Err(AppError::Internal("No plans exist. Create a plan first.".into()));
+            }
+        }
+    }
+    
+    Ok(Json(json!({
+        "message": format!("Added {} credits", amount),
+        "tenant_id": tenant_id_str
+    })))
+}
+
+/// Admin: delete a tenant and all associated data
+pub async fn delete_tenant(
+    State(state): State<AppState>,
+    Path(tenant_id_str): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    let tenant_id = Uuid::parse_str(&tenant_id_str)
+        .map_err(|_| AppError::BadRequest("Invalid tenant ID".into()))?;
+
+    let result = sqlx::query("DELETE FROM tenants WHERE id = $1")
+        .bind(tenant_id)
+        .execute(&state.pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Tenant not found".into()));
+    }
+
+    Ok(Json(json!({
+        "message": "Tenant deleted",
+        "tenant_id": tenant_id_str
     })))
 }

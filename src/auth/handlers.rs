@@ -167,6 +167,28 @@ pub async fn change_password(
     Ok(Json(serde_json::json!({"message": "Password updated successfully"})))
 }
 
+pub async fn update_profile(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let name = req.get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("name is required".into()))?;
+    
+    if name.trim().is_empty() {
+        return Err(AppError::BadRequest("name cannot be empty".into()));
+    }
+    
+    sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
+        .bind(name)
+        .bind(claims.sub)
+        .execute(&state.pool)
+        .await?;
+    
+    Ok(Json(serde_json::json!({"message": "Profile updated", "name": name})))
+}
+
 pub async fn forgot_password(
     State(state): State<AppState>,
     Json(req): Json<ForgotPasswordRequest>,

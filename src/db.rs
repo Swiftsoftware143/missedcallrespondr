@@ -13,6 +13,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     let sql4 = include_str!("../migrations/000004_password_resets.sql");
     sqlx::raw_sql(sql4).execute(pool).await?;
 
+    let sql5 = include_str!("../migrations/000005_provider_keys.sql");
+    sqlx::raw_sql(sql5).execute(pool).await?;
+
+    let sql6 = include_str!("../migrations/000006_campaign_triggers.sql");
+    sqlx::raw_sql(sql6).execute(pool).await?;
+
+    let sql7 = include_str!("../migrations/000007_contact_custom_fields.sql");
+    sqlx::raw_sql(sql7).execute(pool).await?;
+
     Ok(())
 }
-
