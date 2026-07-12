@@ -19,7 +19,7 @@ pub async fn list_calls(
     let calls = sqlx::query_as::<_, InboundCall>(
         "SELECT * FROM inbound_calls WHERE tenant_id = $1 ORDER BY call_time DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(calls))
@@ -30,7 +30,7 @@ pub async fn create_call(
     State(state): State<AppState>,
     Json(req): Json<CreateInboundCallRequest>,
 ) -> Result<Json<InboundCall>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_calls", "Calls").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
@@ -49,7 +49,7 @@ pub async fn create_call(
     .bind(&req.recording_url)
     .bind(&req.voicemail_url)
     .bind(&disposition)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(now)
     .bind(now)
     .execute(&state.pool)
@@ -71,7 +71,7 @@ pub async fn get_call(
         "SELECT * FROM inbound_calls WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Call not found".into()))?;
@@ -88,7 +88,7 @@ pub async fn update_call(
         "SELECT * FROM inbound_calls WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Call not found".into()))?;
@@ -121,7 +121,7 @@ pub async fn delete_call(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM inbound_calls WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 
@@ -140,7 +140,7 @@ pub async fn get_call_voicemail(
         "SELECT * FROM voicemails WHERE call_id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?;
 
@@ -159,7 +159,7 @@ pub async fn respond_to_call(
         "SELECT * FROM inbound_calls WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Call not found".into()))?;
@@ -176,7 +176,7 @@ pub async fn respond_to_call(
         .bind("call_back")
         .bind(now + chrono::Duration::hours(1))
         .bind("pending")
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .bind(now)
         .bind(now)
         .execute(&state.pool)

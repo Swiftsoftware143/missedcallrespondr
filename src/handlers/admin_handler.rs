@@ -107,7 +107,7 @@ pub async fn portfolio_sync(
         "id": sync_id.to_string(),
         "name": name,
         "email": email,
-        "tenant_id": tenant_id.to_string(),
+        "account_id": tenant_id.to_string(),
         "user_id": user_id.to_string(),
         "password": generated_password,
         "note": "Share credentials with the company."
@@ -127,13 +127,13 @@ pub async fn impersonate(
     let target_tenant_id = req.get("tenant_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok())
-        .ok_or_else(|| AppError::BadRequest("valid tenant_id is required".into()))?;
+        .ok_or_else(|| AppError::BadRequest("valid account_id is required".into()))?;
 
     let now = chrono::Utc::now().timestamp() as usize;
     let imp_claims = Claims {
         sub: claims.sub,
         email: format!("impersonated@{}", target_tenant_id),
-        tenant_id: target_tenant_id,
+        aid: target_tenant_id,
         role: "impersonated".to_string(),
         exp: now + 900,
         iat: now,
@@ -146,7 +146,7 @@ pub async fn impersonate(
         "impersonation_token": token,
         "expires_in": 900,
         "token_type": "Bearer",
-        "message": "Full tenant switch. Admin panel disappears."
+        "message": "Full account switch. Admin panel disappears."
     })))
 }
 

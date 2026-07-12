@@ -40,7 +40,7 @@ pub async fn create_api_key(
     Extension(claims): Extension<Claims>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_api_keys", "Api Keys").await?;
     let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("default");
     let target_url = req.get("target_url").and_then(|v| v.as_str()).unwrap_or("");
@@ -53,7 +53,7 @@ pub async fn create_api_key(
         "INSERT INTO api_keys (id, tenant_id, user_id, name, key_hash, prefix, permissions, target_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(claims.sub)
     .bind(name)
     .bind(&key_hash)
@@ -81,7 +81,7 @@ pub async fn list_api_keys(
     let rows = sqlx::query(
         "SELECT id::text, name, prefix, target_url, is_active, last_used_at::text, created_at::text FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC"
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -108,7 +108,7 @@ pub async fn update_api_key(
         "SELECT COUNT(*) FROM api_keys WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await?;
 
@@ -147,7 +147,7 @@ pub async fn delete_api_key(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM api_keys WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 

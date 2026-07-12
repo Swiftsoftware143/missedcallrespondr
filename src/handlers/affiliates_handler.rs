@@ -101,7 +101,7 @@ pub async fn list(
                ORDER BY created_at DESC
                LIMIT $3 OFFSET $4"#,
         )
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .bind(format!("%{}%", search))
         .bind(limit)
         .bind(offset)
@@ -114,7 +114,7 @@ pub async fn list(
                ORDER BY created_at DESC
                LIMIT $2 OFFSET $3"#,
         )
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.pool)
@@ -137,7 +137,7 @@ pub async fn create(
            VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
     )
     .bind(&aff_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(&req.name)
     .bind(&req.email)
     .bind(&req.industry)
@@ -162,7 +162,7 @@ pub async fn get(
         r#"SELECT * FROM affiliates WHERE id = $1 AND tenant_id = $2"#,
     )
     .bind(&id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Affiliate not found".into()))?;
@@ -181,7 +181,7 @@ pub async fn update(
         r#"SELECT * FROM affiliates WHERE id = $1 AND tenant_id = $2"#,
     )
     .bind(&id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Affiliate not found".into()))?;
@@ -199,7 +199,7 @@ pub async fn update(
     .bind(req.tax_docs.or(existing.tax_docs))
     .bind(req.is_active.unwrap_or(existing.is_active))
     .bind(&id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .execute(&state.pool)
     .await?;
 
@@ -216,7 +216,7 @@ pub async fn delete(
         r#"DELETE FROM affiliates WHERE id = $1 AND tenant_id = $2"#,
     )
     .bind(&id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .execute(&state.pool)
     .await?;
 

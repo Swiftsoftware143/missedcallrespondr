@@ -217,5 +217,5 @@ pub async fn admin_assign_plan(
     .bind(billing_cycle)
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({"message": "Plan assigned to tenant"})))
+    Ok(Json(json!({"message": "Plan assigned to account"})))
 }

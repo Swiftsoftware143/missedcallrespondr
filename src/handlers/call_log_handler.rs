@@ -18,7 +18,7 @@ pub async fn list_call_logs(
     let items = sqlx::query_as::<_, CallLog>(
         "SELECT * FROM call_logs WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -34,7 +34,7 @@ pub async fn export_call_logs(
     let items = sqlx::query_as::<_, CallLog>(
         "SELECT * FROM call_logs WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 

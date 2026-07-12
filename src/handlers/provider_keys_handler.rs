@@ -61,7 +61,7 @@ pub async fn list_provider_keys(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> ApiResult<Json<Vec<MaskedProviderKey>>> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
 
     let keys = sqlx::query_as::<_, ProviderKey>(
         "SELECT pk.id, pk.tenant_id, pk.provider, pk.api_key, pk.base_url, pk.metadata, pk.is_active, pk.scope, pk.created_at, pk.updated_at
@@ -96,7 +96,7 @@ pub async fn upsert_provider_key(
     Extension(claims): Extension<Claims>,
     Json(req): Json<UpsertProviderKeyRequest>,
 ) -> ApiResult<Json<Value>> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
 
     // Verify provider exists
     let exists = sqlx::query_scalar::<_, i64>(
@@ -182,7 +182,7 @@ pub async fn delete_provider_key(
     Extension(claims): Extension<Claims>,
     Path(provider): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
 
     let result = sqlx::query(
         "DELETE FROM provider_keys WHERE tenant_id = $1 AND provider = $2"

@@ -19,7 +19,7 @@ pub async fn list_integrations(
     let items = sqlx::query_as::<_, Integration>(
         "SELECT * FROM integrations WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -30,7 +30,7 @@ pub async fn create_integration(
     State(state): State<AppState>,
     Json(req): Json<CreateIntegrationRequest>,
 ) -> Result<Json<Integration>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_integrations", "Integrations").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
@@ -43,7 +43,7 @@ pub async fn create_integration(
     .bind(&req.name)
     .bind(&req.integration_type)
     .bind(&req.config)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(is_active)
     .bind(now)
     .bind(now)
@@ -67,7 +67,7 @@ pub async fn update_integration(
         "SELECT * FROM integrations WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Integration not found".into()))?;
@@ -99,7 +99,7 @@ pub async fn delete_integration(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM integrations WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 
@@ -118,7 +118,7 @@ pub async fn test_integration(
         "SELECT * FROM integrations WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Integration not found".into()))?;

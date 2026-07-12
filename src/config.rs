@@ -30,7 +30,7 @@ impl AppConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct Tenant {
+pub struct Account {
     pub id: uuid::Uuid,
     pub name: String,
     pub slug: String,
@@ -39,7 +39,7 @@ pub struct Tenant {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct User {
+pub struct TeamMember {
     pub id: uuid::Uuid,
     pub email: String,
     pub password_hash: String,
@@ -54,7 +54,7 @@ pub struct User {
 pub struct Claims {
     pub sub: uuid::Uuid,
     pub email: String,
-    pub tenant_id: uuid::Uuid,
+    pub aid: uuid::Uuid,
     pub role: String,
     pub exp: usize,
     pub iat: usize,
@@ -65,7 +65,7 @@ pub struct RegisterRequest {
     pub email: String,
     pub password: String,
     pub name: String,
-    pub tenant_name: String,
+    pub account_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,20 +77,21 @@ pub struct LoginRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthResponse {
     pub token: String,
-    pub user: UserResponse,
+    pub team_member: TeamMemberResponse,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct UserResponse {
+pub struct TeamMemberResponse {
     pub id: uuid::Uuid,
     pub email: String,
     pub name: String,
+    #[serde(rename = "account_id")]
     pub tenant_id: uuid::Uuid,
     pub role: String,
 }
 
-impl From<User> for UserResponse {
-    fn from(u: User) -> Self {
+impl From<TeamMember> for TeamMemberResponse {
+    fn from(u: TeamMember) -> Self {
         Self {
             id: u.id,
             email: u.email,

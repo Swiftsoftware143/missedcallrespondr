@@ -21,7 +21,7 @@ pub async fn list_message_templates(
     let items = sqlx::query_as::<_, MessageTemplate>(
         "SELECT * FROM message_templates WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -32,7 +32,7 @@ pub async fn create_message_template(
     State(state): State<AppState>,
     Json(req): Json<CreateMessageTemplateRequest>,
 ) -> Result<Json<MessageTemplate>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_message_templates", "Message Templates").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
@@ -44,7 +44,7 @@ pub async fn create_message_template(
     .bind(&req.name)
     .bind(&req.body)
     .bind(&req.variables)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(now)
     .bind(now)
     .execute(&state.pool)
@@ -67,7 +67,7 @@ pub async fn update_message_template(
         "SELECT * FROM message_templates WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Message template not found".into()))?;
@@ -98,7 +98,7 @@ pub async fn delete_message_template(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM message_templates WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 

@@ -123,7 +123,7 @@ pub async fn list_email_triggers(
     let triggers = sqlx::query_as::<_, EmailTrigger>(
         "SELECT * FROM campaign_email_triggers WHERE tenant_id = $1 ORDER BY name"
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -167,7 +167,7 @@ pub async fn create_email_trigger(
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)"#
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(portfolio_id)
     .bind(body.name.trim())
     .bind(&trigger_event)
@@ -203,7 +203,7 @@ pub async fn get_email_trigger(
         "SELECT * FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2"
     )
     .bind(trigger_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Email trigger not found".into()))?;
@@ -226,7 +226,7 @@ pub async fn update_email_trigger(
         "SELECT * FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2"
     )
     .bind(trigger_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Email trigger not found".into()))?;
@@ -279,7 +279,7 @@ pub async fn delete_email_trigger(
         "DELETE FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2"
     )
     .bind(trigger_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .execute(&state.pool)
     .await?;
 
@@ -302,7 +302,7 @@ pub async fn list_redirect_triggers(
     let triggers = sqlx::query_as::<_, RedirectTrigger>(
         "SELECT * FROM campaign_redirect_triggers WHERE tenant_id = $1 ORDER BY name"
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -343,7 +343,7 @@ pub async fn create_redirect_trigger(
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)"#
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(portfolio_id)
     .bind(body.name.trim())
     .bind(&trigger_event)
@@ -376,7 +376,7 @@ pub async fn get_redirect_trigger(
         "SELECT * FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2"
     )
     .bind(trigger_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Redirect trigger not found".into()))?;
@@ -398,7 +398,7 @@ pub async fn update_redirect_trigger(
         "SELECT * FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2"
     )
     .bind(trigger_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Redirect trigger not found".into()))?;
@@ -444,7 +444,7 @@ pub async fn delete_redirect_trigger(
         "DELETE FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2"
     )
     .bind(trigger_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .execute(&state.pool)
     .await?;
 
@@ -473,7 +473,7 @@ pub async fn get_smtp_config(
          FROM portfolio_companies WHERE id = $1 AND tenant_id = $2"
     )
     .bind(pc_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Portfolio company not found".into()))?;
@@ -511,7 +511,7 @@ pub async fn update_smtp_config(
         "SELECT EXISTS(SELECT 1 FROM portfolio_companies WHERE id = $1 AND tenant_id = $2)"
     )
     .bind(pc_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await?;
 

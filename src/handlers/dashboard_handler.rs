@@ -17,7 +17,7 @@ pub async fn get_dashboard_stats(
     let total_calls: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM inbound_calls WHERE tenant_id = $1",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await
     .unwrap_or(0);
@@ -25,7 +25,7 @@ pub async fn get_dashboard_stats(
     let missed_calls: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM inbound_calls WHERE tenant_id = $1 AND disposition = 'missed'",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await
     .unwrap_or(0);
@@ -33,7 +33,7 @@ pub async fn get_dashboard_stats(
     let answered_calls: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM inbound_calls WHERE tenant_id = $1 AND disposition = 'answered'",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await
     .unwrap_or(0);
@@ -41,7 +41,7 @@ pub async fn get_dashboard_stats(
     let voicemails: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM voicemails WHERE tenant_id = $1",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await
     .unwrap_or(0);
@@ -49,7 +49,7 @@ pub async fn get_dashboard_stats(
     let follow_ups_pending: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM follow_ups WHERE tenant_id = $1 AND status = 'pending'",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await
     .unwrap_or(0);
@@ -77,7 +77,7 @@ pub async fn get_dashboard_activity(
     let items = sqlx::query_as::<_, ActivityLog>(
         "SELECT * FROM activity_log WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 50",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))

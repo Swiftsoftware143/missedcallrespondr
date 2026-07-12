@@ -18,7 +18,7 @@ pub async fn list_voicemails(
     let items = sqlx::query_as::<_, Voicemail>(
         "SELECT * FROM voicemails WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -33,7 +33,7 @@ pub async fn get_voicemail(
         "SELECT * FROM voicemails WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Voicemail not found".into()))?;
@@ -50,7 +50,7 @@ pub async fn update_voicemail(
         "SELECT * FROM voicemails WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Voicemail not found".into()))?;

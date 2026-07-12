@@ -19,7 +19,7 @@ pub async fn list_messages(
     let items = sqlx::query_as::<_, Message>(
         "SELECT * FROM messages WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -30,7 +30,7 @@ pub async fn create_message(
     State(state): State<AppState>,
     Json(req): Json<CreateMessageRequest>,
 ) -> Result<Json<Message>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_messages", "Messages").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
@@ -46,7 +46,7 @@ pub async fn create_message(
     .bind(&req.body)
     .bind("sent")
     .bind(now)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(now)
     .execute(&state.pool)
     .await?;
@@ -67,7 +67,7 @@ pub async fn get_message(
         "SELECT * FROM messages WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Message not found".into()))?;

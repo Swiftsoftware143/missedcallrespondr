@@ -19,7 +19,7 @@ pub async fn list_contacts(
     let items = sqlx::query_as::<_, Contact>(
         "SELECT * FROM contacts WHERE tenant_id = $1 ORDER BY name ASC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -30,7 +30,7 @@ pub async fn create_contact(
     State(state): State<AppState>,
     Json(req): Json<CreateContactRequest>,
 ) -> Result<Json<Contact>, AppError> {
-    features::enforce_feature_limit(&state.pool, claims.tenant_id, "max_contacts", "Contacts").await?;
+    features::enforce_feature_limit(&state.pool, claims.aid, "max_contacts", "Contacts").await?;
 
     // Check for duplicate email within tenant
     if let Some(ref email) = req.email {
@@ -39,7 +39,7 @@ pub async fn create_contact(
                 "SELECT EXISTS(SELECT 1 FROM contacts WHERE email = $1 AND tenant_id = $2)",
             )
             .bind(email)
-            .bind(claims.tenant_id)
+            .bind(claims.aid)
             .fetch_one(&state.pool)
             .await
             .unwrap_or(false);
@@ -65,7 +65,7 @@ pub async fn create_contact(
     .bind(&req.company)
     .bind(&req.notes)
     .bind(&req.tags)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(now)
     .bind(now)
     .execute(&state.pool)
@@ -94,7 +94,7 @@ pub async fn get_contact(
         "SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
@@ -111,7 +111,7 @@ pub async fn update_contact(
         "SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
@@ -145,7 +145,7 @@ pub async fn delete_contact(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM contacts WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 
@@ -167,7 +167,7 @@ pub async fn search_contacts(
         sqlx::query_as::<_, Contact>(
             "SELECT * FROM contacts WHERE tenant_id = $1 AND phone LIKE $2 ORDER BY name ASC",
         )
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .bind(p)
         .fetch_all(&state.pool)
         .await?
@@ -175,7 +175,7 @@ pub async fn search_contacts(
         sqlx::query_as::<_, Contact>(
             "SELECT * FROM contacts WHERE tenant_id = $1 AND (name ILIKE $2 OR phone ILIKE $2 OR email ILIKE $2) ORDER BY name ASC",
         )
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .bind(&q)
         .fetch_all(&state.pool)
         .await?
@@ -183,7 +183,7 @@ pub async fn search_contacts(
         sqlx::query_as::<_, Contact>(
             "SELECT * FROM contacts WHERE tenant_id = $1 ORDER BY name ASC",
         )
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .fetch_all(&state.pool)
         .await?
     };

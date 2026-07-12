@@ -18,7 +18,7 @@ pub async fn list_response_rules(
     let rules = sqlx::query_as::<_, ResponseRule>(
         "SELECT * FROM response_rules WHERE tenant_id = $1 ORDER BY created_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(rules))
@@ -29,7 +29,7 @@ pub async fn create_response_rule(
     State(state): State<AppState>,
     Json(req): Json<CreateResponseRuleRequest>,
 ) -> Result<Json<ResponseRule>, AppError> {
-    features::enforce_feature_limit(&state.pool, claims.tenant_id, "max_rules", "Response rules").await?;
+    features::enforce_feature_limit(&state.pool, claims.aid, "max_rules", "Response rules").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
     let is_active = req.is_active.unwrap_or(true);
@@ -43,7 +43,7 @@ pub async fn create_response_rule(
     .bind(&req.response_type)
     .bind(&req.response_content)
     .bind(&req.schedule)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(is_active)
     .bind(now)
     .bind(now)
@@ -67,7 +67,7 @@ pub async fn update_response_rule(
         "SELECT * FROM response_rules WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Response rule not found".into()))?;
@@ -101,7 +101,7 @@ pub async fn delete_response_rule(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM response_rules WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 

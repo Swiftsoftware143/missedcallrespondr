@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    config::{AuthResponse, Claims, LoginRequest, RegisterRequest, User, UserResponse, ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest},
+    config::{AuthResponse, Claims, LoginRequest, RegisterRequest, TeamMember, TeamMemberResponse, ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest},
     error::AppError,
     state::AppState,
 };
@@ -15,7 +15,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let existing = sqlx::query_as::<_, User>(
+    let existing = sqlx::query_as::<_, TeamMember>(
         "SELECT * FROM users WHERE email = $1",
     )
     .bind(&req.email)
@@ -23,18 +23,18 @@ pub async fn register(
     .await?;
 
     if existing.is_some() {
-        return Err(AppError::Conflict("User already exists".into()));
+        return Err(AppError::Conflict("Team member already exists".into()));
     }
 
-    let tenant_id = uuid::Uuid::new_v4();
-    let tenant_slug = req.tenant_name.to_lowercase().replace(' ', "_");
+    let account_id = uuid::Uuid::new_v4();
+    let account_slug = req.account_name.to_lowercase().replace(' ', "_");
 
     sqlx::query(
         "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)",
     )
-    .bind(tenant_id)
-    .bind(&req.tenant_name)
-    .bind(&tenant_slug)
+    .bind(account_id)
+    .bind(&req.account_name)
+    .bind(&account_slug)
     .execute(&state.pool)
     .await?;
 
@@ -49,8 +49,8 @@ pub async fn register(
     .bind(&req.email)
     .bind(&password_hash)
     .bind(&req.name)
-    .bind(tenant_id)
-    .bind("admin")
+    .bind(account_id)
+    .bind("account_owner")
     .bind(now)
     .bind(now)
     .execute(&state.pool)
@@ -59,8 +59,8 @@ pub async fn register(
     let claims = Claims {
         sub: user_id,
         email: req.email.clone(),
-        tenant_id,
-        role: "admin".into(),
+        aid: account_id,
+        role: "account_owner".into(),
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
     };
@@ -70,12 +70,12 @@ pub async fn register(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserResponse {
+        team_member: TeamMemberResponse {
             id: user_id,
             email: req.email,
             name: req.name,
-            tenant_id,
-            role: "admin".into(),
+            tenant_id: account_id,
+            role: "account_owner".into(),
         },
     }))
 }
@@ -84,7 +84,7 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let user = sqlx::query_as::<_, User>(
+    let user = sqlx::query_as::<_, TeamMember>(
         "SELECT * FROM users WHERE email = $1",
     )
     .bind(&req.email)
@@ -102,7 +102,7 @@ pub async fn login(
     let claims = Claims {
         sub: user.id,
         email: user.email.clone(),
-        tenant_id: user.tenant_id,
+        aid: user.tenant_id,
         role: user.role.clone(),
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
@@ -113,15 +113,15 @@ pub async fn login(
 
     Ok(Json(AuthResponse {
         token,
-        user: user.into(),
+        team_member: user.into(),
     }))
 }
 
 pub async fn me(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-) -> Result<Json<UserResponse>, AppError> {
-    let user = sqlx::query_as::<_, User>(
+) -> Result<Json<TeamMemberResponse>, AppError> {
+    let user = sqlx::query_as::<_, TeamMember>(
         "SELECT * FROM users WHERE id = $1",
     )
     .bind(claims.sub)
@@ -141,7 +141,7 @@ pub async fn change_password(
         return Err(AppError::BadRequest("New password must be at least 8 characters".into()));
     }
 
-    let user = sqlx::query_as::<_, User>(
+    let user = sqlx::query_as::<_, TeamMember>(
         "SELECT * FROM users WHERE id = $1",
     )
     .bind(claims.sub)
@@ -193,7 +193,7 @@ pub async fn forgot_password(
     State(state): State<AppState>,
     Json(req): Json<ForgotPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if let Some(user) = sqlx::query_as::<_, User>(
+    if let Some(user) = sqlx::query_as::<_, TeamMember>(
         "SELECT * FROM users WHERE email = $1",
     )
     .bind(&req.email)
@@ -263,4 +263,3 @@ pub async fn reset_password(
 
     Ok(Json(serde_json::json!({"message": "Password has been reset successfully"})))
 }
-

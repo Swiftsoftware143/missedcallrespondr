@@ -17,7 +17,7 @@ pub async fn get_settings(
     let items = sqlx::query_as::<_, TenantSetting>(
         "SELECT * FROM tenant_settings WHERE tenant_id = $1",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -32,7 +32,7 @@ pub async fn update_settings(
         sqlx::query(
             "INSERT INTO tenant_settings (tenant_id, key, value) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, key) DO UPDATE SET value = $3",
         )
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .bind(&entry.key)
         .bind(&entry.value)
         .execute(&state.pool)

@@ -23,7 +23,7 @@ pub async fn list_custom_fields(
     let fields = sqlx::query_as::<_, ContactCustomField>(
         "SELECT * FROM contact_custom_fields WHERE tenant_id = $1 ORDER BY field_order ASC, field_name ASC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(fields))
@@ -42,7 +42,7 @@ pub async fn create_custom_field(
     let existing: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM contact_custom_fields WHERE tenant_id = $1 AND field_name = $2)",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(&req.field_name)
     .fetch_one(&state.pool)
     .await
@@ -64,7 +64,7 @@ pub async fn create_custom_field(
         "INSERT INTO contact_custom_fields (id, tenant_id, field_name, field_type, is_required, field_order, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(&req.field_name)
     .bind(&field_type)
     .bind(is_required)
@@ -90,7 +90,7 @@ pub async fn update_custom_field(
         "SELECT * FROM contact_custom_fields WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Custom field not found".into()))?;
@@ -120,7 +120,7 @@ pub async fn delete_custom_field(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM contact_custom_fields WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 
@@ -141,7 +141,7 @@ pub async fn get_contact_with_fields(
         "SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
@@ -186,7 +186,7 @@ pub async fn list_contacts_with_fields(
     let contacts = sqlx::query_as::<_, crate::models::contact::Contact>(
         "SELECT * FROM contacts WHERE tenant_id = $1 ORDER BY name ASC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -242,7 +242,7 @@ pub async fn update_contact_field_value(
         "SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND tenant_id = $2)",
     )
     .bind(contact_id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_one(&state.pool)
     .await
     .unwrap_or(false);

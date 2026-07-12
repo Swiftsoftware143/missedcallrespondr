@@ -19,7 +19,7 @@ pub async fn list_follow_ups(
     let items = sqlx::query_as::<_, FollowUp>(
         "SELECT * FROM follow_ups WHERE tenant_id = $1 ORDER BY scheduled_at DESC",
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -30,7 +30,7 @@ pub async fn create_follow_up(
     State(state): State<AppState>,
     Json(req): Json<CreateFollowUpRequest>,
 ) -> Result<Json<FollowUp>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_follow_ups", "Follow Ups").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
@@ -45,7 +45,7 @@ pub async fn create_follow_up(
     .bind("pending")
     .bind(&req.notes)
     .bind(req.assigned_to)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .bind(now)
     .bind(now)
     .execute(&state.pool)
@@ -68,7 +68,7 @@ pub async fn update_follow_up(
         "SELECT * FROM follow_ups WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Follow-up not found".into()))?;
@@ -102,7 +102,7 @@ pub async fn delete_follow_up(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM follow_ups WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(claims.tenant_id)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 

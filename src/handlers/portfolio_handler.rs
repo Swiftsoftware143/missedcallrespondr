@@ -18,7 +18,7 @@ pub async fn list_portfolio_companies(
     let rows = sqlx::query(
         "SELECT id, name, slug, settings::text, is_active, created_at, updated_at FROM portfolio_companies WHERE tenant_id = $1 ORDER BY name"
     )
-    .bind(&claims.tenant_id)
+    .bind(&claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -40,7 +40,7 @@ pub async fn create_portfolio_company(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_portfolio_companys", "Portfolio Companys").await?;
     let name = body.get("name")
         .and_then(|v| v.as_str())
@@ -56,7 +56,7 @@ pub async fn create_portfolio_company(
         "INSERT INTO portfolio_companies (id, tenant_id, name, slug, settings) VALUES ($1, $2, $3, $4, $5::jsonb)"
     )
     .bind(id)
-    .bind(&claims.tenant_id)
+    .bind(&claims.aid)
     .bind(name)
     .bind(slug)
     .bind(&settings)
@@ -81,7 +81,7 @@ pub async fn get_portfolio_company(
         "SELECT id, name, slug, settings::text, is_active, created_at, updated_at FROM portfolio_companies WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
-    .bind(&claims.tenant_id)
+    .bind(&claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Portfolio company not found".into()))?;
@@ -105,7 +105,7 @@ pub async fn update_portfolio_company(
         "SELECT id FROM portfolio_companies WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
-    .bind(&claims.tenant_id)
+    .bind(&claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Portfolio company not found".into()))?;
@@ -200,7 +200,7 @@ pub async fn delete_portfolio_company(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM portfolio_companies WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(&claims.tenant_id)
+        .bind(&claims.aid)
         .execute(&state.pool)
         .await?;
 

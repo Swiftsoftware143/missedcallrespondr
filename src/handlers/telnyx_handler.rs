@@ -326,7 +326,7 @@ pub async fn list_numbers(
          WHERE tenant_id = $1 AND (provider = 'telnyx' OR telnyx_connection_id IS NOT NULL)
          ORDER BY number ASC"
     )
-    .bind(claims.tenant_id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(numbers))
@@ -340,7 +340,7 @@ pub async fn purchase_number(
     Extension(claims): Extension<Claims>,
     Json(req): Json<PurchaseNumberRequest>,
 ) -> ApiResult<Json<Value>> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
 
     // Normalize number
     let number = if req.number.starts_with('+') {
@@ -458,7 +458,7 @@ pub async fn delete_number(
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
-    let tenant_id: Uuid = claims.tenant_id;
+    let tenant_id: Uuid = claims.aid;
 
     // Verify ownership
     let number = sqlx::query_as::<_, PhoneNumber>(
