@@ -23,7 +23,7 @@ pub async fn register(
     .await?;
 
     if existing.is_some() {
-        return Err(AppError::Conflict("Team member already exists".into()));
+        return Err(AppError::Conflict("A user with this email already exists. Try signing in.".into()));
     }
 
     let account_id = uuid::Uuid::new_v4();
@@ -55,6 +55,26 @@ pub async fn register(
     .bind(now)
     .execute(&state.pool)
     .await?;
+
+    // Auto-assign Free plan with 50 starter credits
+    let free_plan = sqlx::query_as::<_, (uuid::Uuid,)>(
+        "SELECT id FROM plans WHERE slug = 'free' AND is_active = true LIMIT 1"
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some((plan_id,)) = free_plan {
+        let tp_id = uuid::Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, credit_balance, lifetime_credits, status, billing_cycle)
+               VALUES ($1, $2, $3, 50, 50, 'active', 'free')"#
+        )
+        .bind(tp_id)
+        .bind(account_id)
+        .bind(plan_id)
+        .execute(&state.pool)
+        .await?;
+    }
 
     let claims = Claims {
         sub: user_id,
