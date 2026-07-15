@@ -103,7 +103,7 @@ pub async fn update_integration_target(
     Path(id): Path<Uuid>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let existing = sqlx::query(
+    let _existing = sqlx::query(
         "SELECT id FROM integration_targets WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)

@@ -8,7 +8,7 @@ use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::SaltString;
 use rand::rngs::OsRng;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
