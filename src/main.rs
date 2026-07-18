@@ -28,10 +28,14 @@ async fn main() -> anyhow::Result<()> {
     let workflowswift_url = std::env::var("WORKFLOWSWIFT_URL")
         .unwrap_or_else(|_| "http://localhost:8085/api/incoming".into());
 
+    let coreswift_url = std::env::var("CORESWIFT_URL")
+        .unwrap_or_else(|_| "http://localhost:8084".into());
+
     let app_state = state::AppState {
         pool,
         config: cfg.clone(),
         workflowswift_url,
+        coreswift_url,
     };
 
     let app = routes::create_router(app_state);

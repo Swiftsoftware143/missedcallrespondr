@@ -6,4 +6,5 @@ pub struct AppState {
     pub pool: PgPool,
     pub config: AppConfig,
     pub workflowswift_url: String,
+    pub coreswift_url: String,
 }

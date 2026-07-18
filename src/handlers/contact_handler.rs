@@ -76,10 +76,12 @@ pub async fn create_contact(
         .fetch_one(&state.pool)
         .await?;
 
-    // Best-effort push to WorkflowSwift (never block on failure)
+    // Best-effort pushes (never block on failure)
+    let state_clone = state.clone();
     let item_clone = item.clone();
     tokio::spawn(async move {
-        super::workflowswift_push::push_contact_to_workflowswift(&state, &item_clone).await;
+        super::workflowswift_push::push_contact_to_workflowswift(&state_clone, &item_clone).await;
+        super::coreswift_push::push_contact_to_coreswift(&state_clone, &item_clone, "contact_creation").await;
     });
 
     Ok(Json(item))
@@ -135,6 +137,14 @@ pub async fn update_contact(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
+
+    // Best-effort push to CoreSwift (tag changes)
+    let state_clone = state.clone();
+    let item_clone = item.clone();
+    tokio::spawn(async move {
+        super::coreswift_push::push_contact_to_coreswift(&state_clone, &item_clone, "tag_update").await;
+    });
+
     Ok(Json(item))
 }
 

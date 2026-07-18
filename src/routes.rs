@@ -14,12 +14,13 @@ use crate::{
         import_logs_handler, export_templates_handler, calendar_events_handler,
         message_handler, message_template_handler,
         response_rule_handler, settings_handler, voicemail_handler, provider_keys_handler,
-        telnyx_handler, triggers_handler, contact_custom_field_handler,
+        telnyx_handler, triggers_handler, contact_custom_field_handler, checkout_handler,
     },
     state::AppState,
 };
 
 pub fn create_router(state: AppState) -> Router {
+    // ── Public routes (no auth required) ──
     let public_routes = Router::new()
         .route("/api/v1/health", get(health_check))
         .route("/api/v1/auth/register", post(auth_handlers::register))
@@ -29,8 +30,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/internal/portfolio-companies", post(portfolio_handler::internal_create_portfolio_company))
         .route("/api/v1/available-providers", get(provider_keys_handler::list_available_providers))
         // Telnyx webhook (public — Telnyx sends unauthenticated requests)
-        .route("/api/v1/telnyx/webhook", post(telnyx_handler::webhook));
+        .route("/api/v1/telnyx/webhook", post(telnyx_handler::webhook))
+        // Payment webhooks (public — providers send unauthenticated requests)
+        .route("/api/v1/webhooks/stripe", post(checkout_handler::stripe_webhook))
+        .route("/api/v1/webhooks/paypal", post(checkout_handler::paypal_webhook));
 
+    // ── Protected routes (auth required) ──
     let protected_routes = Router::new()
         .route("/api/v1/auth/me", get(auth_handlers::me))
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
@@ -102,12 +107,42 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/triggers/redirect/:id", get(crate::handlers::triggers_handler::get_redirect_trigger).put(crate::handlers::triggers_handler::update_redirect_trigger).delete(crate::handlers::triggers_handler::delete_redirect_trigger))
         // SMTP Config
         .route("/api/v1/portfolio-companies/:id/smtp", get(crate::handlers::triggers_handler::get_smtp_config).put(crate::handlers::triggers_handler::update_smtp_config))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
-
-    Router::new()
-        .merge(public_routes)
-        .merge(protected_routes)
-
+        // Tags (authenticated)
+        .route("/api/v1/tags", get(crate::handlers::tags_handler::list).post(crate::handlers::tags_handler::create))
+        .route("/api/v1/tags/:id", get(crate::handlers::tags_handler::get).put(crate::handlers::tags_handler::update).delete(crate::handlers::tags_handler::delete))
+        // Tag Groups (authenticated)
+        .route("/api/v1/tag-groups", get(crate::handlers::tag_groups_handler::list).post(crate::handlers::tag_groups_handler::create))
+        .route("/api/v1/tag-groups/:id", get(crate::handlers::tag_groups_handler::get).put(crate::handlers::tag_groups_handler::update).delete(crate::handlers::tag_groups_handler::delete))
+        // Leads
+        .route("/api/v1/leads", get(crate::handlers::leads_handler::list).post(crate::handlers::leads_handler::create))
+        .route("/api/v1/leads/{id}", get(crate::handlers::leads_handler::get).put(crate::handlers::leads_handler::update).delete(crate::handlers::leads_handler::delete))
+        // Deals
+        .route("/api/v1/deals", get(crate::handlers::deals_handler::list).post(crate::handlers::deals_handler::create))
+        .route("/api/v1/deals/{id}", get(crate::handlers::deals_handler::get).put(crate::handlers::deals_handler::update).delete(crate::handlers::deals_handler::delete))
+        // Campaigns
+        .route("/api/v1/campaigns", get(crate::handlers::campaigns_handler::list).post(crate::handlers::campaigns_handler::create))
+        .route("/api/v1/campaigns/{id}", get(crate::handlers::campaigns_handler::get).put(crate::handlers::campaigns_handler::update).delete(crate::handlers::campaigns_handler::delete))
+        // Tickets
+        .route("/api/v1/tickets", get(crate::handlers::tickets_handler::list).post(crate::handlers::tickets_handler::create))
+        .route("/api/v1/tickets/{id}", get(crate::handlers::tickets_handler::get).put(crate::handlers::tickets_handler::update).delete(crate::handlers::tickets_handler::delete))
+        // Email Templates
+        .route("/api/v1/email-templates", get(crate::handlers::email_templates_handler::list).post(crate::handlers::email_templates_handler::create))
+        .route("/api/v1/email-templates/{id}", get(crate::handlers::email_templates_handler::get).put(crate::handlers::email_templates_handler::update).delete(crate::handlers::email_templates_handler::delete))
+        // Import Logs
+        .route("/api/v1/import-logs", get(crate::handlers::import_logs_handler::list).post(crate::handlers::import_logs_handler::create))
+        .route("/api/v1/import-logs/{id}", get(crate::handlers::import_logs_handler::get).put(crate::handlers::import_logs_handler::update).delete(crate::handlers::import_logs_handler::delete))
+        // Export Templates
+        .route("/api/v1/export-templates", get(crate::handlers::export_templates_handler::list).post(crate::handlers::export_templates_handler::create))
+        .route("/api/v1/export-templates/{id}", get(crate::handlers::export_templates_handler::get).put(crate::handlers::export_templates_handler::update).delete(crate::handlers::export_templates_handler::delete))
+        // Calendar Events
+        .route("/api/v1/calendar-events", get(crate::handlers::calendar_events_handler::list).post(crate::handlers::calendar_events_handler::create))
+        .route("/api/v1/calendar-events/{id}", get(crate::handlers::calendar_events_handler::get).put(crate::handlers::calendar_events_handler::update).delete(crate::handlers::calendar_events_handler::delete))
+        // Clients
+        .route("/api/v1/clients", get(crate::handlers::clients_handler::list).post(crate::handlers::clients_handler::create))
+        .route("/api/v1/clients/{id}", get(crate::handlers::clients_handler::get).put(crate::handlers::clients_handler::update).delete(crate::handlers::clients_handler::delete))
+        // Workflows
+        .route("/api/v1/workflows", get(crate::handlers::workflows_handler::list).post(crate::handlers::workflows_handler::create))
+        .route("/api/v1/workflows/{id}", get(crate::handlers::workflows_handler::get).put(crate::handlers::workflows_handler::update).delete(crate::handlers::workflows_handler::delete))
         // Admin endpoints (cross-app portfolio sync + impersonation)
         .route("/api/v1/admin/portfolio-sync", post(crate::handlers::admin_handler::portfolio_sync))
         .route("/api/v1/admin/impersonate", post(crate::handlers::admin_handler::impersonate))
@@ -122,60 +157,19 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/admin/plans/:id/features", put(crate::handlers::plans_handler::admin_update_plan_features))
         // Admin Telnyx config
         .route("/api/v1/admin/telnyx-config", get(telnyx_handler::get_admin_config).put(telnyx_handler::put_admin_config))
+        // Payment Providers (admin)
+        .route("/api/v1/payment-providers", get(checkout_handler::list_payment_providers).post(checkout_handler::upsert_payment_provider))
+        .route("/api/v1/payment-providers/{provider_type}", delete(checkout_handler::delete_payment_provider))
+        // Checkout Sessions
+        .route("/api/v1/checkout/create", post(checkout_handler::create_checkout_session))
+        .route("/api/v1/checkout/sessions", get(checkout_handler::list_checkout_sessions))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         .layer(CorsLayer::permissive())
-
-        // Leads
-        .route("/api/v1/leads", get(crate::handlers::leads_handler::list).post(crate::handlers::leads_handler::create))
-        .route("/api/v1/leads/{id}", get(crate::handlers::leads_handler::get).put(crate::handlers::leads_handler::update).delete(crate::handlers::leads_handler::delete))
-
-        // Tags
-        .route("/api/v1/tags", get(crate::handlers::tags_handler::list).post(crate::handlers::tags_handler::create))
-        .route("/api/v1/tags/{id}", get(crate::handlers::tags_handler::get).put(crate::handlers::tags_handler::update).delete(crate::handlers::tags_handler::delete))
-
-        // Plans
-        .route("/api/v1/plans", get(crate::handlers::plans_handler::list_plans).post(crate::handlers::plans_handler::create_plan))
-        .route("/api/v1/plans/{id}", get(crate::handlers::plans_handler::get_plan).put(crate::handlers::plans_handler::update_plan).delete(crate::handlers::plans_handler::delete_plan))
-
-        // Tag Groups
-        .route("/api/v1/tag-groups", get(crate::handlers::tag_groups_handler::list).post(crate::handlers::tag_groups_handler::create))
-        .route("/api/v1/tag-groups/{id}", get(crate::handlers::tag_groups_handler::get).put(crate::handlers::tag_groups_handler::update).delete(crate::handlers::tag_groups_handler::delete))
-
-        // Deals
-        .route("/api/v1/deals", get(crate::handlers::deals_handler::list).post(crate::handlers::deals_handler::create))
-        .route("/api/v1/deals/{id}", get(crate::handlers::deals_handler::get).put(crate::handlers::deals_handler::update).delete(crate::handlers::deals_handler::delete))
-
-        // Campaigns
-        .route("/api/v1/campaigns", get(crate::handlers::campaigns_handler::list).post(crate::handlers::campaigns_handler::create))
-        .route("/api/v1/campaigns/{id}", get(crate::handlers::campaigns_handler::get).put(crate::handlers::campaigns_handler::update).delete(crate::handlers::campaigns_handler::delete))
-
-        // Tickets
-        .route("/api/v1/tickets", get(crate::handlers::tickets_handler::list).post(crate::handlers::tickets_handler::create))
-        .route("/api/v1/tickets/{id}", get(crate::handlers::tickets_handler::get).put(crate::handlers::tickets_handler::update).delete(crate::handlers::tickets_handler::delete))
-
-        // Email Templates
-        .route("/api/v1/email-templates", get(crate::handlers::email_templates_handler::list).post(crate::handlers::email_templates_handler::create))
-        .route("/api/v1/email-templates/{id}", get(crate::handlers::email_templates_handler::get).put(crate::handlers::email_templates_handler::update).delete(crate::handlers::email_templates_handler::delete))
-
-        // Import Logs
-        .route("/api/v1/import-logs", get(crate::handlers::import_logs_handler::list).post(crate::handlers::import_logs_handler::create))
-        .route("/api/v1/import-logs/{id}", get(crate::handlers::import_logs_handler::get).put(crate::handlers::import_logs_handler::update).delete(crate::handlers::import_logs_handler::delete))
-
-        // Export Templates
-        .route("/api/v1/export-templates", get(crate::handlers::export_templates_handler::list).post(crate::handlers::export_templates_handler::create))
-        .route("/api/v1/export-templates/{id}", get(crate::handlers::export_templates_handler::get).put(crate::handlers::export_templates_handler::update).delete(crate::handlers::export_templates_handler::delete))
-
-        // Calendar Events
-        .route("/api/v1/calendar-events", get(crate::handlers::calendar_events_handler::list).post(crate::handlers::calendar_events_handler::create))
-        .route("/api/v1/calendar-events/{id}", get(crate::handlers::calendar_events_handler::get).put(crate::handlers::calendar_events_handler::update).delete(crate::handlers::calendar_events_handler::delete))
-
-        // Clients
-        .route("/api/v1/clients", get(crate::handlers::clients_handler::list).post(crate::handlers::clients_handler::create))
-        .route("/api/v1/clients/{id}", get(crate::handlers::clients_handler::get).put(crate::handlers::clients_handler::update).delete(crate::handlers::clients_handler::delete))
-
-        // Workflows
-        .route("/api/v1/workflows", get(crate::handlers::workflows_handler::list).post(crate::handlers::workflows_handler::create))
-        .route("/api/v1/workflows/{id}", get(crate::handlers::workflows_handler::get).put(crate::handlers::workflows_handler::update).delete(crate::handlers::workflows_handler::delete))
-.with_state(state)
+        .with_state(state)
 }
 
 async fn health_check() -> axum::Json<serde_json::Value> {
@@ -185,4 +179,3 @@ async fn health_check() -> axum::Json<serde_json::Value> {
         "version": "0.1.0"
     }))
 }
-

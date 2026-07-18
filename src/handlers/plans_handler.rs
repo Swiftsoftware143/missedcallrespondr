@@ -23,6 +23,7 @@ pub struct Plan {
     pub features: Option<serde_json::Value>,
     pub is_active: bool,
     pub sort_order: i32,
+    pub payment_provider: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -32,7 +33,7 @@ pub async fn list_plans(
 ) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
     let rows = sqlx::query(
-        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order, created_at, updated_at FROM plans ORDER BY sort_order ASC, price_monthly ASC"
+        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order, payment_provider, created_at, updated_at FROM plans ORDER BY sort_order ASC, price_monthly ASC"
     )
     .fetch_all(&state.pool)
     .await?;
@@ -48,6 +49,7 @@ pub async fn list_plans(
             "features": r.try_get::<Option<serde_json::Value>,_>("features").ok().flatten(),
             "is_active": r.try_get::<bool,_>("is_active").unwrap_or(true),
             "sort_order": r.try_get::<i32, _>("sort_order").unwrap_or(0),
+            "payment_provider": r.try_get::<Option<String>,_>("payment_provider").ok().flatten(),
             "created_at": r.try_get::<Option<DateTime<Utc>>,_>("created_at").ok().flatten().map(|d| d.to_string()),
             "updated_at": r.try_get::<Option<DateTime<Utc>>,_>("updated_at").ok().flatten().map(|d| d.to_string()),
         })
@@ -62,7 +64,7 @@ pub async fn get_plan(
 ) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
     let row = sqlx::query(
-        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order, created_at, updated_at FROM plans WHERE id = $1"
+        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order, payment_provider, created_at, updated_at FROM plans WHERE id = $1"
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -79,6 +81,7 @@ pub async fn get_plan(
         "features": row.try_get::<Option<serde_json::Value>,_>("features").ok().flatten(),
         "is_active": row.try_get::<bool,_>("is_active").unwrap_or(true),
         "sort_order": row.try_get::<i32,_>("sort_order").unwrap_or(0),
+        "payment_provider": row.try_get::<Option<String>,_>("payment_provider").ok().flatten(),
     }})))
 }
 
@@ -101,9 +104,11 @@ pub async fn create_plan(
         return Err(AppError::BadRequest("Plan name is required".into()));
     }
 
+    let payment_provider = req.get("payment_provider").and_then(|v| v.as_str()).map(|s| s.to_string());
+
     sqlx::query(
-        r#"INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#
+        r#"INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active, payment_provider)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#
     )
     .bind(id)
     .bind(&name)
@@ -113,6 +118,7 @@ pub async fn create_plan(
     .bind(price_yearly)
     .bind(features)
     .bind(is_active)
+    .bind(&payment_provider)
     .execute(&state.pool)
     .await?;
 
@@ -143,10 +149,12 @@ pub async fn update_plan(
     let price_yearly = req.get("price_yearly").and_then(|v| v.as_f64()).unwrap_or_else(|| existing.try_get::<f64, _>("price_yearly").unwrap_or(0.0));
     let features = req.get("features").map(|v| v.clone()).or_else(|| existing.try_get::<Option<serde_json::Value>, _>("features").ok().flatten());
     let is_active = req.get("is_active").and_then(|v| v.as_bool()).unwrap_or_else(|| existing.try_get::<bool, _>("is_active").unwrap_or(true));
+    let payment_provider: Option<String> = req.get("payment_provider").and_then(|v| v.as_str()).map(|s| s.to_string())
+        .or_else(|| existing.try_get::<Option<String>, _>("payment_provider").ok().flatten());
 
     sqlx::query(
         r#"UPDATE plans SET name=$1, slug=$2, description=$3, price_monthly=$4, price_yearly=$5,
-           features=$6, is_active=$7 WHERE id=$8"#
+           features=$6, is_active=$7, payment_provider=$8 WHERE id=$9"#
     )
     .bind(&name)
     .bind(&slug)
@@ -155,6 +163,7 @@ pub async fn update_plan(
     .bind(price_yearly)
     .bind(&features)
     .bind(is_active)
+    .bind(&payment_provider)
     .bind(id)
     .execute(&state.pool)
     .await?;

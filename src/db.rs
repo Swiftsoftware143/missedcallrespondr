@@ -22,5 +22,8 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     let sql7 = include_str!("../migrations/000007_contact_custom_fields.sql");
     sqlx::raw_sql(sql7).execute(pool).await?;
 
+    let sql8 = include_str!("../migrations/000008_tag_groups_and_tags.sql");
+    sqlx::raw_sql(sql8).execute(pool).await?;
+
     Ok(())
 }
