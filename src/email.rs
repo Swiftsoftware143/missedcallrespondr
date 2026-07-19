@@ -83,7 +83,11 @@ async fn send_inline(to: &str, template_type: &str, vars: &serde_json::Value, ap
 
     match template_type {
         "welcome" => {
-            send_welcome_email(to, name, email, password, app_name, app_url).await
+            let body = format!(
+                "Welcome to {}, {}!\n\nYour account has been created successfully.\n\nHere are your login credentials:\n\nEmail: {}\nPassword: {}\n\nLogin at: {}/login\n\nYou can now:\n- Set up your missed call responses\n- Configure call forwarding rules\n- Monitor your call activity\n\nFor help, contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
+                app_name, name, email, password, app_url, app_name
+            );
+            send_email_request(to, &format!("Welcome to {}!", app_name), &body, "").await
         }
         "purchase_confirmed" => {
             let body = format!(
@@ -106,37 +110,35 @@ async fn send_inline(to: &str, template_type: &str, vars: &serde_json::Value, ap
     }
 }
 
-/// Keep original send_welcome_email for backward compatibility
-pub async fn send_welcome_email(to: &str, name: &str, email: &str, password: &str, app_name: &str, app_url: &str) -> Result<(), String> {
-    let body = format!(
-        "Welcome to {}, {}!\n\nYour account has been created successfully.\n\nHere are your login credentials:\n\nEmail: {}\nPassword: {}\n\nLogin at: {}/login\n\nYou can now:\n- Set up your missed call responses\n- Configure call forwarding rules\n- Monitor your call activity\n\nFor help, contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
-        app_name,
-        name,
-        email,
-        password,
-        app_url,
-        app_name
-    );
-
-    send_email_request(to, &format!("Welcome to {}!", app_name), &body, "").await
+/// Convenience wrapper — now uses DB template system
+pub async fn send_welcome_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: &str, password: &str) -> Result<(), String> {
+    let vars = json!({
+        "name": name,
+        "email": to,
+        "password": password,
+        "app_url": "https://app.missedcallrespondr.com",
+    });
+    send_template_email(pool, tenant_id, to, "welcome", &vars).await
 }
 
-/// Keep original send_purchase_confirmed_email for backward compatibility
-pub async fn send_purchase_confirmed_email(to: &str, name: &str, plan_name: &str) -> Result<(), String> {
-    let body = format!(
-        "Hi {},\n\nThank you for your purchase! Your payment for the {} plan has been received successfully.\n\nYou can access your dashboard at: https://app.missedcallrespondr.com/dashboard\n\nIf you have any questions, please contact support@missedcallrespondr.com\n\nBest regards,\nThe MissedCall Respondr Team",
-        name, plan_name
-    );
-    send_email_request(to, "Payment Received - Thank You!", &body, "").await
+/// Convenience wrapper — now uses DB template system
+pub async fn send_purchase_confirmed_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: &str, plan_name: &str) -> Result<(), String> {
+    let vars = json!({
+        "name": name,
+        "plan_name": plan_name,
+        "app_url": "https://app.missedcallrespondr.com",
+    });
+    send_template_email(pool, tenant_id, to, "purchase_confirmed", &vars).await
 }
 
-/// Keep original send_reset_email for backward compatibility
-pub async fn send_reset_email(to: &str, token: &str) -> Result<(), String> {
-    let body = format!(
-        "Your password reset code is: {}\n\nThis code expires in 1 hour.\n\nIf you did not request this password reset, please ignore this email.\n\n- SwiftSoftware",
-        token
-    );
-    send_email_request(to, "Password Reset Request", &body, "").await
+/// Convenience wrapper — now uses DB template system
+pub async fn send_reset_email(pool: &PgPool, tenant_id: Uuid, to: &str, token: &str) -> Result<(), String> {
+    let vars = json!({
+        "token": token,
+        "name": "there",
+        "app_url": "https://app.missedcallrespondr.com",
+    });
+    send_template_email(pool, tenant_id, to, "password_reset", &vars).await
 }
 
 /// Core email sender — sends via HTTP API (Mailgun, SendGrid, SMTP.com, etc.)

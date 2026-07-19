@@ -1,4 +1,3 @@
-use crate::email::send_reset_email;
 use axum::{
     extract::{Extension, State},
     Json,
