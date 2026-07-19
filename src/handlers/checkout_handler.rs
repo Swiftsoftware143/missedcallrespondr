@@ -755,6 +755,7 @@ async fn deliver_credentials(
         let user_id: Uuid = user_row.try_get("id")?;
         let existing_hash: String = user_row.try_get("password_hash")?;
         let existing_name: String = user_row.try_get("name")?;
+        let tenant_id: Uuid = user_row.try_get("tenant_id")?;
 
         if existing_hash.is_empty() || existing_hash == "" {
             // User exists but no password set → generate temp password
@@ -766,12 +767,23 @@ async fn deliver_credentials(
                 .execute(&state.pool)
                 .await?;
 
-            if let Err(e) = email::send_welcome_email(email, &existing_name, &temp_password).await {
+            let vars = json!({
+                "name": &existing_name,
+                "email": email,
+                "password": &temp_password,
+                "app_url": "https://app.missedcallrespondr.com",
+            });
+            if let Err(e) = email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await {
                 tracing::warn!("Failed to send welcome email to {}: {}", email, e);
             }
         } else {
             // User exists with password → send purchase confirmed
-            if let Err(e) = email::send_purchase_confirmed_email(email, &existing_name, &plan_name).await {
+            let vars = json!({
+                "name": &existing_name,
+                "plan_name": plan_name,
+                "app_url": "https://app.missedcallrespondr.com",
+            });
+            if let Err(e) = email::send_template_email(&state.pool, tenant_id, email, "purchase_confirmed", &vars).await {
                 tracing::warn!("Failed to send purchase confirmed email to {}: {}", email, e);
             }
         }
@@ -800,7 +812,13 @@ async fn deliver_credentials(
         .execute(&state.pool)
         .await?;
 
-        if let Err(e) = email::send_welcome_email(email, customer_name, &temp_password).await {
+        let vars = json!({
+                "name": customer_name,
+                "email": email,
+                "password": &temp_password,
+                "app_url": "https://app.missedcallrespondr.com",
+            });
+        if let Err(e) = email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await {
             tracing::warn!("Failed to send welcome email to {}: {}", email, e);
         }
     }

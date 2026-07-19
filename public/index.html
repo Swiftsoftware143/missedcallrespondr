@@ -115,6 +115,7 @@ const pages = {
   contacts: {label:'👤 Contacts', fn: loadContacts},
   'response-rules': {label:'⚙️ Response Rules', fn: loadResponseRules},
   integrations: {label:'🔗 Integrations', fn: loadIntegrations},
+  'email-templates': {label:'📧 Email Templates', fn: loadEmailTemplates},
   settings: {label:'⚙️ Settings', fn: loadSettings},
 };
 
@@ -277,6 +278,138 @@ async function loadSettings() {
   const html = Array.isArray(items) ? `<table><thead><tr><th>Key</th><th>Value</th></tr></thead>
     <tbody>${items.map(i => `<tr><td>${i.key || i.setting_key || '-'}</td><td>${i.value || '-'}</td></tr>`).join('')}</tbody></table>` : '<p>Settings loaded</p>';
   document.getElementById('page-content').innerHTML = html;
+}
+
+/* ===== EMAIL TEMPLATES ===== */
+function loadEmailTemplates(){
+  document.getElementById('page-content').innerHTML =
+    '<div class="page-header"><span></span><button class="btn primary" onclick="showMCREmailTemplateForm({})">+ Add Template</button></div>'
+    +'<div id="mcr-et-list">Loading...</div>';
+  fetchMCREmailTemplates();
+}
+
+function fetchMCREmailTemplates(){
+  api('/api/v1/email-templates').then(res=>{
+    const items=res.ok&&res.data?res.data.items||[]:[];
+    const list=document.getElementById('mcr-et-list');
+    if(!list)return;
+    if(!items.length){
+      list.innerHTML='<p style="color:var(--text2);text-align:center;padding:2rem">No email templates yet.</p>';
+      return;
+    }
+    let html='<table><thead><tr><th>Name</th><th>Subject</th><th>Type</th><th>Default</th><th>Actions</th></tr></thead><tbody>';
+    items.forEach(t=>{
+      const d=t.is_default?'✅':'—';
+      html+='<tr>'
+        +'<td>'+escMCR(t.name)+'</td>'
+        +'<td>'+escMCR(t.subject||'')+'</td>'
+        +'<td><span style="color:var(--accent)">'+escMCR(t.template_type||'')+'</span></td>'
+        +'<td>'+d+'</td>'
+        +'<td>'
+        +'<button class="btn small" onclick="showMCREmailTemplateForm('+JSON.stringify(t).replace(/"/g,'&quot;')+')">✏️</button> '
+        +'<button class="btn small danger" onclick="deleteMCREmailTemplate(\''+t.id+'\')">🗑</button>'
+        +'</td></tr>';
+    });
+    html+='</tbody></table>';
+    list.innerHTML=html;
+  }).catch(()=>{
+    const list=document.getElementById('mcr-et-list');
+    if(list)list.innerHTML='<p style="color:var(--red)">Failed to load templates</p>';
+  });
+}
+
+function escMCR(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+function showMCREmailTemplateForm(template){
+  const isNew=!template.id;
+  const htmlMode=template.is_html!==false;
+  const modal=document.createElement('div');
+  modal.className='modal-overlay';
+  modal.onclick=e=>{if(e.target===modal)modal.remove()};
+  modal.innerHTML=
+    '<div class="modal" style="max-width:700px">'
+    +'<h3>'+(isNew?'New Email Template':'Edit: '+escMCR(template.name))+'</h3>'
+    +'<div class="form-group"><label>Name</label><input id="mcr-et-name" value="'+escMCR(template.name||'')+'"></div>'
+    +'<div class="form-group"><label>Template Type</label><select id="mcr-et-type">'
+      +'<option value="welcome" '+(template.template_type==='welcome'?'selected':'')+'>Welcome</option>'
+      +'<option value="purchase_confirmed" '+(template.template_type==='purchase_confirmed'?'selected':'')+'>Purchase Confirmed</option>'
+      +'<option value="password_reset" '+(template.template_type==='password_reset'?'selected':'')+'>Password Reset</option>'
+      +'<option value="custom" '+(template.template_type&&!['welcome','purchase_confirmed','password_reset'].includes(template.template_type)?'selected':'')+'>Custom</option>'
+    +'</select></div>'
+    +'<div class="form-group"><label>Subject</label><input id="mcr-et-subject" value="'+escMCR(template.subject||'')+'"></div>'
+    +'<div class="form-group"><label>Content Mode</label>'
+    +'<div style="display:flex;gap:12px">'
+    +'<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="mcr-et-mode" value="html" '+(htmlMode?'checked':'')+' onchange="toggleMCRHtml(true)"> HTML</label>'
+    +'<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="mcr-et-mode" value="text" '+(!htmlMode?'checked':'')+' onchange="toggleMCRHtml(false)"> Plain Text</label>'
+    +'</div></div>'
+    +'<div class="form-group"><label>Merge Fields</label>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{name}}\')">{{name}}</button>'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{email}}\')">{{email}}</button>'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{password}}\')">{{password}}</button>'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{app_url}}\')">{{app_url}}</button>'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{plan_name}}\')">{{plan_name}}</button>'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{token}}\')">{{token}}</button>'
+      +'<button class="btn small" onclick="insertMCRField(\'mcr-et-body\',\'{{account_name}}\')">{{account_name}}</button>'
+    +'</div></div>'
+    +'<div class="form-group"><label>Body (plain text)</label><textarea id="mcr-et-body" rows="8">'+escMCR(template.body||'')+'</textarea></div>'
+    +'<div id="mcr-et-html-wrap" style="display:'+(htmlMode?'block':'none')+'">'
+    +'<div class="form-group"><label>HTML Body</label><textarea id="mcr-et-html" rows="10" style="font-family:monospace">'+escMCR(template.html_body||'')+'</textarea></div>'
+    +'</div>'
+    +'<div class="form-group"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mcr-et-default" '+(template.is_default?'checked':'')+'> Is Default</label></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button class="btn" onclick="this.closest(\'.modal-overlay\').remove()">Cancel</button>'
+    +'<button class="btn primary" onclick="saveMCRTemplate(\''+(template.id||'')+'\')">💾 Save</button>'
+    +'</div></div>';
+  document.body.appendChild(modal);
+}
+
+function toggleMCRHtml(isHtml){
+  const w=document.getElementById('mcr-et-html-wrap');
+  if(w)w.style.display=isHtml?'block':'none';
+}
+
+function insertMCRField(id,f){
+  const ta=document.getElementById(id);
+  if(!ta)return;
+  const s=ta.selectionStart,e=ta.selectionEnd;
+  ta.value=ta.value.substring(0,s)+f+ta.value.substring(e);
+  ta.focus();ta.selectionStart=ta.selectionEnd=s+f.length;
+}
+
+function saveMCRTemplate(id){
+  const name=document.getElementById('mcr-et-name').value.trim();
+  if(!name){toast('Name is required',true);return;}
+  let tt=document.getElementById('mcr-et-type').value;
+  const isHtml=document.querySelector('input[name="mcr-et-mode"]:checked')?.value==='html';
+  const data={
+    name,
+    subject:document.getElementById('mcr-et-subject').value.trim(),
+    body:document.getElementById('mcr-et-body').value,
+    html_body:isHtml?document.getElementById('mcr-et-html').value:'',
+    is_html:isHtml,
+    is_default:document.getElementById('mcr-et-default').checked,
+    template_type:tt
+  };
+  const url=id?'/api/v1/email-templates/'+id:'/api/v1/email-templates';
+  const method=id?'PUT':'POST';
+  api(url,{method,body:data}).then(r=>{
+    if(r.ok){
+      document.querySelector('.modal-overlay')?.remove();
+      fetchMCREmailTemplates();
+      toast('Template saved!');
+    }else{
+      toast('Save failed: '+(r.data?.message||'Error'),true);
+    }
+  });
+}
+
+function deleteMCREmailTemplate(id){
+  if(!confirm('Delete this email template?'))return;
+  api('/api/v1/email-templates/'+id,{method:'DELETE'}).then(r=>{
+    if(r.ok){fetchMCREmailTemplates();toast('Deleted');}
+    else toast('Delete failed',true);
+  });
 }
 
 // Init

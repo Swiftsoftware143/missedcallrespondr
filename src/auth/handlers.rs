@@ -237,8 +237,19 @@ pub async fn forgot_password(
         .execute(&state.pool)
         .await?;
 
-        // Send password reset email via SMTP
-        match send_reset_email(&user.email, &token).await {
+        // Send password reset email via template system
+        let vars = serde_json::json!({
+            "name": user.name,
+            "token": token,
+            "app_url": "https://app.missedcallrespondr.com",
+        });
+        match crate::email::send_template_email(
+            &state.pool,
+            uuid::Uuid::nil(),
+            &user.email,
+            "password_reset",
+            &vars,
+        ).await {
             Ok(_) => tracing::info!("Password reset email sent to {}", user.email),
             Err(e) => tracing::error!("Failed to send password reset email to {}: {}", user.email, e),
         }
