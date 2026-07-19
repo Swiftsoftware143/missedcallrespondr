@@ -21,8 +21,10 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::config::Claims;
+use crate::email;
 use crate::error::AppError;
 use crate::state::AppState;
+use rand::Rng;
 
 type ApiResult<T> = Result<T, AppError>;
 
@@ -301,8 +303,8 @@ pub async fn create_checkout_session(
 
     // Create checkout session with the provider
     let provider_session = match provider_type.as_str() {
-        "stripe" => create_stripe_session(&api_key, amount, currency, purchasable_type, success_url, cancel_url, &metadata).await?,
-        "paypal" => create_paypal_session(&api_key, amount, currency, purchasable_type, success_url, cancel_url, &metadata).await?,
+        "stripe" => create_stripe_session(&api_key, amount, currency, purchasable_type, &success_url, &cancel_url, &metadata).await?,
+        "paypal" => create_paypal_session(&api_key, amount, currency, purchasable_type, &success_url, &cancel_url, &metadata).await?,
         _ => return Err(AppError::BadRequest(format!("Checkout not supported for provider type: {}", provider_type))),
     };
 
@@ -561,7 +563,7 @@ pub async fn stripe_webhook(
     // Handle the event
     match event_type {
         "checkout.session.completed" => {
-            handle_checkout_completed(&state.pool, &event_body, "stripe").await?;
+            handle_checkout_completed(&state, &event_body, "stripe").await?;
         }
         "checkout.session.expired" => {
             if let Some(session) = event_body.get("data").and_then(|d| d.get("object")) {
@@ -615,7 +617,7 @@ pub async fn paypal_webhook(
 
     match event_type {
         "CHECKOUT.ORDER.APPROVED" | "PAYMENT.CAPTURE.COMPLETED" => {
-            handle_checkout_completed(&state.pool, &event_body, "paypal").await?;
+            handle_checkout_completed(&state, &event_body, "paypal").await?;
         }
         _ => {
             sqlx::query(
@@ -686,9 +688,129 @@ pub async fn list_checkout_sessions(
 // Internal helpers
 // ──────────────────────────────────────────────
 
-/// Handle a completed checkout — update session status and trigger fulfillment
+// ──────────────────────────────────────────────
+// Credential delivery helpers
+// ──────────────────────────────────────────────
+
+/// Generate a random temporary password (12 characters, alphanumeric)
+pub fn generate_temp_password() -> String {
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
+    let mut rng = rand::thread_rng();
+    (0..12)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+/// Hash a password using argon2
+pub fn hash_password(password: &str) -> Result<String, AppError> {
+    use argon2::{
+        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+        Argon2,
+    };
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let hash = argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| AppError::Internal(format!("Password hashing failed: {}", e)))?;
+    Ok(hash.to_string())
+}
+
+/// Deliver credentials to the user who just completed a purchase.
+/// - If user exists with password_hash → send purchase_confirmed email
+/// - If user exists without password_hash → generate temp password, hash, update, send welcome
+/// - If no user → create tenant, create user, send welcome
+async fn deliver_credentials(
+    state: &AppState,
+    email: &str,
+    customer_name: &str,
+    account_id: Uuid,
+    purchasable_type: &str,
+) -> Result<(), AppError> {
+    // Derive a plan name from purchasable_type
+    let plan_name = purchasable_type.replace('_', " ").replace('-', " ");
+    let plan_name = plan_name
+        .split_whitespace()
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Look for existing user by email
+    let existing_user = sqlx::query(
+        "SELECT id, password_hash, name, tenant_id FROM users WHERE email = $1"
+    )
+    .bind(email)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some(user_row) = existing_user {
+        let user_id: Uuid = user_row.try_get("id")?;
+        let existing_hash: String = user_row.try_get("password_hash")?;
+        let existing_name: String = user_row.try_get("name")?;
+
+        if existing_hash.is_empty() || existing_hash == "" {
+            // User exists but no password set → generate temp password
+            let temp_password = generate_temp_password();
+            let hash = hash_password(&temp_password)?;
+            sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+                .bind(&hash)
+                .bind(user_id)
+                .execute(&state.pool)
+                .await?;
+
+            if let Err(e) = email::send_welcome_email(email, &existing_name, &temp_password).await {
+                tracing::warn!("Failed to send welcome email to {}: {}", email, e);
+            }
+        } else {
+            // User exists with password → send purchase confirmed
+            if let Err(e) = email::send_purchase_confirmed_email(email, &existing_name, &plan_name).await {
+                tracing::warn!("Failed to send purchase confirmed email to {}: {}", email, e);
+            }
+        }
+    } else {
+        // No user found → create tenant + user
+        let slug = format!("tenant-{}", account_id.to_string().split('-').next().unwrap_or("new"));
+        let tenant_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(tenant_id)
+            .bind(customer_name)
+            .bind(&slug)
+            .execute(&state.pool)
+            .await?;
+
+        let temp_password = generate_temp_password();
+        let hash = hash_password(&temp_password)?;
+        let user_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, email, password_hash, name, tenant_id, role) VALUES ($1, $2, $3, $4, $5, 'admin')"
+        )
+        .bind(user_id)
+        .bind(email)
+        .bind(&hash)
+        .bind(customer_name)
+        .bind(tenant_id)
+        .execute(&state.pool)
+        .await?;
+
+        if let Err(e) = email::send_welcome_email(email, customer_name, &temp_password).await {
+            tracing::warn!("Failed to send welcome email to {}: {}", email, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle a completed checkout — update session status and trigger credential delivery
 async fn handle_checkout_completed(
-    pool: &sqlx::PgPool,
+    state: &AppState,
     event_body: &Value,
     provider_type: &str,
 ) -> Result<(), AppError> {
@@ -725,7 +847,7 @@ async fn handle_checkout_completed(
     .bind(event_body["id"].as_str().unwrap_or(""))
     .bind(&provider_session_id)
     .bind(provider_type)
-    .execute(pool)
+    .execute(&state.pool)
     .await?;
 
     if result.rows_affected() == 0 {
@@ -738,8 +860,45 @@ async fn handle_checkout_completed(
         "UPDATE payment_webhook_events SET status = 'processed' WHERE event_id = $1"
     )
     .bind(event_body["id"].as_str().unwrap_or(""))
-    .execute(pool)
+    .execute(&state.pool)
     .await?;
+
+    // ── Credential delivery ──
+    // Query the checkout session to get account_id and metadata
+    let session_row = sqlx::query(
+        r#"SELECT account_id, user_id, metadata FROM checkout_sessions
+           WHERE provider_session_id = $1 AND provider_type = $2"#
+    )
+    .bind(&provider_session_id)
+    .bind(provider_type)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some(row) = session_row {
+        let account_id: Uuid = row.try_get("account_id")?;
+        let metadata: Value = row.try_get("metadata")?;
+        let customer_email = metadata.get("customer_email").and_then(|v| v.as_str());
+        let purchasable_type: String = {
+            let ptype: String = sqlx::query_scalar(
+                "SELECT purchasable_type FROM checkout_sessions WHERE provider_session_id = $1 AND provider_type = $2"
+            )
+            .bind(&provider_session_id)
+            .bind(provider_type)
+            .fetch_one(&state.pool)
+            .await?;
+            ptype
+        };
+
+        if let Some(email) = customer_email {
+            let customer_name = metadata.get("customer_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(email.split('@').next().unwrap_or("Customer"));
+
+            if let Err(e) = deliver_credentials(state, email, customer_name, account_id, &purchasable_type).await {
+                tracing::warn!("Credential delivery failed for {}: {:?}", email, e);
+            }
+        }
+    }
 
     tracing::info!("Checkout completed: provider_session={}", provider_session_id);
     Ok(())
