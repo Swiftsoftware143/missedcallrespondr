@@ -80,8 +80,92 @@ function loginPage() {
         <div class="form-group"><label>Password</label><input id="lpass" type="password" value="(rotated-2026-09-16)"></div>
         <div class="error-msg" id="lerr"></div>
         <button class="btn primary" style="width:100%;margin-top:.5rem" onclick="doLogin()">Sign In</button>
+        <div style="text-align:center;margin-top:10px">
+          <a href="#" onclick="showForgotPw();return false" style="color:#6366f1;font-size:13px;text-decoration:none">Forgot Password?</a>
+        </div>
       </div>
     </div>`);
+}
+
+/* Forgot & Reset Password */
+function showForgotPw(){
+  const ov=document.createElement('div');
+  ov.id='forgot-modal';
+  ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  ov.onclick=function(e){if(e.target===this)ov.remove()};
+  ov.innerHTML='<div style="background:var(--surface,#1a1d27);border:1px solid var(--border,#2d3248);border-radius:12px;padding:24px;max-width:420px;width:90vw">'
+    +'<div id="forgot-step-email">'
+    +'<h2 style="margin-bottom:8px">Reset Password</h2>'
+    +'<p style="font-size:13px;color:var(--text2,#8b8fa3);margin-bottom:16px">Enter your email and we\'ll send you a reset code.</p>'
+    +'<label style="display:block;font-size:12px;color:var(--text2,#8b8fa3);margin-bottom:4px">Email</label>'
+    +'<input id="forgot-email" type="email" placeholder="you@example.com" style="background:var(--surface2,#232736);border:1px solid var(--border,#2d3248);color:var(--text,#e1e4ed);padding:10px 14px;border-radius:8px;font-size:14px;width:100%;margin-bottom:12px">'
+    +'<div id="forgot-msg" style="display:none;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:8px"></div>'
+    +'<div id="forgot-success" style="display:none;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:8px;background:rgba(52,211,153,.1);color:#34d399"></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button onclick="this.closest(\'#forgot-modal\').remove()" style="padding:8px 16px;background:var(--surface2,#232736);color:var(--text,#e1e4ed);border:1px solid var(--border,#2d3248);border-radius:8px;cursor:pointer;font-size:13px">Cancel</button>'
+    +'<button id="forgot-btn" onclick="submitForgot()" style="padding:8px 16px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Send Reset Code</button>'
+    +'</div></div>'
+    +'<div id="forgot-step-reset" style="display:none">'
+    +'<h2 style="margin-bottom:8px">Set New Password</h2>'
+    +'<p style="font-size:13px;color:var(--text2,#8b8fa3);margin-bottom:16px">Enter the code from your email and your new password.</p>'
+    +'<label style="display:block;font-size:12px;color:var(--text2,#8b8fa3);margin-bottom:4px">Reset Code</label>'
+    +'<input id="reset-token" type="text" placeholder="Paste the code" style="background:var(--surface2,#232736);border:1px solid var(--border,#2d3248);color:var(--text,#e1e4ed);padding:10px 14px;border-radius:8px;font-size:14px;width:100%;margin-bottom:12px">'
+    +'<label style="display:block;font-size:12px;color:var(--text2,#8b8fa3);margin-bottom:4px">New Password</label>'
+    +'<input id="reset-pw" type="password" placeholder="Minimum 8 characters" style="background:var(--surface2,#232736);border:1px solid var(--border,#2d3248);color:var(--text,#e1e4ed);padding:10px 14px;border-radius:8px;font-size:14px;width:100%;margin-bottom:12px">'
+    +'<div id="reset-msg" style="display:none;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:8px;background:rgba(239,68,68,.1);color:#ef4444"></div>'
+    +'<div id="reset-success" style="display:none;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:8px;background:rgba(52,211,153,.1);color:#34d399"></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button onclick="this.closest(\'#forgot-modal\').remove()" style="padding:8px 16px;background:var(--surface2,#232736);color:var(--text,#e1e4ed);border:1px solid var(--border,#2d3248);border-radius:8px;cursor:pointer;font-size:13px">Cancel</button>'
+    +'<button id="reset-btn" onclick="submitReset()" style="padding:8px 16px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Reset Password</button>'
+    +'</div></div></div>';
+  document.body.appendChild(ov);
+}
+
+async function submitForgot(){
+  const email=document.getElementById('forgot-email').value.trim();
+  const btn=document.getElementById('forgot-btn');
+  const msg=document.getElementById('forgot-msg');
+  const success=document.getElementById('forgot-success');
+  msg.style.display='none';success.style.display='none';
+  if(!email||!email.includes('@')){msg.textContent='Please enter a valid email';msg.style.cssText='display:block;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:8px;background:rgba(239,68,68,.1);color:#ef4444';return}
+  btn.textContent='Sending...';btn.disabled=true;
+  try{
+    const r=await fetch('/api/v1/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const d=await r.json();
+    success.textContent=d.message||'If that email is registered, a reset code has been sent.';
+    success.style.display='';
+    btn.textContent='Sent ✓';btn.disabled=false;
+    setTimeout(()=>{
+      document.getElementById('forgot-step-email').style.display='none';
+      document.getElementById('forgot-step-reset').style.display='';
+    },1500);
+  }catch(e){
+    msg.textContent=e.message;msg.style.display='';
+    btn.textContent='Send Reset Code';btn.disabled=false;
+  }
+}
+
+async function submitReset(){
+  const token=document.getElementById('reset-token').value.trim();
+  const password=document.getElementById('reset-pw').value;
+  const btn=document.getElementById('reset-btn');
+  const msg=document.getElementById('reset-msg');
+  const success=document.getElementById('reset-success');
+  msg.style.display='none';success.style.display='none';
+  if(!token){msg.textContent='Please enter the reset code';msg.style.display='';return}
+  if(password.length<8){msg.textContent='Password must be at least 8 characters';msg.style.display='';return}
+  btn.textContent='Please wait...';btn.disabled=true;
+  try{
+    const r=await fetch('/api/v1/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,password})});
+    if(!r.ok){const d=await r.json();throw new Error(d.message||d.error||'Reset failed')}
+    success.textContent='Password reset successfully! You can now sign in.';
+    success.style.display='';
+    btn.textContent='Done';btn.disabled=true;
+    setTimeout(()=>{const m=document.getElementById('forgot-modal');if(m)m.remove()},2000);
+  }catch(e){
+    msg.textContent=e.message;msg.style.display='';
+    btn.textContent='Reset Password';btn.disabled=false;
+  }
 }
 
 async function doLogin() {
