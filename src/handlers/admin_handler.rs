@@ -84,7 +84,7 @@ pub async fn portfolio_sync(
     .bind(&password_hash)
     .bind(&name)
     .bind(tenant_id)
-    .bind(now.clone())
+    .bind(now)
     .bind(now)
     .execute(&state.pool)
     .await?;

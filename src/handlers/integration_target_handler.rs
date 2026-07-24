@@ -19,7 +19,7 @@ pub async fn list_integration_targets(
                 events, is_active, portfolio_company_id, user_id, created_at, updated_at
          FROM integration_targets WHERE tenant_id = $1 ORDER BY name"
     )
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -75,7 +75,7 @@ pub async fn create_integration_target(
          VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8)"
     )
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .bind(name)
     .bind(provider)
     .bind(webhook_url)
@@ -107,7 +107,7 @@ pub async fn update_integration_target(
         "SELECT id FROM integration_targets WHERE id = $1 AND tenant_id = $2"
     )
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Integration target not found".into()))?;
@@ -152,7 +152,7 @@ pub async fn update_integration_target(
     .bind(provider)
     .bind(webhook_url)
     .bind(api_key)
-    .bind(&events.unwrap_or_default())
+    .bind(events.unwrap_or_default())
     .bind(is_active)
     .bind(portfolio_company_id)
     .bind(id)
@@ -190,7 +190,7 @@ pub async fn delete_integration_target(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM integration_targets WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 

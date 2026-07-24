@@ -31,7 +31,7 @@ pub async fn list(
         ORDER BY tg.sort_order, tg.name
         "#
     )
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -77,7 +77,7 @@ pub async fn create(
         "INSERT INTO tag_groups (id, tenant_id, name, color, sort_order) VALUES ($1, $2, $3, $4, $5)"
     )
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .bind(name)
     .bind(color)
     .bind(sort_order)
@@ -116,7 +116,7 @@ pub async fn get(
         "#
     )
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Tag group not found".into()))?;
@@ -145,7 +145,7 @@ pub async fn update(
     // Verify ownership
     let _existing = sqlx::query("SELECT id FROM tag_groups WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Tag group not found".into()))?;
@@ -168,7 +168,7 @@ pub async fn update(
     .bind(color)
     .bind(sort_order.map(|v| v as i32))
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .execute(&state.pool)
     .await?;
 
@@ -209,7 +209,7 @@ pub async fn delete(
 
     let result = sqlx::query("DELETE FROM tag_groups WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 

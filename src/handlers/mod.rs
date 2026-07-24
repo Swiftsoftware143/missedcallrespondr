@@ -34,3 +34,4 @@ pub mod provider_keys_handler;
 pub mod telnyx_handler;
 pub mod contact_custom_field_handler;
 pub mod checkout_handler;
+pub mod tag_provision_handler;

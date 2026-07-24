@@ -147,7 +147,7 @@ pub async fn update_plan(
     let description: Option<String> = description.or_else(|| existing.try_get::<Option<String>, _>("description").ok().flatten());
     let price_monthly = req.get("price_monthly").and_then(|v| v.as_f64()).unwrap_or_else(|| existing.try_get::<f64, _>("price_monthly").unwrap_or(0.0));
     let price_yearly = req.get("price_yearly").and_then(|v| v.as_f64()).unwrap_or_else(|| existing.try_get::<f64, _>("price_yearly").unwrap_or(0.0));
-    let features = req.get("features").map(|v| v.clone()).or_else(|| existing.try_get::<Option<serde_json::Value>, _>("features").ok().flatten());
+    let features = req.get("features").cloned().or_else(|| existing.try_get::<Option<serde_json::Value>, _>("features").ok().flatten());
     let is_active = req.get("is_active").and_then(|v| v.as_bool()).unwrap_or_else(|| existing.try_get::<bool, _>("is_active").unwrap_or(true));
     let payment_provider: Option<String> = req.get("payment_provider").and_then(|v| v.as_str()).map(|s| s.to_string())
         .or_else(|| existing.try_get::<Option<String>, _>("payment_provider").ok().flatten());

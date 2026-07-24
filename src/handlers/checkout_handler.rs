@@ -303,8 +303,8 @@ pub async fn create_checkout_session(
 
     // Create checkout session with the provider
     let provider_session = match provider_type.as_str() {
-        "stripe" => create_stripe_session(&api_key, amount, currency, purchasable_type, &success_url, &cancel_url, &metadata).await?,
-        "paypal" => create_paypal_session(&api_key, amount, currency, purchasable_type, &success_url, &cancel_url, &metadata).await?,
+        "stripe" => create_stripe_session(&api_key, amount, currency, purchasable_type, &success_url, cancel_url, &metadata).await?,
+        "paypal" => create_paypal_session(&api_key, amount, currency, purchasable_type, &success_url, cancel_url, &metadata).await?,
         _ => return Err(AppError::BadRequest(format!("Checkout not supported for provider type: {}", provider_type))),
     };
 
@@ -551,7 +551,7 @@ pub async fn stripe_webhook(
     .bind(event_type)
     .bind(event_id)
     .bind(&event_body)
-    .bind(&json!({"stripe-signature": signature}))
+    .bind(json!({"stripe-signature": signature}))
     .bind(db_status)
     .execute(&state.pool)
     .await?;
@@ -730,7 +730,7 @@ async fn deliver_credentials(
     purchasable_type: &str,
 ) -> Result<(), AppError> {
     // Derive a plan name from purchasable_type
-    let plan_name = purchasable_type.replace('_', " ").replace('-', " ");
+    let plan_name = purchasable_type.replace(['_', '-'], " ");
     let plan_name = plan_name
         .split_whitespace()
         .map(|w| {
@@ -757,7 +757,7 @@ async fn deliver_credentials(
         let existing_name: String = user_row.try_get("name")?;
         let tenant_id: Uuid = user_row.try_get("tenant_id")?;
 
-        if existing_hash.is_empty() || existing_hash == "" {
+        if existing_hash.is_empty() || existing_hash.is_empty() {
             // User exists but no password set → generate temp password
             let temp_password = generate_temp_password();
             let hash = hash_password(&temp_password)?;
@@ -914,6 +914,50 @@ async fn handle_checkout_completed(
 
             if let Err(e) = deliver_credentials(state, email, customer_name, account_id, &purchasable_type).await {
                 tracing::warn!("Credential delivery failed for {}: {:?}", email, e);
+            }
+        }
+    }
+
+    // ── Fire affiliate conversion (if referral metadata present) ──
+    let session_meta = sqlx::query_scalar::<_, Value>(
+        r#"SELECT COALESCE(metadata, '{}'::jsonb) FROM checkout_sessions
+           WHERE provider_session_id = $1 AND provider_type = $2"#
+    )
+    .bind(&provider_session_id)
+    .bind(provider_type)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some(meta) = session_meta {
+        let affiliate_id = meta.get("affiliate_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let cookie_id = meta.get("cookie_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        if affiliate_id.is_some() || cookie_id.is_some() {
+            let amount = session["amount_total"].as_f64().map(|v| v / 100.0)
+                .or_else(|| session["amount"]
+                    .as_str().and_then(|s| s.parse::<f64>().ok()));
+
+            let payload = serde_json::json!({
+                "affiliate_id": affiliate_id,
+                "cookie_id": cookie_id,
+                "source_app": "missedcallrespondr",
+                "event": "checkout_completed",
+                "product_id": meta.get("product_id").and_then(|v| v.as_str()),
+                "product_name": meta.get("product_name").and_then(|v| v.as_str()),
+                "amount": amount,
+                "lead_email": meta.get("customer_email").and_then(|v| v.as_str()),
+            });
+
+            match reqwest::Client::new()
+                .post(format!("{}/api/v1/webhooks/conversion", state.funnelswift_url))
+                .header("X-Internal-Key", &state.config.internal_sync_key)
+                .header("Content-Type", "application/json")
+                .json(&payload)
+                .send()
+                .await
+            {
+                Ok(resp) => tracing::info!("Affiliate conversion fired — status: {}", resp.status()),
+                Err(e) => tracing::warn!("Failed to fire affiliate conversion: {:?}", e),
             }
         }
     }

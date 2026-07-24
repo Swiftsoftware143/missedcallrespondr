@@ -7,4 +7,5 @@ pub struct AppState {
     pub config: AppConfig,
     pub workflowswift_url: String,
     pub coreswift_url: String,
+    pub funnelswift_url: String,
 }

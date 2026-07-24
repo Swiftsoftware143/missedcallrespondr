@@ -33,7 +33,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/telnyx/webhook", post(telnyx_handler::webhook))
         // Payment webhooks (public — providers send unauthenticated requests)
         .route("/api/v1/webhooks/stripe", post(checkout_handler::stripe_webhook))
-        .route("/api/v1/webhooks/paypal", post(checkout_handler::paypal_webhook));
+        .route("/api/v1/webhooks/paypal", post(checkout_handler::paypal_webhook))
+        // FunnelSwift tag provision webhook — auto-provision contacts (no JWT, internal key)
+        .route("/api/v1/internal/tag-provision", post(crate::handlers::tag_provision_handler::handle_tag_provision));
 
     // ── Protected routes (auth required) ──
     let protected_routes = Router::new()

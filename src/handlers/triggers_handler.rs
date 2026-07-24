@@ -331,7 +331,7 @@ pub async fn create_redirect_trigger(
     let trigger_event = body.trigger_event.unwrap_or_else(|| "on_win".to_string());
     let valid_events = ["on_win", "on_enter", "on_quiz_result", "on_loss", "on_raffle_entry"];
     if !valid_events.contains(&trigger_event.as_str()) {
-        return Err(AppError::BadRequest(format!("Invalid trigger_event")));
+        return Err(AppError::BadRequest("Invalid trigger_event".to_string()));
     }
 
     let id = Uuid::new_v4();

@@ -193,7 +193,7 @@ pub async fn delete_provider_key(
     .await?;
 
     if result.rows_affected() == 0 {
-        let err_msg = format!("Provider key not found");
+        let err_msg = "Provider key not found".to_string();
         return Err(AppError::NotFound(err_msg));
     }
 
@@ -224,7 +224,7 @@ pub async fn list_available_providers(
             (String::from("name"), Value::String(name)),
             (String::from("description"), Value::from(desc)),
             (String::from("requires_base_url"), Value::Bool(base_url)),
-            (String::from("requires_metadata"), Value::from(req_meta)),
+            (String::from("requires_metadata"), req_meta),
             (String::from("icon"), Value::from(icon_val)),
         ])));
     }

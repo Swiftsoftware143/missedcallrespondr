@@ -31,11 +31,15 @@ async fn main() -> anyhow::Result<()> {
     let coreswift_url = std::env::var("CORESWIFT_URL")
         .unwrap_or_else(|_| "http://localhost:8084".into());
 
+    let funnelswift_url = std::env::var("FUNNELSWIFT_URL")
+        .unwrap_or_else(|_| "http://localhost:8080".into());
+
     let app_state = state::AppState {
         pool,
         config: cfg.clone(),
         workflowswift_url,
         coreswift_url,
+        funnelswift_url,
     };
 
     let app = routes::create_router(app_state);

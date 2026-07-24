@@ -51,7 +51,7 @@ pub async fn list(
             LIMIT $3 OFFSET $4
             "#
         )
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .bind(group_id)
         .bind(limit)
         .bind(offset)
@@ -79,7 +79,7 @@ pub async fn list(
             LIMIT $3 OFFSET $4
             "#
         )
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .bind(&pattern)
         .bind(limit)
         .bind(offset)
@@ -106,7 +106,7 @@ pub async fn list(
             LIMIT $2 OFFSET $3
             "#
         )
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.pool)
@@ -161,7 +161,7 @@ pub async fn create(
         "INSERT INTO tags (id, tenant_id, name, color, group_id, sync_to_core) VALUES ($1, $2, $3, $4, $5, $6)"
     )
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .bind(name)
     .bind(color)
     .bind(group_id)
@@ -218,7 +218,7 @@ pub async fn get(
         "#
     )
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Tag not found".into()))?;
@@ -249,7 +249,7 @@ pub async fn update(
     // Verify ownership
     let _existing = sqlx::query("SELECT id FROM tags WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Tag not found".into()))?;
@@ -280,7 +280,7 @@ pub async fn update(
     .bind(group_id.flatten())
     .bind(group_id.is_some()) // indicates whether group_id was explicitly provided (even as null)
     .bind(id)
-    .bind(&claims.aid)
+    .bind(claims.aid)
     .execute(&state.pool)
     .await?;
 
@@ -319,7 +319,7 @@ pub async fn delete(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let result = sqlx::query("DELETE FROM tags WHERE id = $1 AND tenant_id = $2")
         .bind(id)
-        .bind(&claims.aid)
+        .bind(claims.aid)
         .execute(&state.pool)
         .await?;
 
