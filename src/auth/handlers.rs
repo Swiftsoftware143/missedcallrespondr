@@ -87,6 +87,32 @@ pub async fn register(
     let token = create_token(&claims, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
+    let req_email = req.email.clone();
+    let req_name = req.name.clone();
+
+    // Push to CoreSwift as a SwiftSoftware contact (fire-and-forget)
+    let cs_state = state.clone();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "source_app": "missedcallrespondr",
+            "tenant_id": "abd8ad22-aa01-4642-9a9f-6bef6a03d85b",
+            "lead": { "name": req_name, "email": req_email },
+            "tags": ["missedcallrespondr:Free"],
+            "added_tags": ["missedcallrespondr:Free"],
+            "removed_tags": [],
+            "triggered_by": "signup"
+        });
+        let url = format!("{}/api/v1/webhooks/cross-app/tag-sync", cs_state.coreswift_url);
+        if !cs_state.coreswift_url.is_empty() {
+            let _ = reqwest::Client::new()
+                .post(&url)
+                .header("x-internal-key", &cs_state.config.internal_sync_key)
+                .json(&payload)
+                .send()
+                .await;
+        }
+    });
+
     Ok(Json(AuthResponse {
         token,
         team_member: TeamMemberResponse {

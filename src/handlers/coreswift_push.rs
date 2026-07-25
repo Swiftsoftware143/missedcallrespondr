@@ -33,7 +33,7 @@ pub async fn push_contact_to_coreswift(state: &AppState, contact: &Contact, trig
 
     let payload = TagSyncRequest {
         source_app: "missedcallrespondr".into(),
-        tenant_id: contact.tenant_id.to_string(),
+        tenant_id: String::from("abd8ad22-aa01-4642-9a9f-6bef6a03d85b"),  // SwiftSoftware tenant
         lead: TagSyncLead {
             id: contact.id.to_string(),
             name: contact.name.clone(),
