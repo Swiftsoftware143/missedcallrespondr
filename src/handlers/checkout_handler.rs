@@ -916,50 +916,25 @@ async fn handle_checkout_completed(
                 tracing::warn!("Credential delivery failed for {}: {:?}", email, e);
             }
         }
-    }
 
-    // ── Fire affiliate conversion (if referral metadata present) ──
-    let session_meta = sqlx::query_scalar::<_, Value>(
-        r#"SELECT COALESCE(metadata, '{}'::jsonb) FROM checkout_sessions
-           WHERE provider_session_id = $1 AND provider_type = $2"#
-    )
-    .bind(&provider_session_id)
-    .bind(provider_type)
-    .fetch_optional(&state.pool)
-    .await?;
-
-    if let Some(meta) = session_meta {
-        let affiliate_id = meta.get("affiliate_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let cookie_id = meta.get("cookie_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-
-        if affiliate_id.is_some() || cookie_id.is_some() {
-            let amount = session["amount_total"].as_f64().map(|v| v / 100.0)
-                .or_else(|| session["amount"]
-                    .as_str().and_then(|s| s.parse::<f64>().ok()));
-
-            let payload = serde_json::json!({
-                "affiliate_id": affiliate_id,
-                "cookie_id": cookie_id,
-                "source_app": "missedcallrespondr",
-                "event": "checkout_completed",
-                "product_id": meta.get("product_id").and_then(|v| v.as_str()),
-                "product_name": meta.get("product_name").and_then(|v| v.as_str()),
-                "amount": amount,
-                "lead_email": meta.get("customer_email").and_then(|v| v.as_str()),
-            });
-
-            match reqwest::Client::new()
-                .post(format!("{}/api/v1/webhooks/conversion", state.funnelswift_url))
-                .header("X-Internal-Key", &state.config.internal_sync_key)
-                .header("Content-Type", "application/json")
-                .json(&payload)
-                .send()
-                .await
-            {
-                Ok(resp) => tracing::info!("Affiliate conversion fired — status: {}", resp.status()),
-                Err(e) => tracing::warn!("Failed to fire affiliate conversion: {:?}", e),
+        // FunnelSwift affiliate conversion webhook (fire-and-forget, never blocks)
+        let ptype = purchasable_type.clone();
+        let psid = provider_session_id.clone();
+        tokio::spawn(async move {
+            let funnelswift_url = std::env::var("FUNNELSWIFT_URL").unwrap_or_default();
+            if !funnelswift_url.is_empty() {
+                let _ = reqwest::Client::new()
+                    .post(format!("{}/api/v1/webhooks/conversion", funnelswift_url))
+                    .json(&serde_json::json!({
+                        "source_app": "missedcallrespondr",
+                        "provider_session_id": psid,
+                        "purchasable_type": ptype,
+                    }))
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await;
             }
-        }
+        });
     }
 
     tracing::info!("Checkout completed: provider_session={}", provider_session_id);

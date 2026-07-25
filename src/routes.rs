@@ -93,9 +93,6 @@ pub fn create_router(state: AppState) -> Router {
         // Integration Targets
         .route("/api/v1/integration-targets", get(integration_target_handler::list_integration_targets).post(integration_target_handler::create_integration_target))
         .route("/api/v1/integration-targets/:id", put(integration_target_handler::update_integration_target).delete(integration_target_handler::delete_integration_target))
-        // Affiliates
-        .route("/api/v1/affiliates", get(crate::handlers::affiliates_handler::list).post(crate::handlers::affiliates_handler::create))
-        .route("/api/v1/affiliates/:id", get(crate::handlers::affiliates_handler::get).put(crate::handlers::affiliates_handler::update).delete(crate::handlers::affiliates_handler::delete))
         // Provider Keys
         .route("/api/v1/provider-keys", get(provider_keys_handler::list_provider_keys).post(provider_keys_handler::upsert_provider_key))
         .route("/api/v1/provider-keys/:provider", delete(provider_keys_handler::delete_provider_key))
