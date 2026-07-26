@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-cd /opt/swift/missedcall_respondr
+cd /opt/swift/missedcallrespondr
 for i in $(seq 1 60); do
   if mkdir /tmp/rust-build.lock 2>/dev/null; then break; fi
   sleep 2

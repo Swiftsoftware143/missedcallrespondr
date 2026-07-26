@@ -15,9 +15,9 @@ impl AppConfig {
     pub fn from_env() -> Self {
         Self {
             database_url: std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://swift:swift@localhost:5432/missedcall_respondr".into()),
+                .unwrap_or_else(|_| "postgres://swift:swift@localhost:5432/missedcallrespondr".into()),
             jwt_secret: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "missedcall_respondr_jwt_secret_key_2024".into()),
+                .unwrap_or_else(|_| "missedcallrespondr_jwt_secret_key_2024".into()),
             server_port: std::env::var("SERVER_PORT")
                 .unwrap_or_else(|_| "8088".into())
                 .parse()
