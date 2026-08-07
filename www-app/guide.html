@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MissedCall Respondr — User Guide</title>
+  <style>
+    /* ─── Reset & Base ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      color: #1f2937; background: #f9fafb; line-height: 1.65;
+    }
+    a { color: #e11d48; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; }
+
+    /* ─── Top Bar ─── */
+    .topbar {
+      background: #e11d48; color: #fff; padding: 0.75rem 1.5rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    .topbar h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; }
+    .topbar .badge {
+      margin-left: auto; font-size: .75rem; background: rgba(255,255,255,.2);
+      padding: .25rem .6rem; border-radius: 4px; white-space: nowrap;
+    }
+    .topbar .meta { font-size: .8rem; opacity: .85; }
+
+    /* ─── Layout ─── */
+    .wrapper { display: flex; min-height: calc(100vh - 3.2rem); }
+    nav.sidebar {
+      width: 250px; flex-shrink: 0; background: #fff; border-right: 1px solid #e5e7eb;
+      padding: 1.25rem 0; overflow-y: auto; position: sticky; top: 3.2rem; align-self: flex-start; max-height: calc(100vh - 3.2rem);
+    }
+    nav.sidebar ul { list-style: none; }
+    nav.sidebar li a {
+      display: block; padding: .5rem 1.25rem; font-size: .9rem; color: #374151;
+      border-left: 3px solid transparent; transition: .15s;
+    }
+    nav.sidebar li a:hover, nav.sidebar li a.active {
+      background: #fff1f2; color: #e11d48; border-left-color: #e11d48; text-decoration: none;
+    }
+    nav.sidebar .section-label {
+      padding: .6rem 1.25rem .25rem; font-size: .7rem; text-transform: uppercase;
+      letter-spacing: .06em; color: #9ca3af; font-weight: 600;
+    }
+
+    main.content { flex: 1; padding: 2rem 2.5rem; max-width: 900px; }
+
+    /* ─── Typography ─── */
+    main h2 {
+      font-size: 1.6rem; font-weight: 700; margin: 2rem 0 .75rem; padding-bottom: .4rem;
+      border-bottom: 3px solid #e11d48; color: #111827;
+    }
+    main h2:first-of-type { margin-top: 0; }
+    main h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: #1f2937; }
+    main p, main li { margin-bottom: .65rem; color: #374151; }
+    main ul, main ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+    main ul li::marker { color: #e11d48; }
+
+    /* ─── Callout boxes ─── */
+    .callout {
+      border-radius: 8px; padding: 1rem 1.25rem; margin: 1.25rem 0;
+      border-left: 4px solid; font-size: .92rem;
+    }
+    .callout.info    { background: #ecfdf5; border-color: #10b981; }
+    .callout.warning { background: #fffbeb; border-color: #f59e0b; }
+    .callout.tip     { background: #eff6ff; border-color: #3b82f6; }
+    .callout.danger  { background: #fef2f2; border-color: #e11d48; }
+    .callout strong:first-child { display: block; margin-bottom: .25rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* ─── Code / Inline ─── */
+    code {
+      background: #f3f4f6; padding: .15rem .4rem; border-radius: 4px;
+      font-size: .85em; color: #be123c; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+    pre code {
+      display: block; background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px;
+      overflow-x: auto; font-size: .85rem; margin: 1rem 0;
+    }
+
+    /* ─── Tables ─── */
+    table {
+      width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem;
+    }
+    th, td { padding: .6rem .75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    th { background: #fff1f2; color: #9f1239; font-weight: 600; }
+
+    /* ─── Screenshot placeholder ─── */
+    .screenshot {
+      border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 1.5rem;
+      margin: 1.25rem 0; text-align: center; color: #9ca3af; font-size: .85rem;
+    }
+    .screenshot .icon { font-size: 2rem; margin-bottom: .25rem; }
+
+    /* ─── Feature grid ─── */
+    .feature-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 1rem; margin: 1.25rem 0;
+    }
+    .feature-card {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem;
+      text-align: center; transition: box-shadow .15s;
+    }
+    .feature-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .feature-card .icon { font-size: 1.8rem; margin-bottom: .35rem; }
+    .feature-card strong { display: block; font-size: .95rem; color: #111827; }
+    .feature-card span { font-size: .82rem; color: #6b7280; }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 768px) {
+      .wrapper { flex-direction: column; }
+      nav.sidebar {
+        width: 100%; position: static; max-height: none; border-right: none;
+        border-bottom: 1px solid #e5e7eb; padding: .5rem 0;
+      }
+      nav.sidebar ul { display: flex; flex-wrap: wrap; gap: 0; }
+      nav.sidebar li a { padding: .4rem .8rem; font-size: .82rem; border-left: none; }
+      nav.sidebar .section-label { display: none; }
+      main.content { padding: 1.25rem; }
+      .topbar { padding: .5rem 1rem; }
+      .topbar h1 { font-size: 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Top Bar ─── -->
+<header class="topbar">
+  <h1>📞 MissedCall Respondr</h1>
+  <span class="meta">v1.0 — User Guide</span>
+  <span class="badge">missedcallrespondr.com</span>
+</header>
+
+<div class="wrapper">
+
+<!-- ─── Sidebar ─── -->
+<nav class="sidebar">
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#getting-started">Getting Started</a></li>
+    <li><a href="#dashboard">Dashboard</a></li>
+    <li><a href="#call-log">Call Log</a></li>
+    <li><a href="#response-rules">Response Rules</a></li>
+    <li><a href="#followups">Follow-ups</a></li>
+    <li><a href="#contacts">Contacts</a></li>
+    <li><a href="#templates">Message Templates</a></li>
+    <li><a href="#voicemails">Voicemails</a></li>
+    <li><a href="#integrations">Integrations</a></li>
+    <li><a href="#settings">Settings</a></li>
+    <li><a href="#faq">FAQ</a></li>
+    <li><a href="#affiliates">🤝 Affiliates</a></li>
+  </ul>
+</nav>
+
+<!-- ─── Content ─── -->
+<main class="content">
+
+  <!-- Overview -->
+  <h2 id="overview">Overview</h2>
+  <p>
+    <strong>MissedCall Respondr</strong> is a call-response and follow-up automation platform.
+    It captures incoming call data, lets you define custom response rules, sends automated
+    text/callback replies, tracks follow-ups, and manages your contacts — all from one dashboard.
+  </p>
+  <p>
+    Built for businesses that never want to miss a lead or client callback, MissedCall Respondr
+    helps you close the loop on every inbound call.
+  </p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="icon">📊</div>
+      <strong>Dashboard</strong>
+      <span>Real-time call stats &amp; KPIs</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📋</div>
+      <strong>Call Log</strong>
+      <span>Detailed call records</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">⚙️</div>
+      <strong>Response Rules</strong>
+      <span>Automated reply triggers</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📬</div>
+      <strong>Follow-ups</strong>
+      <span>Task tracking</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">👤</div>
+      <strong>Contacts</strong>
+      <span>CRM-style directory</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">💬</div>
+      <strong>Templates</strong>
+      <span>Dynamic message snippets</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📼</div>
+      <strong>Voicemails</strong>
+      <span>Transcription + audio</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🔗</div>
+      <strong>Integrations</strong>
+      <span>Connect 3rd-party services</span>
+    </div>
+  </div>
+
+  <!-- Getting Started -->
+  <h2 id="getting-started">Getting Started</h2>
+
+  <h3>Accessing the App</h3>
+  <p>Open your browser and navigate to:</p>
+  <pre><code>https://missedcallrespondr.com:8088</code></pre>
+
+  <h3>Login Credentials</h3>
+  <div class="callout info">
+    <strong>🔐 Demo Account</strong>
+    <p>
+      <strong>Email:</strong> <code>swiftsoftware143@yahoo.com</code><br>
+      <strong>Password:</strong> <code>(rotated-2026-09-16)</code>
+    </p>
+  </div>
+
+  <h3>Logging In</h3>
+  <ol>
+    <li>Visit the app URL above.</li>
+    <li>Enter your email address and password.</li>
+    <li>Click <strong>Sign In</strong>.</li>
+    <li>On first login, you'll land on the <strong>Dashboard</strong>.</li>
+  </ol>
+
+  <div class="callout warning">
+    <strong>🔒 Password Reset</strong>
+    Forgot your password? Click <em>"Forgot Password?"</em> on the login screen to receive a reset link via email.
+  </div>
+
+  <h3>API Access</h3>
+  <p>All platform resources are also available via REST API at:</p>
+  <pre><code>https://missedcallrespondr.com/api/v1/</code></pre>
+  <p>Generate an API key from <strong>Settings → API Keys</strong> to authenticate programmatic requests.</p>
+
+  <!-- Dashboard -->
+  <h2 id="dashboard">Dashboard</h2>
+  <p>
+    The Dashboard is your command center. It displays high-level metrics for the current day
+    (or date range you select) so you can see at a glance how your call traffic is performing.
+  </p>
+
+  <h3>KPI Cards</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Metric</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Total Calls</td>
+        <td>All inbound calls for the selected period.</td>
+      </tr>
+      <tr>
+        <td>Missed Calls</td>
+        <td>Calls that went unanswered.</td>
+      </tr>
+      <tr>
+        <td>Answered Calls</td>
+        <td>Calls that were picked up.</td>
+      </tr>
+      <tr>
+        <td>Voicemails</td>
+        <td>Voicemail messages left by callers.</td>
+      </tr>
+      <tr>
+        <td>Follow-ups Pending</td>
+        <td>Open follow-up tasks that haven't been completed.</td>
+      </tr>
+      <tr>
+        <td>Response Rate</td>
+        <td>Percentage of calls that received an automated response.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Charts &amp; Visualizations</h3>
+  <p>
+    Below the KPI cards you'll find a <strong>call volume chart</strong> (hourly or daily breakdown)
+    and a <strong>missed vs. answered</strong> pie/bar chart. These visuals update in real time
+    as new calls come in.
+  </p>
+
+  <h3>Recent Activity Feed</h3>
+  <p>
+    A scrolling list of the latest calls and system actions so you can keep an eye on
+    what happened most recently without leaving the dashboard.
+  </p>
+
+  <div class="callout tip">
+    <strong>💡 Pro Tip</strong>
+    Use the date-range picker at the top of the dashboard to view historical data — yesterday,
+    last week, or a custom range.
+  </div>
+
+  <!-- Call Log -->
+  <h2 id="call-log">Call Log</h2>
+  <p>
+    The <strong>Call Log</strong> is a sortable, searchable table of every inbound call.
+    Each entry records who called, when, how long the call lasted, and what happened.
+  </p>
+
+  <h3>Table Columns</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Caller Name</td><td>Display name from your Contacts or "Unknown".</td></tr>
+      <tr><td>Phone Number</td><td>Caller's phone number.</td></tr>
+      <tr><td>Date &amp; Time</td><td>When the call came in (your timezone).</td></tr>
+      <tr><td>Duration</td><td>Length of the call (if answered).</td></tr>
+      <tr><td>Status</td><td>Missed, Answered, Voicemail, or Blocked.</td></tr>
+      <tr><td>Response</td><td>Whether an auto-response was triggered.</td></tr>
+      <tr><td>Actions</td><td>View details, respond, or add a note.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Filtering &amp; Searching</h3>
+  <ul>
+    <li><strong>Search bar</strong> — type any name or phone number to narrow results.</li>
+    <li><strong>Status filter</strong> — show only Missed, Answered, or Voicemail calls.</li>
+    <li><strong>Date range</strong> — pick a start and end date.</li>
+  </ul>
+
+  <h3>Call Detail View</h3>
+  <p>Click a row or the <strong>View</strong> button to open the call detail panel, which shows:</p>
+  <ul>
+    <li>Full caller info and linked contact profile</li>
+    <li>Call timeline (ring, answer, hang-up)</li>
+    <li>Voicemail playback &amp; transcription (if applicable)</li>
+    <li>Auto-response sent (if any) and its delivery status</li>
+    <li>Internal notes (add your own)</li>
+  </ul>
+
+  <!-- Response Rules -->
+  <h2 id="response-rules">Response Rules</h2>
+  <p>
+    <strong>Response Rules</strong> are the heart of MissedCall Respondr. They define
+    <em>when</em> and <em>how</em> the system automatically replies to incoming calls.
+  </p>
+
+  <h3>Creating a Rule</h3>
+  <ol>
+    <li>Navigate to <strong>Response Rules</strong> in the sidebar.</li>
+    <li>Click <strong>+ New Rule</strong>.</li>
+    <li>Fill in the rule fields (see table below).</li>
+    <li>Click <strong>Save</strong>. The rule is evaluated on every inbound call.</li>
+  </ol>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Field</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Rule Name</td><td>A label to identify the rule (e.g., "After-Hours Auto SMS").</td></tr>
+      <tr><td>Trigger Condition</td><td>When to fire: <em>All Missed Calls</em>, <em>Specific Numbers</em>, <em>Time-of-Day</em>, <em>Day-of-Week</em>, or a combination.</td></tr>
+      <tr><td>Response Type</td><td><strong>SMS</strong> (send a text) or <strong>Callback</strong> (queue a return call).</td></tr>
+      <tr><td>Message / Template</td><td>The text to send — type a custom message or select a saved template.</td></tr>
+      <tr><td>Schedule</td><td>Optionally restrict when the rule is active (business hours, 24/7, custom).</td></tr>
+      <tr><td>Priority</td><td>Rules are evaluated in priority order (1 = highest).</td></tr>
+      <tr><td>Enabled</td><td>Toggle the rule on/off without deleting it.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Rule Evaluation Order</h3>
+  <p>
+    Rules are evaluated by <strong>priority</strong> (lowest number first). The first matching
+    rule fires and its action is executed. Lower-priority rules are skipped for that call.
+  </p>
+
+  <h3>Managing Rules</h3>
+  <ul>
+    <li><strong>Edit</strong> — click the pencil icon on any rule row.</li>
+    <li><strong>Delete</strong> — click the trash icon (confirmation required).</li>
+    <li><strong>Reorder</strong> — drag-and-drop or adjust the priority field.</li>
+  </ul>
+
+  <div class="callout example">
+    <strong>📌 Example Rule</strong>
+    <p>
+      <strong>Name:</strong> "Weekend Office Hours Follow-up"<br>
+      <strong>Trigger:</strong> Missed calls on Saturday &amp; Sunday<br>
+      <strong>Response:</strong> SMS — "Hi {{name}}, we missed your call. We'll reach out on Monday. — {{company}}"
+    </p>
+  </div>
+
+  <!-- Follow-ups -->
+  <h2 id="followups">Follow-ups</h2>
+  <p>
+    <strong>Follow-ups</strong> are tasks assigned to calls, contacts, or created manually.
+    They ensure nothing slips through the cracks.
+  </p>
+
+  <h3>Creating a Follow-up</h3>
+  <ol>
+    <li>Go to <strong>Follow-ups</strong>.</li>
+    <li>Click <strong>+ New Follow-up</strong>.</li>
+    <li>
+      Fill in the details:
+      <ul>
+        <li><strong>Title</strong> — brief description (e.g., "Call back John re: quote")</li>
+        <li><strong>Assigned To</strong> — team member (if multiple users)</li>
+        <li><strong>Due Date / Time</strong> — deadline for the follow-up</li>
+        <li><strong>Priority</strong> — Low, Medium, High, Urgent</li>
+        <li><strong>Status</strong> — Pending, In Progress, Completed, Cancelled</li>
+        <li><strong>Notes</strong> — any context or instructions</li>
+      </ul>
+    </li>
+    <li>Click <strong>Save</strong>.</li>
+  </ol>
+
+  <h3>Auto-generated Follow-ups</h3>
+  <p>
+    When a response rule sends an SMS or queues a callback, the platform can automatically
+    create a follow-up task linked to that call. Enable this option in the rule editor.
+  </p>
+
+  <h3>Status Tracking</h3>
+  <p>
+    Filter follow-ups by status (Pending, In Progress, Completed) or use the search bar
+    to find a specific task. Completed items are archived for record-keeping.
+  </p>
+
+  <!-- Contacts -->
+  <h2 id="contacts">Contacts</h2>
+  <p>
+    The <strong>Contacts</strong> section is a lightweight CRM that stores caller profiles.
+    Contacts are auto-created from inbound calls (if the number is new) or can be added manually.
+  </p>
+
+  <h3>Managing Contacts</h3>
+  <ul>
+    <li><strong>Add Contact</strong> — click <strong>+ New Contact</strong>, enter name, phone, email, company, tags, and notes.</li>
+    <li><strong>Edit</strong> — click any contact row to update their info.</li>
+    <li><strong>Delete</strong> — remove a contact (confirmation required).</li>
+    <li><strong>Search</strong> — type name, phone, or email to find a contact instantly.</li>
+  </ul>
+
+  <h3>Contact Detail Page</h3>
+  <p>Opens a full profile showing:</p>
+  <ul>
+    <li>Contact info (name, phone, email, company)</li>
+    <li>Call history — every call from this contact</li>
+    <li>Linked follow-ups — open and completed tasks</li>
+    <li>Notes — internal notes added by your team</li>
+  </ul>
+
+  <div class="callout tip">
+    <strong>💡 Pro Tip</strong>
+    Tag your contacts (e.g., "VIP", "Lead", "Client") to build smart response rules
+    that trigger different responses based on contact tags.
+  </div>
+
+  <!-- Message Templates -->
+  <h2 id="templates">Message Templates</h2>
+  <p>
+    <strong>Message Templates</strong> are reusable text snippets with optional
+    <em>variable placeholders</em> that are replaced dynamically when a response is sent.
+  </p>
+
+  <h3>Available Variables</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Variable</th>
+        <th>Replaced With</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><code>{{name}}</code></td><td>Caller's name from Contacts (or "there")</td></tr>
+      <tr><td><code>{{phone}}</code></td><td>Caller's phone number</td></tr>
+      <tr><td><code>{{company}}</code></td><td>Your company name (from Settings)</td></tr>
+      <tr><td><code>{{time}}</code></td><td>Current time when the response is sent</td></tr>
+      <tr><td><code>{{date}}</code></td><td>Current date when the response is sent</td></tr>
+      <tr><td><code>{{duration}}</code></td><td>Call duration (if answered)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Creating a Template</h3>
+  <ol>
+    <li>Go to <strong>Message Templates</strong> → <strong>+ New Template</strong>.</li>
+    <li>Enter a <strong>name</strong> (e.g., "After-Hours SMS").</li>
+    <li>Write your message body, inserting variables with <code>{{}}</code> syntax.</li>
+    <li>Click <strong>Save</strong>. The template is now available in the Response Rules editor.</li>
+  </ol>
+
+  <div class="callout example">
+    <strong>📌 Example</strong>
+    <p>
+      <code>Hi {{name}}, thanks for calling {{company}}. We received your call at {{time}} and will follow up shortly. If this is urgent, please call us back directly.</code>
+    </p>
+  </div>
+
+  <h3>Editing &amp; Deleting</h3>
+  <p>Templates can be edited or deleted from the same list. Deleting a template does <em>not</em> affect rules that already used it — the text is copied at rule-save time.</p>
+
+  <!-- Voicemails -->
+  <h2 id="voicemails">Voicemails</h2>
+  <p>
+    The <strong>Voicemail</strong> section lists every voicemail left by callers.
+    Each entry shows the caller, duration, transcription status, and an audio player.
+  </p>
+
+  <h3>Transcription Status</h3>
+  <ul>
+    <li><strong>Pending</strong> — audio is being processed.</li>
+    <li><strong>Completed</strong> — transcript is available.</li>
+    <li><strong>Failed</strong> — transcription could not be generated (retry available).</li>
+  </ul>
+
+  <h3>Audio Playback</h3>
+  <p>Click the <strong>play button</strong> on any voicemail row to hear the recording in your browser. Use the volume slider and seek bar to control playback.</p>
+
+  <h3>Taking Action</h3>
+  <p>From the voicemail detail you can:</p>
+  <ul>
+    <li>Create a <strong>Follow-up</strong> task linked to this voicemail</li>
+    <li>Send an <strong>SMS reply</strong></li>
+    <li>Add the caller to <strong>Contacts</strong> (if not already saved)</li>
+    <li>Download the audio file</li>
+  </ul>
+
+  <!-- Integrations -->
+  <h2 id="integrations">Integrations</h2>
+  <p>
+    <strong>Integrations</strong> let you connect MissedCall Respondr with external services.
+    Each integration has a status indicator (Connected / Disconnected) and a <strong>Test Connection</strong> button.
+  </p>
+
+  <h3>Available Integrations</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Integration</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Twilio / VoIP Provider</td><td>Receives inbound call data and sends SMS/callback actions.</td></tr>
+      <tr><td>Email (SMTP)</td><td>Sends email notifications for missed calls, follow-up reminders, etc.</td></tr>
+      <tr><td>Webhook</td><td>HTTP POST callbacks to your own server when calls come in.</td></tr>
+      <tr><td>Zapier / Make</td><td>Low-code automation triggers to connect 2000+ apps.</td></tr>
+      <tr><td>Slack</td><td>Posts call notifications to a Slack channel.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Configuring an Integration</h3>
+  <ol>
+    <li>Click the integration card to open its configuration panel.</li>
+    <li>Enter the required credentials (API key, webhook URL, etc.).</li>
+    <li>Click <strong>Save</strong> — the integration status updates immediately.</li>
+    <li>Click <strong>Test Connection</strong> to verify everything works.</li>
+  </ol>
+
+  <div class="callout warning">
+    <strong>⚠️ Important</strong>
+    Always test a new integration before relying on it in production. The <strong>Test Connection</strong> button sends a sample payload to validate your credentials.
+  </div>
+
+  <!-- Settings -->
+  <h2 id="settings">Settings</h2>
+  <p>
+    The <strong>Settings</strong> page manages your account, company profile, security, and API keys.
+  </p>
+
+  <h3>Account Settings</h3>
+  <ul>
+    <li><strong>Profile</strong> — your name, email, phone, timezone.</li>
+    <li><strong>Company</strong> — business name, address, logo (used in templates via <code>{{company}}</code>).</li>
+    <li><strong>Password</strong> — change your login password.</li>
+  </ul>
+
+  <h3>API Keys</h3>
+  <p>
+    Generate and manage API tokens for programmatic access to the MissedCall Respondr API.
+    Each key can have a label (e.g., "Production Webhook") and an expiration date.
+  </p>
+  <ul>
+    <li><strong>Generate</strong> — click <strong>+ New API Key</strong>. Copy the key immediately — it's shown only once.</li>
+    <li><strong>Revoke</strong> — delete a key that is no longer needed.</li>
+  </ul>
+
+  <h3>Notification Preferences</h3>
+  <p>Choose how you're alerted when calls come in:</p>
+  <ul>
+    <li>Email notifications for missed calls</li>
+    <li>SMS alerts to your phone</li>
+    <li>Daily/weekly summary digest</li>
+  </ul>
+
+  <h3>Business Hours</h3>
+  <p>Set your default business hours and timezone. These are referenced by response rules that are configured for "Business Hours Only" or "After Hours".</p>
+
+  <!-- FAQ -->
+  <h2 id="faq">Frequently Asked Questions</h2>
+
+  <h3>How does MissedCall Respondr receive call data?</h3>
+  <p>
+    Your VoIP provider (Twilio, Telnyx, etc.) sends webhooks to MissedCall Respondr's API.
+    Configure the webhook URL from your provider's dashboard to point to
+    <code>https://missedcallrespondr.com/api/v1/calls/incoming</code>.
+  </p>
+
+  <h3>Can I have multiple response rules active at the same time?</h3>
+  <p>
+    Yes. Rules are evaluated by priority. Only the <strong>first matching rule</strong> fires per call.
+    You can have dozens of rules with different conditions and priorities.
+  </p>
+
+  <h3>What happens if no rule matches a call?</h3>
+  <p>
+    The call is logged in the Call Log with status <strong>Missed</strong> or <strong>Answered</strong>,
+    but no automated response is sent. You can still handle it manually from the call detail screen.
+  </p>
+
+  <h3>Are message templates required for SMS responses?</h3>
+  <p>
+    No. You can type a custom message directly in the rule editor. Templates are a convenience
+    when you use the same message across multiple rules.
+  </p>
+
+  <h3>Can I export my call data?</h3>
+  <p>
+    Yes. Use the <strong>Export</strong> button in the Call Log to download a CSV file of all
+    calls for the current filter or date range.
+  </p>
+
+  <h3>What variable syntax does the app support?</h3>
+  <p>
+    Use double-curly-brace syntax: <code>{{name}}</code>, <code>{{phone}}</code>,
+    <code>{{company}}</code>, <code>{{time}}</code>, <code>{{date}}</code>, <code>{{duration}}</code>.
+    Variables are case-sensitive.
+  </p>
+
+  <h3>How do I reset my password?</h3>
+  <p>
+    On the login page, click <strong>"Forgot Password?"</strong> and enter your email address.
+    You'll receive a password reset link. You can also change your password in
+    <strong>Settings → Password</strong> while logged in.
+  </p>
+
+  <h3>What happens to voicemails after they're transcribed?</h3>
+  <p>
+    Voicemails are stored indefinitely unless deleted manually. The transcript and audio file
+    remain available in the Voicemails section and linked to the original call record.
+  </p>
+
+  <h3>Is there a mobile app?</h3>
+  <p>
+    The MissedCall Respondr web app is fully responsive and works on mobile browsers.
+    There is no native iOS/Android app at this time.
+  </p>
+
+  <h3>How do I contact support?</h3>
+  <p>
+    Email support at <strong>support@missedcallrespondr.com</strong> or submit a request
+    through the app using the <strong>Help</strong> link in the bottom-left of the sidebar.
+  </p>
+
+  <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid #e5e7eb;">
+  <p style="text-align:center; color:#9ca3af; font-size:.82rem;">
+    MissedCall Respondr &mdash; Built by SwiftSoftware<br>
+    © 2026 SwiftSoftware. All rights reserved.
+  </p>
+
+</main>
+</div>
+
+      <hr style="border-color: var(--border); margin: 40px 0;">
+      <h2 id="affiliates">🤝 Affiliate Program</h2>
+      <div class="alert alert-success"><strong>Earn commissions!</strong> Refer other businesses to this service and earn a percentage of their subscription fees. The affiliate system is managed through FunnelSwift — ask your account manager to set up your affiliate account.</div>
+
+      <h3>How It Works</h3>
+      <ol class="step-list">
+        <li><strong>Get Your Affiliate Link</strong><p>Your affiliate manager provides a unique tracking link (or you can generate one in the FunnelSwift affiliate portal).</p></li>
+        <li><strong>Share It</strong><p>Post the link on your website, in emails, on social media, or wherever your audience is.</p></li>
+        <li><strong>They Sign Up &amp; Pay</strong><p>When someone clicks your link and later completes a paid purchase, the system tracks the conversion.</p></li>
+        <li><strong>You Earn Commission</strong><p>Commissions are calculated based on your affiliate rate and credited to your account automatically.</p></li>
+      </ol>
+
+      <h3>Products You Can Promote</h3>
+      <table>
+        <thead><tr><th>Service</th><th>Plan</th><th>Price</th><th>Commission</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="3"><strong>ADASwift</strong></td><td>Pro Plan</td><td>$79/mo</td><td>10%</td></tr>
+          <tr><td>Enterprise Plan</td><td>$199/mo</td><td>10%</td></tr>
+          <tr><td>Monthly Scan</td><td>$29/mo</td><td>15%</td></tr>
+          <tr><td rowspan="2"><strong>MissedCall Respondr</strong></td><td>Pro Plan</td><td>$49/mo</td><td>10%</td></tr>
+          <tr><td>Credit Packs</td><td>$10–$40</td><td>10%</td></tr>
+          <tr><td rowspan="3"><strong>WorkflowSwift</strong></td><td>Starter Plan</td><td>$29/mo</td><td>10%</td></tr>
+          <tr><td>Professional Plan</td><td>$79/mo</td><td>10%</td></tr>
+          <tr><td>Enterprise Plan</td><td>$199/mo</td><td>10%</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Affiliate Products (All Services)</h3>
+      <p>The full list of all 13 affiliate products across all SwiftSoftware services:</p>
+      <table>
+        <thead><tr><th>Service</th><th>Product</th><th>Price</th><th>Commission</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="4"><strong>ADASwift</strong></td><td>Free Plan</td><td>$0</td><td>10%</td></tr>
+          <tr><td>Pro Plan</td><td>$79/mo</td><td>10%</td></tr>
+          <tr><td>Enterprise Plan</td><td>$199/mo</td><td>10%</td></tr>
+          <tr><td>Monthly Scan</td><td>$29/mo</td><td>15%</td></tr>
+          <tr><td rowspan="5"><strong>MissedCall</strong></td><td>Free Plan</td><td>$0</td><td>10%</td></tr>
+          <tr><td>Pro Plan</td><td>$49/mo</td><td>10%</td></tr>
+          <tr><td>Credit Pack - 1,000</td><td>$10</td><td>10%</td></tr>
+          <tr><td>Credit Pack - 5,000</td><td>$40</td><td>10%</td></tr>
+          <tr><td>Phone Number</td><td>$5/mo</td><td>5%</td></tr>
+          <tr><td rowspan="4"><strong>WorkflowSwift</strong></td><td>Free Plan</td><td>$0</td><td>10%</td></tr>
+          <tr><td>Starter Plan</td><td>$29/mo</td><td>10%</td></tr>
+          <tr><td>Professional Plan</td><td>$79/mo</td><td>10%</td></tr>
+          <tr><td>Enterprise Plan</td><td>$199/mo</td><td>10%</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Conversion Tracking</h3>
+      <p>When a referred lead completes a purchase, the conversion is tracked automatically:</p>
+      <ol class="step-list">
+        <li><strong>Checkout Metadata</strong><p>The system stores <code>affiliate_id</code> and/or <code>cookie_id</code> in the checkout session metadata.</p></li>
+        <li><strong>Webhook Fires</strong><p>On successful payment, the Stripe/PayPal webhook fires a conversion event to FunnelSwift.</p></li>
+        <li><strong>Commission Recorded</strong><p>FunnelSwift records the conversion and attributes commission based on the affiliate's rate.</p></li>
+      </ol>
+      <p>This is fully automatic. As long as the affiliate link is used at checkout, nothing extra is needed.</p>
+
+      <h3>Managing Affiliates</h3>
+      <p>Affiliates are managed through the <strong>FunnelSwift Admin</strong> portal:</p>
+      <ul>
+        <li><strong>Affiliate Admin</strong> — full CRUD for affiliate products, categories, links, and conversion history</li>
+        <li><strong>Affiliates</strong> — add, edit, and manage affiliate partners with commission rates</li>
+        <li><strong>Affiliate Products</strong> — configure which products can be promoted and at what commission rate</li>
+        <li><strong>Affiliate Links</strong> — create tracking links that pair an affiliate with a specific product</li>
+      </ul>
+      <p>To access, log in to FunnelSwift and navigate to <strong>Super Admin → Affiliate Admin</strong>.</p>
+
+</body>
+</html>

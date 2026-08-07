@@ -1,8 +1,7 @@
 //! Email Templates handler — CRUD for email templates with admin auth.
 
 use axum::{
-    extract::{Path, Query, State},
-    Extension, Json,
+    extract::{Path, Query, State}, Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -10,7 +9,6 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 use crate::error::AppError;
-use crate::config::Claims;
 
 /// Full email template row
 #[derive(Debug, Serialize, sqlx::FromRow)]

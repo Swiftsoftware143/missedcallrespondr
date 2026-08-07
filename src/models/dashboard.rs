@@ -3,6 +3,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
+#[allow(dead_code)]
 pub struct DashboardStat {
     pub tenant_id: Uuid,
     pub period: String,

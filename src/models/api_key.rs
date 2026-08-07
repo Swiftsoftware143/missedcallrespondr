@@ -4,6 +4,7 @@ use uuid::Uuid;
 use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[allow(dead_code)]
 pub struct ApiKey {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -21,6 +22,7 @@ pub struct ApiKey {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct ApiKeyResponse {
     pub id: Uuid,
     pub name: String,
@@ -31,6 +33,7 @@ pub struct ApiKeyResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CreateApiKeyRequest {
     pub name: Option<String>,
     pub target_url: Option<String>,
@@ -38,6 +41,7 @@ pub struct CreateApiKeyRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
     pub target_url: Option<String>,

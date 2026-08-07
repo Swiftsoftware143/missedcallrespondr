@@ -33,6 +33,7 @@ impl AppConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
+#[allow(dead_code)]
 pub struct Account {
     pub id: uuid::Uuid,
     pub name: String,

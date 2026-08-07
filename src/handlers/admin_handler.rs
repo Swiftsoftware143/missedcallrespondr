@@ -12,7 +12,7 @@ use chrono::Utc;
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::auth::models::{create_token, validate_token};
+use crate::auth::models::create_token;
 
 /// Admin sync endpoint called by CoreSwift
 pub async fn portfolio_sync(

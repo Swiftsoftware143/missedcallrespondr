@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MissedCall Respondr</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#c9d1d9;--text2:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+#app{display:flex;min-height:100vh}
+.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);padding:1rem;position:fixed;height:100vh;overflow-y:auto}
+.sidebar h2{font-size:1.1rem;margin-bottom:1.5rem;color:var(--accent)}
+.sidebar .nav-item{padding:.6rem .8rem;margin-bottom:.3rem;border-radius:6px;cursor:pointer;color:var(--text2);transition:.15s}
+.sidebar .nav-item:hover,.sidebar .nav-item.active{background:var(--surface2);color:var(--text)}
+.sidebar .nav-item.logout{margin-top:2rem;color:var(--red)}
+.main{flex:1;margin-left:240px;padding:1.5rem}
+.main h1{font-size:1.4rem;margin-bottom:1.5rem}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:2rem}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.2rem}
+.stat-card .label{font-size:.8rem;color:var(--text2);margin-bottom:.3rem}
+.stat-card .value{font-size:1.5rem;font-weight:600}
+table{width:100%;border-collapse:collapse;margin-top:.5rem}
+th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--border);font-size:.9rem}
+th{color:var(--text2);font-weight:500;font-size:.8rem;text-transform:uppercase}
+.btn{padding:.5rem 1rem;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:.85rem}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.danger{background:var(--red);color:#fff;border-color:var(--red)}
+.btn.small{padding:.3rem .6rem;font-size:.8rem}
+.page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
+.form-group{margin-bottom:1rem}
+.form-group label{display:block;font-size:.85rem;color:var(--text2);margin-bottom:.3rem}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:.6rem;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:.9rem}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;min-width:400px;max-width:600px;max-height:80vh;overflow-y:auto}
+.modal h3{margin-bottom:1rem}
+.login-page{display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column}
+.login-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2rem;width:360px}
+.login-box h1{font-size:1.3rem;margin-bottom:1.5rem;text-align:center}
+.error-msg{color:var(--red);font-size:.85rem;margin-top:.5rem}
+.toast{position:fixed;top:1rem;right:1rem;background:var(--green);color:#fff;padding:.8rem 1.2rem;border-radius:8px;z-index:200;animation:fadeIn .2s}
+.toast.error{background:var(--red)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-10px)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const API = '';
+let token = localStorage.getItem('token');
+let user = null;
+const view = {};
+
+function api(path, opts={}) {
+  opts.headers = opts.headers || {};
+  if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  return fetch(API + path, opts).then(r => r.json().then(d => ({ok: r.ok, status: r.status, data: d})));
+}
+
+function toast(msg, err) {
+  const d = document.createElement('div');
+  d.className = 'toast' + (err ? ' error' : '');
+  d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 2500);
+}
+
+function render(html) { document.getElementById('app').innerHTML = html; }
+
+var authMode = window.location.pathname==='/register'||window.location.pathname==='/signup'?'register':'login';
+
+function loginPage() {
+  if(authMode==='register') return registerPage();
+  render(`
+    <div class="login-page">
+      <div class="login-box">
+        <h1>🔔 MissedCall Respondr</h1>
+        <div id="lauth-title" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px">Sign In</div>
+        <div class="form-group"><label>Email</label><input id="lemail" type="email" value="swiftsoftware143@yahoo.com"></div>
+        <div class="form-group"><label>Password</label><input id="lpass" type="password" value="(rotated-2026-09-16)"></div>
+        <div class="error-msg" id="lerr"></div>
+        <button class="btn primary" style="width:100%;margin-top:.5rem" onclick="doLogin()">Sign In</button>
+        <p style="margin-top:14px;text-align:center;font-size:12px;color:var(--muted)">Don't have an account? <a href="#" onclick="toggleAuth()" style="color:var(--accent);text-decoration:none">Sign Up</a></p>
+      </div>
+    </div>`);
+}
+
+function registerPage() {
+  render(`
+    <div class="login-page">
+      <div class="login-box">
+        <h1>🔔 MissedCall Respondr</h1>
+        <div id="lauth-title" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px">Create Account</div>
+        <div class="form-group"><label>Account Name</label><input id="racct" type="text" placeholder="My Company"></div>
+        <div class="form-group"><label>Email</label><input id="remail" type="email" placeholder="you@example.com"></div>
+        <div class="form-group"><label>Password</label><input id="rpass" type="password" placeholder="At least 6 characters"></div>
+        <div class="error-msg" id="lerr"></div>
+        <button class="btn primary" style="width:100%;margin-top:.5rem" onclick="doRegister()">Create Account</button>
+        <p style="margin-top:14px;text-align:center;font-size:12px;color:var(--muted)">Already have an account? <a href="#" onclick="toggleAuth()" style="color:var(--accent);text-decoration:none">Sign In</a></p>
+      </div>
+    </div>`);
+}
+
+function toggleAuth() {
+  authMode = authMode==='register' ? 'login' : 'register';
+  if(authMode==='register') registerPage(); else loginPage();
+}
+
+async function doRegister() {
+  const email = document.getElementById('remail').value.trim();
+  const acct = (document.getElementById('racct')?.value.trim()) || email.split('@')[0];
+  const password = document.getElementById('rpass').value;
+  const errEl = document.getElementById('lerr');
+  if(!email||!password){errEl.textContent='Email and password are required';return}
+  if(password.length<6){errEl.textContent='Password must be at least 6 characters';return}
+  const res = await api('/api/v1/auth/register', {method:'POST', body:{email, password, name: email.split('@')[0], account_name: acct}});
+  if (res.ok && res.data.token) {
+    token = res.data.token;
+    localStorage.setItem('token', token);
+    user = res.data.user || {email};
+    loadApp();
+  } else {
+    errEl.textContent = res.data.message || res.data.error || 'Registration failed';
+  }
+}
+
+async function doLogin() {
+  const email = document.getElementById('lemail').value;
+  const password = document.getElementById('lpass').value;
+  const res = await api('/api/v1/auth/login', {method:'POST', body:{email, password}});
+  if (res.ok && res.data.token) {
+    token = res.data.token;
+    localStorage.setItem('token', token);
+    user = res.data.user || {email};
+    loadApp();
+  } else {
+    document.getElementById('lerr').textContent = res.data.message || 'Login failed';
+  }
+}
+
+async function loadApp() {
+  // Try to fetch current user
+  const u = await api('/api/v1/auth/me');
+  if (u.ok) user = u.data;
+  renderApp();
+  loadDashboard();
+}
+
+const pages = {
+  dashboard: {label:'📊 Dashboard', fn: loadDashboard},
+  calls: {label:'📞 Calls', fn: loadCalls},
+  voicemails: {label:'📼 Voicemails', fn: loadVoicemails},
+  'follow-ups': {label:'🔄 Follow-ups', fn: loadFollowUps},
+  messages: {label:'✉️ Messages', fn: loadMessages},
+  contacts: {label:'👤 Contacts', fn: loadContacts},
+  'response-rules': {label:'⚙️ Response Rules', fn: loadResponseRules},
+  integrations: {label:'🔗 Integrations', fn: loadIntegrations},
+  settings: {label:'⚙️ Settings', fn: loadSettings},
+};
+
+function renderApp() {
+  const navHtml = Object.entries(pages).map(([k,v]) =>
+    `<div class="nav-item${view.page === k || (!view.page && k==='dashboard') ? ' active' : ''}" onclick="navigate('${k}')">${v.label}</div>`
+  ).join('');
+  render(`
+    <div class="sidebar">
+      <h2>MissedCall Respondr</h2>
+      ${navHtml}
+      <div class="nav-item logout" onclick="logout()">🚪 Logout</div>
+    </div>
+    <div class="main" id="main-content">
+      <h1 id="page-title">Dashboard</h1>
+      <div id="page-content"></div>
+    </div>`);
+}
+
+function navigate(page) {
+  view.page = page;
+  const navs = document.querySelectorAll('.nav-item');
+  navs.forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.textContent.trim().toLowerCase().includes(page)) n.classList.add('active');
+  });
+  document.getElementById('page-title').textContent = pages[page].label;
+  pages[page].fn();
+}
+
+function logout() { token = null; localStorage.removeItem('token'); render(loginPage()); }
+
+async function loadDashboard() {
+  const res = await api('/api/v1/dashboard/stats');
+  const d = res.ok && res.data ? res.data : {};
+  document.getElementById('page-content').innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">Total Calls</div><div class="value">${d.total_calls || d.totalCalls || 0}</div></div>
+      <div class="stat-card"><div class="label">Missed Calls</div><div class="value">${d.missed_calls || d.missedCalls || 0}</div></div>
+      <div class="stat-card"><div class="label">Voicemails</div><div class="value">${d.total_voicemails || d.totalVoicemails || 0}</div></div>
+      <div class="stat-card"><div class="label">Follow-ups Today</div><div class="value">${d.follow_ups_today || d.followUpsToday || 0}</div></div>
+    </div>
+    <div class="stat-card" style="margin-top:1rem"><div class="label">Recent Activity</div>
+      <div style="margin-top:.5rem;font-size:.9rem">${d.recent_activity || 'No recent activity'}</div>
+    </div>`;
+}
+
+// --- Calls ---
+async function loadCalls() {
+  const res = await api('/api/v1/calls');
+  const items = res.ok && res.data ? (res.data.data || res.data.calls || res.data) : [];
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <span></span>
+      <button class="btn primary" onclick="showCallForm()">+ New Call</button>
+    </div>
+    <table><thead><tr><th>Phone</th><th>Status</th><th>Direction</th><th>Date</th><th>Actions</th></tr></thead>
+    <tbody id="call-tbody">${items.map(i => `<tr>
+      <td>${i.phone_number || i.caller || '-'}</td>
+      <td>${i.status || '-'}</td>
+      <td>${i.direction || '-'}</td>
+      <td>${i.created_at ? new Date(i.created_at).toLocaleString() : '-'}</td>
+      <td><button class="btn small" onclick="showCallDetail('${i.id}')">View</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function showCallForm() { toast('Creating calls via API - use integration'); }
+async function showCallDetail(id) { toast('Call detail: ' + id); }
+
+// --- Voicemails ---
+async function loadVoicemails() {
+  const res = await api('/api/v1/voicemails');
+  const items = res.ok && res.data ? (res.data.data || res.data.voicemails || res.data) : [];
+  document.getElementById('page-content').innerHTML = `<table><thead><tr><th>Call</th><th>URL</th><th>Duration</th><th>Date</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td>${i.call_id || '-'}</td>
+      <td>${i.url || i.file_url ? `<a href="${i.url||i.file_url}" target="_blank">Listen</a>` : '-'}</td>
+      <td>${i.duration ? i.duration+'s' : '-'}</td>
+      <td>${i.created_at ? new Date(i.created_at).toLocaleString() : '-'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// --- Follow-ups ---
+async function loadFollowUps() {
+  const res = await api('/api/v1/follow-ups');
+  const items = res.ok && res.data ? (res.data.data || res.data.follow_ups || res.data) : [];
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header"><span></span><button class="btn primary" onclick="showFUPForm()">+ New</button></div>
+    <table><thead><tr><th>Call</th><th>Action</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td>${i.call_id || '-'}</td>
+      <td>${i.action || i.description || '-'}</td>
+      <td>${i.status || '-'}</td>
+      <td>${i.due_at || i.due_date ? new Date(i.due_at||i.due_date).toLocaleString() : '-'}</td>
+      <td><button class="btn small" onclick="toast('Edit follow-up ${i.id}')">Edit</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function showFUPForm() { toast('New follow-up form'); }
+
+// --- Messages ---
+async function loadMessages() {
+  const res = await api('/api/v1/messages');
+  const items = res.ok && res.data ? (res.data.data || res.data.messages || res.data) : [];
+  document.getElementById('page-content').innerHTML = `<table><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Date</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td>${i.to || i.recipient || '-'}</td>
+      <td>${i.body ? i.body.substring(0,60) : '-'}</td>
+      <td>${i.status || '-'}</td>
+      <td>${i.created_at ? new Date(i.created_at).toLocaleString() : '-'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// --- Contacts ---
+async function loadContacts() {
+  const res = await api('/api/v1/contacts');
+  const items = res.ok && res.data ? (res.data.data || res.data.contacts || res.data) : [];
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header"><span></span><button class="btn primary" onclick="showContactForm()">+ New Contact</button></div>
+    <table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Actions</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td>${i.name || i.first_name + ' ' + (i.last_name||'') || '-'}</td>
+      <td>${i.phone || i.phone_number || '-'}</td>
+      <td>${i.email || '-'}</td>
+      <td><button class="btn small" onclick="toast('Contact ${i.id}')">View</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function showContactForm() { toast('New contact form'); }
+
+// --- Response Rules ---
+async function loadResponseRules() {
+  const res = await api('/api/v1/response-rules');
+  const items = res.ok && res.data ? (res.data.data || res.data.response_rules || res.data) : [];
+  document.getElementById('page-content').innerHTML = `<table><thead><tr><th>Name</th><th>Type</th><th>Trigger</th><th>Active</th><th>Actions</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td>${i.name || '-'}</td>
+      <td>${i.response_type || i.type || '-'}</td>
+      <td>${i.trigger_condition || i.condition || '-'}</td>
+      <td>${i.active ? '✅' : '❌'}</td>
+      <td><button class="btn small" onclick="toast('Edit rule ${i.id}')">Edit</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// --- Integrations ---
+async function loadIntegrations() {
+  const res = await api('/api/v1/integrations');
+  const items = res.ok && res.data ? (res.data.data || res.data.integrations || res.data) : [];
+  document.getElementById('page-content').innerHTML = `<table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${items.map(i => `<tr>
+      <td>${i.name || '-'}</td>
+      <td>${i.provider || i.type || '-'}</td>
+      <td>${i.active || i.enabled ? '✅' : '❌'}</td>
+      <td><button class="btn small" onclick="toast('Integration ${i.id}')">Edit</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// --- Settings ---
+async function loadSettings() {
+  const res = await api('/api/v1/settings');
+  const items = res.ok && res.data ? (res.data.data || res.data.settings || res.data) : [];
+  const html = Array.isArray(items) ? `<table><thead><tr><th>Key</th><th>Value</th></tr></thead>
+    <tbody>${items.map(i => `<tr><td>${i.key || i.setting_key || '-'}</td><td>${i.value || '-'}</td></tr>`).join('')}</tbody></table>` : '<p>Settings loaded</p>';
+  document.getElementById('page-content').innerHTML = html;
+}
+
+// Init
+if (token) { user = {email: 'swiftsoftware143@yahoo.com'}; renderApp(); loadDashboard(); }
+else loginPage();
+</script>
+</body>
+</html>

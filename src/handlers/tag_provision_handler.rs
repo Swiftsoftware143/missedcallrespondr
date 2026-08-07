@@ -13,25 +13,31 @@ use crate::state::AppState;
 pub struct TagProvisionRequest {
     pub contact: TagProvisionContact,
     pub tag: TagProvisionTag,
+    #[allow(dead_code)]
     pub source: String,
+    #[allow(dead_code)]
     pub timestamp: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct TagProvisionContact {
+    #[allow(dead_code)]
     pub id: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub company: Option<String>,
+    #[allow(dead_code)]
     pub custom_fields: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct TagProvisionTag {
     pub name: String,
+    #[allow(dead_code)]
     pub campaign_id: Option<String>,
+    #[allow(dead_code)]
     pub metadata: Option<Value>,
 }
 

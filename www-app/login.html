@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang= en>
+<head>
+<meta charset=UTF-8>
+<meta name=viewport content=width=device-width initial-scale=1.0>
+<title>Sign In</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;min-height:100vh}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#059669,#047857)}
+.wrapper{display:flex;align-items:center;justify-content:center;min-height:100vh;width:100%;padding:20px}
+.login-card{background:#fff;border-radius:16px;padding:40px;width:400px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.login-card .emoji{font-size:40px;text-align:center;margin-bottom:8px}
+.login-card h1{font-size:24px;font-weight:700;text-align:center;color:#1e293b;margin-bottom:4px}
+.login-card p.sub{text-align:center;color:#64748b;font-size:14px;margin-bottom:28px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:4px}
+.form-group input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none}
+.form-group input:focus{border-color:#059669;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
+.btn{width:100%;padding:10px;border:none;border-radius:8px;font-size:15px;font-weight:600;color:#fff;background:#059669;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.9}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.error{color:#ef4444;font-size:13px;margin-bottom:12px;display:none}
+.error.show{display:block}
+.loading{text-align:center;margin-top:12px;font-size:13px;color:#64748b;display:none}
+</style>
+</head>
+<body>
+<div class=wrapper>
+<div class=login-card>
+<div class=emoji>&#x1f514;</div>
+<h1>MissedCall Respondr</h1>
+<p class=sub>Sign in to your account</p>
+<div class=error id=login-error></div>
+<form id=login-form>
+<div class=form-group>
+<label>Email</label>
+<input type=email id=login-email placeholder=you@company.com required autocomplete=email>
+</div>
+<div class=form-group>
+<label>Password</label>
+<input type=password id=login-password placeholder=Enter password required autocomplete=current-password>
+</div>
+<button type=submit class=btn id=login-btn>Sign In</button>
+</form>
+<div class=loading id=login-loading>Signing in...</div>
+</div>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', async function(e){
+e.preventDefault();
+var btn = document.getElementById('login-btn');
+var err = document.getElementById('login-error');
+var loading = document.getElementById('login-loading');
+err.classList.remove('show');
+btn.disabled = true;
+loading.style.display = 'block';
+try{
+var res = await fetch('/api/v1/auth/login', {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({
+email: document.getElementById('login-email').value,
+password: document.getElementById('login-password').value
+})
+});
+var data = await res.json();
+if(!res.ok) throw new Error(data.error || data.message || 'Login failed');
+var token = data.token || data.access_token;
+if(token){
+    sessionStorage.setItem('mcr_token', token);
+    if(data.user) sessionStorage.setItem('mcr_user', JSON.stringify(data.user));
+    localStorage.setItem('token', token);
+  }
+  window.location.href = '/dashboard';
+}catch(ex){
+err.textContent = ex.message;
+err.classList.add('show');
+btn.disabled = false;
+loading.style.display = 'none';
+}
+});
+</script>
+</body>
+</html>

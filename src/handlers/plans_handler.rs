@@ -13,6 +13,7 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
+#[allow(dead_code)]
 pub struct Plan {
     pub id: Uuid,
     pub name: String,

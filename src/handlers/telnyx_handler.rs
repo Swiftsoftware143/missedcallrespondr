@@ -41,12 +41,14 @@ pub struct TelnyxConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct TelnyxWebhookPayload {
     pub data: Option<TelnyxWebhookData>,
     pub meta: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct TelnyxWebhookData {
     pub event_type: Option<String>,
     pub id: Option<String>,
@@ -55,6 +57,7 @@ pub struct TelnyxWebhookData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct TelnyxWebhookEventPayload {
     pub call_control_id: Option<String>,
     pub connection_id: Option<String>,

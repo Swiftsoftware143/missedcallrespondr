@@ -9,12 +9,10 @@ use crate::{
     auth::{handlers as auth_handlers, middleware::auth_middleware},
     handlers::{
         api_key_handler, call_handler, call_log_handler, contact_handler, dashboard_handler,
-        deals_handler, campaigns_handler, tickets_handler, email_templates_handler,
         follow_up_handler, integration_handler, portfolio_handler, integration_target_handler,
-        import_logs_handler, export_templates_handler, calendar_events_handler,
         message_handler, message_template_handler,
         response_rule_handler, settings_handler, voicemail_handler, provider_keys_handler,
-        telnyx_handler, triggers_handler, contact_custom_field_handler, checkout_handler,
+        telnyx_handler, contact_custom_field_handler, checkout_handler,
     },
     state::AppState,
 };

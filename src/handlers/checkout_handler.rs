@@ -844,12 +844,10 @@ async fn handle_checkout_completed(
         _ => None,
     };
 
-    if provider_session_id.is_none() {
+    let Some(provider_session_id) = provider_session_id else {
         tracing::warn!("Webhook received without provider session ID");
         return Ok(());
-    }
-
-    let provider_session_id = provider_session_id.unwrap();
+    };
 
     // Update the checkout session status
     let result = sqlx::query(

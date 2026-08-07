@@ -111,6 +111,7 @@ async fn send_inline(to: &str, template_type: &str, vars: &serde_json::Value, ap
 }
 
 /// Convenience wrapper — now uses DB template system
+#[allow(dead_code)]
 pub async fn send_welcome_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: &str, password: &str) -> Result<(), String> {
     let vars = json!({
         "name": name,
@@ -122,6 +123,7 @@ pub async fn send_welcome_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: 
 }
 
 /// Convenience wrapper — now uses DB template system
+#[allow(dead_code)]
 pub async fn send_purchase_confirmed_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: &str, plan_name: &str) -> Result<(), String> {
     let vars = json!({
         "name": name,
@@ -132,6 +134,7 @@ pub async fn send_purchase_confirmed_email(pool: &PgPool, tenant_id: Uuid, to: &
 }
 
 /// Convenience wrapper — now uses DB template system
+#[allow(dead_code)]
 pub async fn send_reset_email(pool: &PgPool, tenant_id: Uuid, to: &str, token: &str) -> Result<(), String> {
     let vars = json!({
         "token": token,
@@ -183,11 +186,14 @@ async fn send_email_request(to: &str, subject: &str, text_body: &str, html_body:
 
 #[derive(Debug, sqlx::FromRow)]
 struct EmailTemplateRow {
+    #[allow(dead_code)]
     id: Uuid,
+    #[allow(dead_code)]
     name: String,
     subject: Option<String>,
     body: Option<String>,
     html_body: Option<String>,
     is_html: Option<bool>,
+    #[allow(dead_code)]
     is_default: Option<bool>,
 }

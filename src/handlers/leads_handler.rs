@@ -9,42 +9,45 @@ use serde_json::json;
 
 #[derive(Deserialize)]
 pub struct ListQuery {
+    #[allow(dead_code)]
     pub limit: Option<i64>,
+    #[allow(dead_code)]
     pub offset: Option<i64>,
+    #[allow(dead_code)]
     pub search: Option<String>,
 }
 
 pub async fn list(
-    State(state): State<AppState>,
-    Query(query): Query<ListQuery>,
+    State(_state): State<AppState>,
+    Query(_query): Query<ListQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(json!([])))
 }
 
 pub async fn create(
-    State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
+    State(_state): State<AppState>,
+    Json(_body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(json!({"created": true})))
 }
 
 pub async fn get(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(json!({"id": id})))
 }
 
 pub async fn update(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<serde_json::Value>,
+    Json(_body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(json!({"updated": true, "id": id})))
 }
 
 pub async fn delete(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(json!({"deleted": true, "id": id})))
