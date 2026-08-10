@@ -26,6 +26,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/auth/forgot-password", post(auth_handlers::forgot_password))
         .route("/api/v1/auth/reset-password", post(auth_handlers::reset_password))
         .route("/api/v1/internal/portfolio-companies", post(portfolio_handler::internal_create_portfolio_company))
+        .route("/api/v1/internal/portfolio-sync", post(crate::handlers::portfolio_sync_handler::portfolio_sync_internal))
         .route("/api/v1/available-providers", get(provider_keys_handler::list_available_providers))
         // Telnyx webhook (public — Telnyx sends unauthenticated requests)
         .route("/api/v1/telnyx/webhook", post(telnyx_handler::webhook))
@@ -38,6 +39,7 @@ pub fn create_router(state: AppState) -> Router {
     // ── Protected routes (auth required) ──
     let protected_routes = Router::new()
         .route("/api/v1/auth/me", get(auth_handlers::me))
+        .route("/api/v1/me/usage", get(auth_handlers::get_usage))
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
         // Calls

@@ -1,7 +1,10 @@
 use axum::{
+
     extract::{Extension, State},
     Json,
 };
+
+use serde_json::Value;
 
 use crate::{
     config::{AuthResponse, Claims, LoginRequest, RegisterRequest, TeamMember, TeamMemberResponse, ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest},
@@ -319,3 +322,14 @@ pub async fn reset_password(
 
     Ok(Json(serde_json::json!({"message": "Password has been reset successfully"})))
 }
+
+
+pub async fn get_usage(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<Value>, AppError> {
+    let tid = claims.aid;
+    let usage = crate::features::get_usage_json(&state.pool, tid).await;
+    Ok(Json(usage))
+}
+

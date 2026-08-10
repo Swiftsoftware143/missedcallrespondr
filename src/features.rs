@@ -1,79 +1,95 @@
-//! Feature limits enforcement for MissedCall Respondr.
-
+//! Feature limits enforcement — reads limits from plans table.
 use crate::error::AppError;
-use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
-pub struct FeatureLimitResult {
-    pub allowed: bool,
-    pub limit: i32,
-    pub usage: i64,
-    pub feature_key: String,
-}
-
-pub async fn check_feature_limit(
+pub async fn enforce_feature_limit(
     pool: &PgPool,
     tenant_id: Uuid,
     feature_key: &str,
-) -> Result<FeatureLimitResult, AppError> {
-    let plan_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT plan_id FROM tenant_plans WHERE tenant_id = $1 AND status = 'active'"
+    label: &str,
+) -> Result<(), AppError> {
+    // Get plan slug from tenant_plans
+    let plan_slug: Option<String> = sqlx::query_scalar(
+        "SELECT p.slug FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id WHERE tp.tenant_id = $1 AND tp.status = 'active'"
     )
     .bind(tenant_id)
     .fetch_optional(pool)
     .await?
     .flatten();
 
-    let plan_id = match plan_id {
-        Some(id) => id,
-        None => return Ok(FeatureLimitResult { allowed: false, limit: 0, usage: 0, feature_key: feature_key.to_string() }),
+    let slug = match plan_slug {
+        Some(s) => s,
+        None => return Ok(()),
     };
 
-    let limit_value: Option<i32> = sqlx::query_scalar(
-        "SELECT limit_value FROM feature_limits WHERE plan_id = $1 AND feature_key = $2"
+    // Map feature key to plans table column
+    let plan_col = match feature_key {
+        "max_leads" | "leads" | "max_contacts" | "contacts" => "max_leads",
+        "max_tags" | "tags" => "max_tags",
+        _ => return Ok(()), // Unknown — allow
+    };
+
+    let limit: Option<i64> = sqlx::query_scalar(
+        &format!("SELECT {} FROM plans WHERE slug = $1", plan_col)
     )
-    .bind(plan_id)
-    .bind(feature_key)
+    .bind(&slug)
     .fetch_optional(pool)
     .await?
     .flatten();
 
-    let limit_value = match limit_value {
-        Some(v) => v,
-        None => return Ok(FeatureLimitResult { allowed: false, limit: 0, usage: 0, feature_key: feature_key.to_string() }),
-    };
-
-    if limit_value == -1 {
-        return Ok(FeatureLimitResult { allowed: true, limit: -1, usage: 0, feature_key: feature_key.to_string() });
+    match limit {
+        None | Some(-1) => Ok(()),
+        Some(0) => Err(AppError::UpgradeRequired(
+            format!("{} is not available on your current plan. Upgrade to access this feature.", label)
+        )),
+        Some(limit) => {
+            let usage = count_usage(pool, tenant_id, feature_key).await?;
+            if usage >= limit {
+                Err(AppError::UpgradeRequired(
+                    format!("{} limit reached ({}/{}). Upgrade to increase your limit.", label, usage, limit)
+                ))
+            } else {
+                Ok(())
+            }
+        }
     }
+}
 
-    let usage: i64 = match feature_key {
-        "max_phone_numbers" => sqlx::query_scalar("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?,
-        "max_rules" => sqlx::query_scalar("SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?,
-        "max_contacts" => sqlx::query_scalar("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?,
-        "max_users" => sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND is_active = true").bind(tenant_id).fetch_one(pool).await?,
-        _ => 0i64,
-    };
-
-    Ok(FeatureLimitResult {
-        allowed: usage < limit_value as i64,
-        limit: limit_value,
-        usage,
-        feature_key: feature_key.to_string(),
+pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value {
+    let contacts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await.unwrap_or(0);
+    let phone_numbers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await.unwrap_or(0);
+    let rules: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await.unwrap_or(0);
+    let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND is_active = true").bind(tenant_id).fetch_one(pool).await.unwrap_or(0);
+    serde_json::json!({
+        "contacts": contacts,
+        "phone_numbers": phone_numbers,
+        "rules": rules,
+        "users": users
     })
 }
 
-pub async fn enforce_feature_limit(pool: &PgPool, tenant_id: Uuid, feature_key: &str, label: &str) -> Result<(), AppError> {
-    let result = check_feature_limit(pool, tenant_id, feature_key).await?;
-    if !result.allowed {
-        let msg = if result.limit == 0 {
-            format!("{} is not available on your current plan. Upgrade to access this feature.", label)
-        } else {
-            format!("{} limit reached ({}/{})", label, result.usage, result.limit)
-        };
-        return Err(AppError::BadRequest(msg));
+async fn count_usage(pool: &PgPool, tenant_id: Uuid, feature_key: &str) -> Result<i64, AppError> {
+    match feature_key {
+        "max_leads" | "leads" | "max_contacts" | "contacts" =>
+            Ok(sqlx::query_scalar("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?),
+        "max_tags" | "tags" =>
+            Ok(sqlx::query_scalar("SELECT COUNT(*) FROM tags WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?),
+        "max_phone_numbers" | "phone_numbers" =>
+            Ok(sqlx::query_scalar("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?),
+        "max_rules" | "rules" =>
+            Ok(sqlx::query_scalar("SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1").bind(tenant_id).fetch_one(pool).await?),
+        "max_users" | "users" =>
+            Ok(sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND is_active = true").bind(tenant_id).fetch_one(pool).await?),
+        _ => Ok(0)
     }
-    Ok(())
+}
+
+/// Backwards-compat wrapper
+pub async fn check_feature_limit(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    feature_key: &str,
+) -> Result<(), AppError> {
+    enforce_feature_limit(pool, tenant_id, feature_key, feature_key).await
 }

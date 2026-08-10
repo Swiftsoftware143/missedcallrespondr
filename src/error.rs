@@ -12,6 +12,7 @@ pub enum AppError {
     NotFound(String),
     Internal(String),
     Conflict(String),
+    UpgradeRequired(String),
 }
 
 impl IntoResponse for AppError {
@@ -22,6 +23,7 @@ impl IntoResponse for AppError {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            AppError::UpgradeRequired(msg) => (StatusCode::PAYMENT_REQUIRED, msg),
         };
         (status, Json(json!({"error": message}))).into_response()
     }
