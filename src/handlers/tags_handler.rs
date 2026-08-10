@@ -6,8 +6,8 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use uuid::Uuid;
 use sqlx::Row;
+use uuid::Uuid;
 
 use crate::{config::Claims, error::AppError, state::AppState};
 
@@ -49,7 +49,7 @@ pub async fn list(
             WHERE t.tenant_id = $1 AND t.group_id = $2
             ORDER BY t.name
             LIMIT $3 OFFSET $4
-            "#
+            "#,
         )
         .bind(claims.aid)
         .bind(group_id)
@@ -77,7 +77,7 @@ pub async fn list(
             WHERE t.tenant_id = $1 AND t.name ILIKE $2
             ORDER BY t.name
             LIMIT $3 OFFSET $4
-            "#
+            "#,
         )
         .bind(claims.aid)
         .bind(&pattern)
@@ -104,7 +104,7 @@ pub async fn list(
             WHERE t.tenant_id = $1
             ORDER BY t.name
             LIMIT $2 OFFSET $3
-            "#
+            "#,
         )
         .bind(claims.aid)
         .bind(limit)
@@ -139,19 +139,23 @@ pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let name = body.get("name")
+    let name = body
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("name is required".into()))?;
 
-    let color = body.get("color")
+    let color = body
+        .get("color")
         .and_then(|v| v.as_str())
         .unwrap_or("#6366f1");
 
-    let group_id: Option<Uuid> = body.get("group_id")
+    let group_id: Option<Uuid> = body
+        .get("group_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
 
-    let sync_to_core = body.get("sync_to_core")
+    let sync_to_core = body
+        .get("sync_to_core")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
@@ -215,7 +219,7 @@ pub async fn get(
         FROM tags t
         LEFT JOIN tag_groups tg ON t.group_id = tg.id
         WHERE t.id = $1 AND t.tenant_id = $2
-        "#
+        "#,
     )
     .bind(id)
     .bind(claims.aid)
@@ -293,7 +297,7 @@ pub async fn update(
         FROM tags t
         LEFT JOIN tag_groups tg ON t.group_id = tg.id
         WHERE t.id = $1
-        "#
+        "#,
     )
     .bind(id)
     .fetch_one(&state.pool)

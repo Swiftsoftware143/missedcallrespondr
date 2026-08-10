@@ -1,4 +1,4 @@
-use axum::extract::{Path, State, Extension};
+use axum::extract::{Extension, Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -53,7 +53,7 @@ pub fn mask_key(key: &str) -> String {
         return String::from("****");
     }
     let first3 = &key[..3];
-    let last3 = &key[key.len()-3..];
+    let last3 = &key[key.len() - 3..];
     format!("{}...{}", first3, last3)
 }
 
@@ -73,8 +73,9 @@ pub async fn list_provider_keys(
     .fetch_all(&state.pool)
     .await?;
 
-    let masked: Vec<MaskedProviderKey> = keys.into_iter().map(|k| {
-        MaskedProviderKey {
+    let masked: Vec<MaskedProviderKey> = keys
+        .into_iter()
+        .map(|k| MaskedProviderKey {
             id: k.id,
             tenant_id: k.tenant_id,
             provider: k.provider,
@@ -85,8 +86,8 @@ pub async fn list_provider_keys(
             scope: k.scope,
             created_at: k.created_at,
             updated_at: k.updated_at,
-        }
-    }).collect();
+        })
+        .collect();
 
     Ok(Json(masked))
 }
@@ -99,21 +100,23 @@ pub async fn upsert_provider_key(
     let tenant_id: Uuid = claims.aid;
 
     // Verify provider exists
-    let exists = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM available_providers WHERE key = $1"
-    )
-    .bind(&req.provider)
-    .fetch_one(&state.pool)
-    .await?;
+    let exists =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM available_providers WHERE key = $1")
+            .bind(&req.provider)
+            .fetch_one(&state.pool)
+            .await?;
 
     if exists == 0 {
-        return Err(AppError::BadRequest(format!("Unknown provider: {}", req.provider)));
+        return Err(AppError::BadRequest(format!(
+            "Unknown provider: {}",
+            req.provider
+        )));
     }
 
     // BYOK gate: when saving a telnyx key, check the tenant's plan allows BYOK
     if req.provider == "telnyx" {
         let plan_id: Option<Uuid> = sqlx::query_scalar(
-            "SELECT plan_id FROM tenant_plans WHERE tenant_id = $1 AND status = 'active'"
+            "SELECT plan_id FROM tenant_plans WHERE tenant_id = $1 AND status = 'active'",
         )
         .bind(tenant_id)
         .fetch_optional(&state.pool)
@@ -140,9 +143,9 @@ pub async fn upsert_provider_key(
                 ));
             }
         } else {
-            return Err(AppError::BadRequest(
-                String::from("You do not have an active plan. Select a plan before configuring BYOK.")
-            ));
+            return Err(AppError::BadRequest(String::from(
+                "You do not have an active plan. Select a plan before configuring BYOK.",
+            )));
         }
     }
 
@@ -157,7 +160,7 @@ pub async fn upsert_provider_key(
                        metadata = COALESCE(EXCLUDED.metadata, provider_keys.metadata),
                        scope = EXCLUDED.scope,
                        updated_at = NOW()
-         RETURNING *"
+         RETURNING *",
     )
     .bind(tenant_id)
     .bind(&req.provider)
@@ -184,13 +187,11 @@ pub async fn delete_provider_key(
 ) -> ApiResult<Json<Value>> {
     let tenant_id: Uuid = claims.aid;
 
-    let result = sqlx::query(
-        "DELETE FROM provider_keys WHERE tenant_id = $1 AND provider = $2"
-    )
-    .bind(tenant_id)
-    .bind(&provider)
-    .execute(&state.pool)
-    .await?;
+    let result = sqlx::query("DELETE FROM provider_keys WHERE tenant_id = $1 AND provider = $2")
+        .bind(tenant_id)
+        .bind(&provider)
+        .execute(&state.pool)
+        .await?;
 
     if result.rows_affected() == 0 {
         let err_msg = "Provider key not found".to_string();
@@ -206,7 +207,7 @@ pub async fn list_available_providers(
 ) -> ApiResult<Json<Vec<Value>>> {
     let rows = sqlx::query(
         "SELECT key, name, description, requires_base_url, requires_metadata, icon
-         FROM available_providers ORDER BY name "
+         FROM available_providers ORDER BY name ",
     )
     .fetch_all(&state.pool)
     .await?;

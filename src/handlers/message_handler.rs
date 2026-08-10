@@ -63,13 +63,12 @@ pub async fn get_message(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Message>, AppError> {
-    let item = sqlx::query_as::<_, Message>(
-        "SELECT * FROM messages WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(claims.aid)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
+    let item =
+        sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
     Ok(Json(item))
 }

@@ -7,8 +7,9 @@ use uuid::Uuid;
 use crate::{
     config::Claims,
     error::AppError,
+    features,
     models::response_rule::{CreateResponseRuleRequest, ResponseRule, UpdateResponseRuleRequest},
-    state::AppState, features,
+    state::AppState,
 };
 
 pub async fn list_response_rules(
@@ -108,5 +109,7 @@ pub async fn delete_response_rule(
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Response rule not found".into()));
     }
-    Ok(Json(serde_json::json!({"message": "Response rule deleted"})))
+    Ok(Json(
+        serde_json::json!({"message": "Response rule deleted"}),
+    ))
 }

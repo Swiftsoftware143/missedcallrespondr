@@ -1,9 +1,9 @@
 use argon2::{
-    password_hash::{rand_core::OsRng, SaltString, PasswordHasher},
+    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
 };
 use axum::{
-    extract::{Path, State, Extension},
+    extract::{Extension, Path, State},
     http::StatusCode,
     Json,
 };
@@ -12,9 +12,9 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::features;
 use crate::config::Claims;
 use crate::error::AppError;
+use crate::features;
 use crate::state::AppState;
 
 fn generate_api_key() -> (String, String) {
@@ -42,7 +42,10 @@ pub async fn create_api_key(
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let tenant_id: Uuid = claims.aid;
     features::enforce_feature_limit(&state.pool, tenant_id, "max_api_keys", "Api Keys").await?;
-    let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("default");
+    let name = req
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
     let target_url = req.get("target_url").and_then(|v| v.as_str()).unwrap_or("");
 
     let (raw_key, prefix) = generate_api_key();
@@ -85,15 +88,18 @@ pub async fn list_api_keys(
     .fetch_all(&state.pool)
     .await?;
 
-    let keys: Vec<serde_json::Value> = rows.iter().map(|row| {
-        json!({
-            "id": row.try_get::<&str, _>("id").unwrap_or(""),
-            "name": row.try_get::<&str, _>("name").unwrap_or(""),
-            "prefix": row.try_get::<&str, _>("prefix").unwrap_or(""),
-            "target_url": row.try_get::<Option<&str>, _>("target_url").unwrap_or(None),
-            "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+    let keys: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<&str, _>("id").unwrap_or(""),
+                "name": row.try_get::<&str, _>("name").unwrap_or(""),
+                "prefix": row.try_get::<&str, _>("prefix").unwrap_or(""),
+                "target_url": row.try_get::<Option<&str>, _>("target_url").unwrap_or(None),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(json!({"api_keys": keys})))
 }
@@ -105,7 +111,7 @@ pub async fn update_api_key(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM api_keys WHERE id = $1 AND tenant_id = $2"
+        "SELECT COUNT(*) FROM api_keys WHERE id = $1 AND tenant_id = $2",
     )
     .bind(id)
     .bind(claims.aid)

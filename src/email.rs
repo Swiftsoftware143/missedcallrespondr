@@ -1,6 +1,6 @@
-use std::env;
 use serde_json::json;
 use sqlx::PgPool;
+use std::env;
 use uuid::Uuid;
 
 /// Render a template string by replacing {{key}} placeholders with values from `vars`.
@@ -36,7 +36,7 @@ pub async fn send_template_email(
            FROM email_templates
            WHERE template_type = $1 AND (aid = $2 OR is_default = true)
            ORDER BY is_default ASC, created_at DESC
-           LIMIT 1"#
+           LIMIT 1"#,
     )
     .bind(template_type)
     .bind(tenant_id)
@@ -48,20 +48,27 @@ pub async fn send_template_email(
     match template {
         Some(t) => {
             let subject = render_template(
-                &t.subject.unwrap_or_else(|| get_default_subject(template_type, app_name)),
+                &t.subject
+                    .unwrap_or_else(|| get_default_subject(template_type, app_name)),
                 vars,
             );
-            let html_body = t.html_body.as_ref()
+            let html_body = t
+                .html_body
+                .as_ref()
                 .map(|h| render_template(h, vars))
                 .unwrap_or_default();
             let text_body = render_template(&t.body.unwrap_or_default(), vars);
             let use_html = t.is_html.unwrap_or(true);
 
-            send_email_request(to, &subject, &text_body, if use_html { &html_body } else { "" }).await
+            send_email_request(
+                to,
+                &subject,
+                &text_body,
+                if use_html { &html_body } else { "" },
+            )
+            .await
         }
-        None => {
-            send_inline(to, template_type, vars, app_name, app_url).await
-        }
+        None => send_inline(to, template_type, vars, app_name, app_url).await,
     }
 }
 
@@ -74,12 +81,21 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
     }
 }
 
-async fn send_inline(to: &str, template_type: &str, vars: &serde_json::Value, app_name: &str, app_url: &str) -> Result<(), String> {
+async fn send_inline(
+    to: &str,
+    template_type: &str,
+    vars: &serde_json::Value,
+    app_name: &str,
+    app_url: &str,
+) -> Result<(), String> {
     let name = vars.get("name").and_then(|v| v.as_str()).unwrap_or("there");
     let email = vars.get("email").and_then(|v| v.as_str()).unwrap_or("");
     let password = vars.get("password").and_then(|v| v.as_str()).unwrap_or("");
     let token = vars.get("token").and_then(|v| v.as_str()).unwrap_or("");
-    let plan_name_val = vars.get("plan_name").and_then(|v| v.as_str()).unwrap_or("a plan");
+    let plan_name_val = vars
+        .get("plan_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("a plan");
 
     match template_type {
         "welcome" => {
@@ -112,7 +128,13 @@ async fn send_inline(to: &str, template_type: &str, vars: &serde_json::Value, ap
 
 /// Convenience wrapper — now uses DB template system
 #[allow(dead_code)]
-pub async fn send_welcome_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: &str, password: &str) -> Result<(), String> {
+pub async fn send_welcome_email(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    to: &str,
+    name: &str,
+    password: &str,
+) -> Result<(), String> {
     let vars = json!({
         "name": name,
         "email": to,
@@ -124,7 +146,13 @@ pub async fn send_welcome_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: 
 
 /// Convenience wrapper — now uses DB template system
 #[allow(dead_code)]
-pub async fn send_purchase_confirmed_email(pool: &PgPool, tenant_id: Uuid, to: &str, name: &str, plan_name: &str) -> Result<(), String> {
+pub async fn send_purchase_confirmed_email(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    to: &str,
+    name: &str,
+    plan_name: &str,
+) -> Result<(), String> {
     let vars = json!({
         "name": name,
         "plan_name": plan_name,
@@ -135,7 +163,12 @@ pub async fn send_purchase_confirmed_email(pool: &PgPool, tenant_id: Uuid, to: &
 
 /// Convenience wrapper — now uses DB template system
 #[allow(dead_code)]
-pub async fn send_reset_email(pool: &PgPool, tenant_id: Uuid, to: &str, token: &str) -> Result<(), String> {
+pub async fn send_reset_email(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    to: &str,
+    token: &str,
+) -> Result<(), String> {
     let vars = json!({
         "token": token,
         "name": "there",
@@ -145,13 +178,15 @@ pub async fn send_reset_email(pool: &PgPool, tenant_id: Uuid, to: &str, token: &
 }
 
 /// Core email sender — sends via HTTP API (Mailgun, SendGrid, SMTP.com, etc.)
-async fn send_email_request(to: &str, subject: &str, text_body: &str, html_body: &str) -> Result<(), String> {
-    let api_url = env::var("EMAIL_API_URL")
-        .map_err(|_| "EMAIL_API_URL not set".to_string())?;
-    let api_key = env::var("EMAIL_API_KEY")
-        .map_err(|_| "EMAIL_API_KEY not set".to_string())?;
-    let from = env::var("EMAIL_FROM")
-        .unwrap_or_else(|_| "swiftsoftware143@yahoo.com".to_string());
+async fn send_email_request(
+    to: &str,
+    subject: &str,
+    text_body: &str,
+    html_body: &str,
+) -> Result<(), String> {
+    let api_url = env::var("EMAIL_API_URL").map_err(|_| "EMAIL_API_URL not set".to_string())?;
+    let api_key = env::var("EMAIL_API_KEY").map_err(|_| "EMAIL_API_KEY not set".to_string())?;
+    let from = env::var("EMAIL_FROM").unwrap_or_else(|_| "swiftsoftware143@yahoo.com".to_string());
 
     let mut payload = json!({
         "from": from,
@@ -161,7 +196,8 @@ async fn send_email_request(to: &str, subject: &str, text_body: &str, html_body:
     });
 
     if !html_body.is_empty() {
-        payload.as_object_mut()
+        payload
+            .as_object_mut()
             .map(|m| m.insert("html".to_string(), json!(html_body)));
     }
 

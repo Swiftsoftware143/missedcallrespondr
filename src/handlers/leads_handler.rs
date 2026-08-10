@@ -1,9 +1,12 @@
 //! Leads handler
 //! Generated during endpoint restoration.
 
-use axum::{extract::{Path, Query, State}, Json};
 use crate::error::AppError;
 use crate::state::AppState;
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
 use serde::Deserialize;
 use serde_json::json;
 

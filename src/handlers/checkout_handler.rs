@@ -10,12 +10,12 @@
 //! - POST   /api/v1/webhooks/paypal            (PayPal webhook receiver — no auth)
 
 use axum::{
-    extract::{State, Json, Path},
+    extract::{Json, Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Extension,
 };
-use base64::{Engine as _, engine::general_purpose};
+use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
@@ -34,9 +34,7 @@ type ApiResult<T> = Result<T, AppError>;
 
 /// GET /api/v1/payment-providers
 /// List all configured payment providers (keys masked)
-pub async fn list_payment_providers(
-    State(state): State<AppState>,
-) -> ApiResult<impl IntoResponse> {
+pub async fn list_payment_providers(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
     let rows = sqlx::query(
         r#"SELECT id, provider_type, label, is_active,
                   CASE WHEN api_key_encrypted IS NOT NULL AND api_key_encrypted != '' THEN 'configured' ELSE 'not_configured' END as key_status,
@@ -48,22 +46,25 @@ pub async fn list_payment_providers(
     .fetch_all(&state.pool)
     .await?;
 
-    let providers: Vec<Value> = rows.iter().map(|r| {
-        json!({
-            "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
-            "provider_type": r.try_get::<&str,_>("provider_type").unwrap_or(""),
-            "label": r.try_get::<&str,_>("label").unwrap_or(""),
-            "is_active": r.try_get::<bool,_>("is_active").unwrap_or(false),
-            "key_status": r.try_get::<&str,_>("key_status").unwrap_or("not_configured"),
-            "publishable_key": r.try_get::<&str,_>("publishable_key").unwrap_or(""),
-            "is_test_mode": r.try_get::<bool,_>("is_test_mode").unwrap_or(true),
-            "config": r.try_get::<Value,_>("config").unwrap_or(json!({})),
-            "created_at": r.try_get::<chrono::DateTime<chrono::Utc>,_>("created_at")
-                .map(|t| t.to_rfc3339()).unwrap_or_default(),
-            "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>,_>("updated_at")
-                .map(|t| t.to_rfc3339()).unwrap_or_default(),
+    let providers: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
+                "provider_type": r.try_get::<&str,_>("provider_type").unwrap_or(""),
+                "label": r.try_get::<&str,_>("label").unwrap_or(""),
+                "is_active": r.try_get::<bool,_>("is_active").unwrap_or(false),
+                "key_status": r.try_get::<&str,_>("key_status").unwrap_or("not_configured"),
+                "publishable_key": r.try_get::<&str,_>("publishable_key").unwrap_or(""),
+                "is_test_mode": r.try_get::<bool,_>("is_test_mode").unwrap_or(true),
+                "config": r.try_get::<Value,_>("config").unwrap_or(json!({})),
+                "created_at": r.try_get::<chrono::DateTime<chrono::Utc>,_>("created_at")
+                    .map(|t| t.to_rfc3339()).unwrap_or_default(),
+                "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>,_>("updated_at")
+                    .map(|t| t.to_rfc3339()).unwrap_or_default(),
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(json!({"providers": providers})))
 }
@@ -77,38 +78,58 @@ pub async fn upsert_payment_provider(
 ) -> ApiResult<impl IntoResponse> {
     // Super admin only
     if claims.role != "super_admin" {
-        return Err(AppError::Unauthorized("Only super admins can manage payment providers".into()));
+        return Err(AppError::Unauthorized(
+            "Only super admins can manage payment providers".into(),
+        ));
     }
 
-    let provider_type = req.get("provider_type")
+    let provider_type = req
+        .get("provider_type")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| AppError::BadRequest("provider_type is required (stripe, paypal, square, paddle)".into()))?;
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "provider_type is required (stripe, paypal, square, paddle)".into(),
+            )
+        })?;
 
     if !["stripe", "paypal", "square", "paddle"].contains(&provider_type) {
-        return Err(AppError::BadRequest("Invalid provider_type. Must be stripe, paypal, square, or paddle".into()));
+        return Err(AppError::BadRequest(
+            "Invalid provider_type. Must be stripe, paypal, square, or paddle".into(),
+        ));
     }
 
     let label = req.get("label").and_then(|v| v.as_str()).unwrap_or("");
-    let is_active = req.get("is_active").and_then(|v| v.as_bool()).unwrap_or(false);
-    let is_test_mode = req.get("is_test_mode").and_then(|v| v.as_bool()).unwrap_or(true);
-    let publishable_key = req.get("publishable_key").and_then(|v| v.as_str()).unwrap_or("");
+    let is_active = req
+        .get("is_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let is_test_mode = req
+        .get("is_test_mode")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let publishable_key = req
+        .get("publishable_key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let config = req.get("config").cloned().unwrap_or(json!({}));
     let api_key = req.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
-    let webhook_secret = req.get("webhook_secret").and_then(|v| v.as_str()).unwrap_or("");
+    let webhook_secret = req
+        .get("webhook_secret")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     // Check if provider already exists
-    let existing = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM payment_providers WHERE provider_type = $1"
-    )
-    .bind(provider_type)
-    .fetch_optional(&state.pool)
-    .await?;
+    let existing =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM payment_providers WHERE provider_type = $1")
+            .bind(provider_type)
+            .fetch_optional(&state.pool)
+            .await?;
 
     if let Some(provider_id) = existing {
         // Update — only overwrite api_key/webhook_secret if provided
         let mut query = String::from(
             "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, \
-             publishable_key = $4, config = $5, updated_at = NOW()"
+             publishable_key = $4, config = $5, updated_at = NOW()",
         );
         let mut param_idx = 6u8;
 
@@ -147,14 +168,16 @@ pub async fn upsert_payment_provider(
     } else {
         // Insert
         if api_key.is_empty() {
-            return Err(AppError::BadRequest("api_key is required when creating a new provider".into()));
+            return Err(AppError::BadRequest(
+                "api_key is required when creating a new provider".into(),
+            ));
         }
 
         sqlx::query(
             r#"INSERT INTO payment_providers
                (provider_type, label, is_active, api_key_encrypted, webhook_secret_encrypted,
                 publishable_key, config, is_test_mode)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
         )
         .bind(provider_type)
         .bind(label)
@@ -184,7 +207,9 @@ pub async fn delete_payment_provider(
 ) -> ApiResult<impl IntoResponse> {
     // Super admin only
     if claims.role != "super_admin" {
-        return Err(AppError::Unauthorized("Only super admins can manage payment providers".into()));
+        return Err(AppError::Unauthorized(
+            "Only super admins can manage payment providers".into(),
+        ));
     }
 
     let result = sqlx::query("DELETE FROM payment_providers WHERE provider_type = $1")
@@ -193,10 +218,15 @@ pub async fn delete_payment_provider(
         .await?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Payment provider '{}' not found", provider_type)));
+        return Err(AppError::NotFound(format!(
+            "Payment provider '{}' not found",
+            provider_type
+        )));
     }
 
-    Ok(Json(json!({"status": "deleted", "provider_type": provider_type})))
+    Ok(Json(
+        json!({"status": "deleted", "provider_type": provider_type}),
+    ))
 }
 
 // ──────────────────────────────────────────────
@@ -241,7 +271,8 @@ pub async fn create_checkout_session(
     let tenant_id: Uuid = claims.aid;
     let user_id: Uuid = claims.sub;
 
-    let purchasable_type = req.get("purchasable_type")
+    let purchasable_type = req
+        .get("purchasable_type")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("purchasable_type is required".into()))?;
 
@@ -249,44 +280,64 @@ pub async fn create_checkout_session(
     let provider_type = if let Some(pt) = req.get("provider_type").and_then(|v| v.as_str()) {
         pt.to_string()
     } else if purchasable_type == "plan" {
-        if let Some(pid) = req.get("purchasable_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()) {
-            sqlx::query_scalar::<_, Option<String>>("SELECT payment_provider FROM plans WHERE id = $1")
-                .bind(pid)
-                .fetch_optional(&state.pool)
-                .await?
-                .flatten()
-                .ok_or_else(|| AppError::BadRequest("No provider_type specified and plan has no payment_provider set".into()))?
+        if let Some(pid) = req
+            .get("purchasable_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+        {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT payment_provider FROM plans WHERE id = $1",
+            )
+            .bind(pid)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten()
+            .ok_or_else(|| {
+                AppError::BadRequest(
+                    "No provider_type specified and plan has no payment_provider set".into(),
+                )
+            })?
         } else {
-            return Err(AppError::BadRequest("purchasable_id is required for plan checkout".into()));
+            return Err(AppError::BadRequest(
+                "purchasable_id is required for plan checkout".into(),
+            ));
         }
     } else {
-        return Err(AppError::BadRequest("provider_type is required (stripe, paypal)".into()));
+        return Err(AppError::BadRequest(
+            "provider_type is required (stripe, paypal)".into(),
+        ));
     };
 
-    let amount = req.get("amount")
+    let amount = req
+        .get("amount")
         .and_then(|v| v.as_f64())
         .ok_or_else(|| AppError::BadRequest("amount is required".into()))?;
 
-    let currency = req.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
-    let purchasable_id = req.get("purchasable_id").and_then(|v| v.as_str())
+    let currency = req
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .unwrap_or("USD");
+    let purchasable_id = req
+        .get("purchasable_id")
+        .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
 
     let success_url = if let Some(url) = req.get("success_url").and_then(|v| v.as_str()) {
         url.to_string()
     } else if let Some(pid) = purchasable_id {
-        sqlx::query_scalar::<_, Option<String>>(
-            "SELECT thank_you_url FROM plans WHERE id = $1"
-        )
-        .bind(pid)
-        .fetch_optional(&state.pool)
-        .await?
-        .flatten()
-        .unwrap_or_else(|| "/thank-you.html".to_string())
+        sqlx::query_scalar::<_, Option<String>>("SELECT thank_you_url FROM plans WHERE id = $1")
+            .bind(pid)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten()
+            .unwrap_or_else(|| "/thank-you.html".to_string())
     } else {
         "/thank-you.html".to_string()
     };
 
-    let cancel_url = req.get("cancel_url").and_then(|v| v.as_str())
+    let cancel_url = req
+        .get("cancel_url")
+        .and_then(|v| v.as_str())
         .unwrap_or("/");
 
     let metadata = req.get("metadata").cloned().unwrap_or(json!({}));
@@ -294,18 +345,50 @@ pub async fn create_checkout_session(
     // Get the active provider config
     let provider = get_active_provider(&state.pool, &provider_type)
         .await?
-        .ok_or_else(|| AppError::BadRequest(format!("No active {} provider configured", provider_type)))?;
+        .ok_or_else(|| {
+            AppError::BadRequest(format!("No active {} provider configured", provider_type))
+        })?;
 
     let api_key = provider["api_key"].as_str().unwrap_or("").to_string();
     if api_key.is_empty() {
-        return Err(AppError::BadRequest(format!("{} API key not configured", provider_type)));
+        return Err(AppError::BadRequest(format!(
+            "{} API key not configured",
+            provider_type
+        )));
     }
 
     // Create checkout session with the provider
     let provider_session = match provider_type.as_str() {
-        "stripe" => create_stripe_session(&api_key, amount, currency, purchasable_type, &success_url, cancel_url, &metadata).await?,
-        "paypal" => create_paypal_session(&api_key, amount, currency, purchasable_type, &success_url, cancel_url, &metadata).await?,
-        _ => return Err(AppError::BadRequest(format!("Checkout not supported for provider type: {}", provider_type))),
+        "stripe" => {
+            create_stripe_session(
+                &api_key,
+                amount,
+                currency,
+                purchasable_type,
+                &success_url,
+                cancel_url,
+                &metadata,
+            )
+            .await?
+        }
+        "paypal" => {
+            create_paypal_session(
+                &api_key,
+                amount,
+                currency,
+                purchasable_type,
+                &success_url,
+                cancel_url,
+                &metadata,
+            )
+            .await?
+        }
+        _ => {
+            return Err(AppError::BadRequest(format!(
+                "Checkout not supported for provider type: {}",
+                provider_type
+            )))
+        }
     };
 
     let provider_session_id = provider_session["id"].as_str().unwrap_or("");
@@ -317,7 +400,7 @@ pub async fn create_checkout_session(
         r#"INSERT INTO checkout_sessions
            (id, account_id, user_id, provider_type, provider_session_id,
             purchasable_type, purchasable_id, amount, currency, status, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)"#
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)"#,
     )
     .bind(session_id)
     .bind(tenant_id)
@@ -399,11 +482,14 @@ async fn create_stripe_session(
         .map_err(|e| AppError::Internal(format!("Stripe API error: {}", e)))?;
 
     let status = resp.status();
-    let response_body: Value = resp.json().await
+    let response_body: Value = resp
+        .json()
+        .await
         .map_err(|e| AppError::Internal(format!("Failed to parse Stripe response: {}", e)))?;
 
     if !status.is_success() {
-        let error_msg = response_body["error"]["message"].as_str()
+        let error_msg = response_body["error"]["message"]
+            .as_str()
             .unwrap_or("Unknown Stripe error");
         return Err(AppError::Internal(format!("Stripe error: {}", error_msg)));
     }
@@ -429,17 +515,23 @@ async fn create_paypal_session(
     // PayPal requires an access token first
     let token_resp = client
         .post("https://api-m.paypal.com/v1/oauth2/token")
-        .header("Authorization", format!("Basic {}", base64_encode_auth(api_key)))
+        .header(
+            "Authorization",
+            format!("Basic {}", base64_encode_auth(api_key)),
+        )
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body("grant_type=client_credentials")
         .send()
         .await
         .map_err(|e| AppError::Internal(format!("PayPal auth error: {}", e)))?;
 
-    let token_body: Value = token_resp.json().await
+    let token_body: Value = token_resp
+        .json()
+        .await
         .map_err(|e| AppError::Internal(format!("Failed to parse PayPal auth response: {}", e)))?;
 
-    let access_token = token_body["access_token"].as_str()
+    let access_token = token_body["access_token"]
+        .as_str()
         .ok_or_else(|| AppError::Internal("Failed to get PayPal access token".into()))?;
 
     // Create the order
@@ -475,20 +567,25 @@ async fn create_paypal_session(
         .map_err(|e| AppError::Internal(format!("PayPal order error: {}", e)))?;
 
     let order_status = order_resp.status();
-    let order_body: Value = order_resp.json().await
+    let order_body: Value = order_resp
+        .json()
+        .await
         .map_err(|e| AppError::Internal(format!("Failed to parse PayPal order response: {}", e)))?;
 
     if !order_status.is_success() {
-        let error_msg = order_body["message"].as_str()
+        let error_msg = order_body["message"]
+            .as_str()
             .or_else(|| order_body["error_description"].as_str())
             .unwrap_or("Unknown PayPal error");
         return Err(AppError::Internal(format!("PayPal error: {}", error_msg)));
     }
 
     // Get the approval URL from the links
-    let approval_url = order_body["links"].as_array()
+    let approval_url = order_body["links"]
+        .as_array()
         .and_then(|links| {
-            links.iter()
+            links
+                .iter()
                 .find(|l| l["rel"].as_str() == Some("approve"))
                 .and_then(|l| l["href"].as_str())
         })
@@ -542,11 +639,15 @@ pub async fn stripe_webhook(
     };
 
     // Log the webhook event
-    let db_status = if verification_ok { "received" } else { "failed" };
+    let db_status = if verification_ok {
+        "received"
+    } else {
+        "failed"
+    };
     sqlx::query(
         r#"INSERT INTO payment_webhook_events
            (provider_type, event_type, event_id, raw_body, headers, status)
-           VALUES ('stripe', $1, $2, $3, $4, $5)"#
+           VALUES ('stripe', $1, $2, $3, $4, $5)"#,
     )
     .bind(event_type)
     .bind(event_id)
@@ -557,7 +658,10 @@ pub async fn stripe_webhook(
     .await?;
 
     if !verification_ok {
-        return Ok((StatusCode::OK, Json(json!({"status": "ignored", "reason": "signature_verification_failed"}))));
+        return Ok((
+            StatusCode::OK,
+            Json(json!({"status": "ignored", "reason": "signature_verification_failed"})),
+        ));
     }
 
     // Handle the event
@@ -572,12 +676,10 @@ pub async fn stripe_webhook(
             }
         }
         _ => {
-            sqlx::query(
-                "UPDATE payment_webhook_events SET status = 'ignored' WHERE event_id = $1"
-            )
-            .bind(event_id)
-            .execute(&state.pool)
-            .await?;
+            sqlx::query("UPDATE payment_webhook_events SET status = 'ignored' WHERE event_id = $1")
+                .bind(event_id)
+                .execute(&state.pool)
+                .await?;
         }
     }
 
@@ -599,14 +701,17 @@ pub async fn paypal_webhook(
 
     // Log the webhook event
     let mut hdrs = json!({});
-    if let Some(trans_id) = headers.get("paypal-transmission-id").and_then(|v| v.to_str().ok()) {
+    if let Some(trans_id) = headers
+        .get("paypal-transmission-id")
+        .and_then(|v| v.to_str().ok())
+    {
         hdrs["paypal-transmission-id"] = json!(trans_id);
     }
 
     sqlx::query(
         r#"INSERT INTO payment_webhook_events
            (provider_type, event_type, event_id, raw_body, headers, status)
-           VALUES ('paypal', $1, $2, $3, $4, 'received')"#
+           VALUES ('paypal', $1, $2, $3, $4, 'received')"#,
     )
     .bind(event_type)
     .bind(event_id)
@@ -620,12 +725,10 @@ pub async fn paypal_webhook(
             handle_checkout_completed(&state, &event_body, "paypal").await?;
         }
         _ => {
-            sqlx::query(
-                "UPDATE payment_webhook_events SET status = 'ignored' WHERE event_id = $1"
-            )
-            .bind(event_id)
-            .execute(&state.pool)
-            .await?;
+            sqlx::query("UPDATE payment_webhook_events SET status = 'ignored' WHERE event_id = $1")
+                .bind(event_id)
+                .execute(&state.pool)
+                .await?;
         }
     }
 
@@ -652,7 +755,7 @@ pub async fn list_checkout_sessions(
            FROM checkout_sessions
            WHERE account_id = $1
            ORDER BY created_at DESC
-           LIMIT 50"#
+           LIMIT 50"#,
     )
     .bind(tenant_id)
     .fetch_all(&state.pool)
@@ -694,7 +797,8 @@ pub async fn list_checkout_sessions(
 
 /// Generate a random temporary password (12 characters, alphanumeric)
 pub fn generate_temp_password() -> String {
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
+    const CHARSET: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
     let mut rng = rand::thread_rng();
     (0..12)
         .map(|_| {
@@ -744,12 +848,11 @@ async fn deliver_credentials(
         .join(" ");
 
     // Look for existing user by email
-    let existing_user = sqlx::query(
-        "SELECT id, password_hash, name, tenant_id FROM users WHERE email = $1"
-    )
-    .bind(email)
-    .fetch_optional(&state.pool)
-    .await?;
+    let existing_user =
+        sqlx::query("SELECT id, password_hash, name, tenant_id FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(&state.pool)
+            .await?;
 
     if let Some(user_row) = existing_user {
         let user_id: Uuid = user_row.try_get("id")?;
@@ -773,7 +876,9 @@ async fn deliver_credentials(
                 "password": &temp_password,
                 "app_url": "https://app.missedcallrespondr.com",
             });
-            if let Err(e) = email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await {
+            if let Err(e) =
+                email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await
+            {
                 tracing::warn!("Failed to send welcome email to {}: {}", email, e);
             }
         } else {
@@ -783,13 +888,28 @@ async fn deliver_credentials(
                 "plan_name": plan_name,
                 "app_url": "https://app.missedcallrespondr.com",
             });
-            if let Err(e) = email::send_template_email(&state.pool, tenant_id, email, "purchase_confirmed", &vars).await {
-                tracing::warn!("Failed to send purchase confirmed email to {}: {}", email, e);
+            if let Err(e) = email::send_template_email(
+                &state.pool,
+                tenant_id,
+                email,
+                "purchase_confirmed",
+                &vars,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Failed to send purchase confirmed email to {}: {}",
+                    email,
+                    e
+                );
             }
         }
     } else {
         // No user found → create tenant + user
-        let slug = format!("tenant-{}", account_id.to_string().split('-').next().unwrap_or("new"));
+        let slug = format!(
+            "tenant-{}",
+            account_id.to_string().split('-').next().unwrap_or("new")
+        );
         let tenant_id = Uuid::new_v4();
         sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
             .bind(tenant_id)
@@ -813,12 +933,14 @@ async fn deliver_credentials(
         .await?;
 
         let vars = json!({
-                "name": customer_name,
-                "email": email,
-                "password": &temp_password,
-                "app_url": "https://app.missedcallrespondr.com",
-            });
-        if let Err(e) = email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await {
+            "name": customer_name,
+            "email": email,
+            "password": &temp_password,
+            "app_url": "https://app.missedcallrespondr.com",
+        });
+        if let Err(e) =
+            email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await
+        {
             tracing::warn!("Failed to send welcome email to {}: {}", email, e);
         }
     }
@@ -858,7 +980,7 @@ async fn handle_checkout_completed(
                updated_at = NOW()
            WHERE provider_session_id = $2
              AND provider_type = $3
-             AND status = 'pending'"#
+             AND status = 'pending'"#,
     )
     .bind(event_body["id"].as_str().unwrap_or(""))
     .bind(&provider_session_id)
@@ -867,23 +989,24 @@ async fn handle_checkout_completed(
     .await?;
 
     if result.rows_affected() == 0 {
-        tracing::warn!("No pending checkout session found for provider session: {}", provider_session_id);
+        tracing::warn!(
+            "No pending checkout session found for provider session: {}",
+            provider_session_id
+        );
         return Ok(());
     }
 
     // Mark the webhook event as processed
-    sqlx::query(
-        "UPDATE payment_webhook_events SET status = 'processed' WHERE event_id = $1"
-    )
-    .bind(event_body["id"].as_str().unwrap_or(""))
-    .execute(&state.pool)
-    .await?;
+    sqlx::query("UPDATE payment_webhook_events SET status = 'processed' WHERE event_id = $1")
+        .bind(event_body["id"].as_str().unwrap_or(""))
+        .execute(&state.pool)
+        .await?;
 
     // ── Credential delivery ──
     // Query the checkout session to get account_id and metadata
     let session_row = sqlx::query(
         r#"SELECT account_id, user_id, metadata FROM checkout_sessions
-           WHERE provider_session_id = $1 AND provider_type = $2"#
+           WHERE provider_session_id = $1 AND provider_type = $2"#,
     )
     .bind(&provider_session_id)
     .bind(provider_type)
@@ -906,11 +1029,15 @@ async fn handle_checkout_completed(
         };
 
         if let Some(email) = customer_email {
-            let customer_name = metadata.get("customer_name")
+            let customer_name = metadata
+                .get("customer_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or(email.split('@').next().unwrap_or("Customer"));
 
-            if let Err(e) = deliver_credentials(state, email, customer_name, account_id, &purchasable_type).await {
+            if let Err(e) =
+                deliver_credentials(state, email, customer_name, account_id, &purchasable_type)
+                    .await
+            {
                 tracing::warn!("Credential delivery failed for {}: {:?}", email, e);
             }
         }
@@ -919,7 +1046,7 @@ async fn handle_checkout_completed(
     // ── Fire affiliate conversion (if referral metadata present) ──
     let session_meta = sqlx::query_scalar::<_, Value>(
         r#"SELECT COALESCE(metadata, '{}'::jsonb) FROM checkout_sessions
-           WHERE provider_session_id = $1 AND provider_type = $2"#
+           WHERE provider_session_id = $1 AND provider_type = $2"#,
     )
     .bind(&provider_session_id)
     .bind(provider_type)
@@ -927,13 +1054,24 @@ async fn handle_checkout_completed(
     .await?;
 
     if let Some(meta) = session_meta {
-        let affiliate_id = meta.get("affiliate_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let cookie_id = meta.get("cookie_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let affiliate_id = meta
+            .get("affiliate_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let cookie_id = meta
+            .get("cookie_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         if affiliate_id.is_some() || cookie_id.is_some() {
-            let amount = session["amount_total"].as_f64().map(|v| v / 100.0)
-                .or_else(|| session["amount"]
-                    .as_str().and_then(|s| s.parse::<f64>().ok()));
+            let amount = session["amount_total"]
+                .as_f64()
+                .map(|v| v / 100.0)
+                .or_else(|| {
+                    session["amount"]
+                        .as_str()
+                        .and_then(|s| s.parse::<f64>().ok())
+                });
 
             let payload = serde_json::json!({
                 "affiliate_id": affiliate_id,
@@ -947,20 +1085,28 @@ async fn handle_checkout_completed(
             });
 
             match reqwest::Client::new()
-                .post(format!("{}/api/v1/webhooks/conversion", state.funnelswift_url))
+                .post(format!(
+                    "{}/api/v1/webhooks/conversion",
+                    state.funnelswift_url
+                ))
                 .header("X-Internal-Key", &state.config.internal_sync_key)
                 .header("Content-Type", "application/json")
                 .json(&payload)
                 .send()
                 .await
             {
-                Ok(resp) => tracing::info!("Affiliate conversion fired — status: {}", resp.status()),
+                Ok(resp) => {
+                    tracing::info!("Affiliate conversion fired — status: {}", resp.status())
+                }
                 Err(e) => tracing::warn!("Failed to fire affiliate conversion: {:?}", e),
             }
         }
     }
 
-    tracing::info!("Checkout completed: provider_session={}", provider_session_id);
+    tracing::info!(
+        "Checkout completed: provider_session={}",
+        provider_session_id
+    );
     Ok(())
 }
 
@@ -972,7 +1118,7 @@ async fn mark_session_expired(
 ) -> Result<(), AppError> {
     sqlx::query(
         "UPDATE checkout_sessions SET status = 'expired', updated_at = NOW() \
-         WHERE provider_session_id = $1 AND provider_type = $2 AND status = 'pending'"
+         WHERE provider_session_id = $1 AND provider_type = $2 AND status = 'pending'",
     )
     .bind(provider_session_id)
     .bind(provider_type)

@@ -5,8 +5,8 @@ use axum::{
     Json,
 };
 use serde_json::json;
-use uuid::Uuid;
 use sqlx::Row;
+use uuid::Uuid;
 
 use crate::{config::Claims, error::AppError, state::AppState};
 
@@ -29,7 +29,7 @@ pub async fn list(
         FROM tag_groups tg
         WHERE tg.tenant_id = $1
         ORDER BY tg.sort_order, tg.name
-        "#
+        "#,
     )
     .bind(claims.aid)
     .fetch_all(&state.pool)
@@ -59,17 +59,17 @@ pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let name = body.get("name")
+    let name = body
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("name is required".into()))?;
 
-    let color = body.get("color")
+    let color = body
+        .get("color")
         .and_then(|v| v.as_str())
         .unwrap_or("#6366f1");
 
-    let sort_order = body.get("sort_order")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
+    let sort_order = body.get("sort_order").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
     let id = Uuid::new_v4();
 
@@ -113,7 +113,7 @@ pub async fn get(
             (SELECT COUNT(*) FROM tags t WHERE t.group_id = tg.id) AS tag_count
         FROM tag_groups tg
         WHERE tg.id = $1 AND tg.tenant_id = $2
-        "#
+        "#,
     )
     .bind(id)
     .bind(claims.aid)
@@ -162,7 +162,7 @@ pub async fn update(
             sort_order = COALESCE($3, sort_order),
             updated_at = NOW()
         WHERE id = $4 AND tenant_id = $5
-        "#
+        "#,
     )
     .bind(name)
     .bind(color)
@@ -178,7 +178,7 @@ pub async fn update(
         SELECT id, tenant_id, name, color, sort_order,
             (SELECT COUNT(*) FROM tags t WHERE t.group_id = tag_groups.id) AS tag_count
         FROM tag_groups WHERE id = $1
-        "#
+        "#,
     )
     .bind(id)
     .fetch_one(&state.pool)

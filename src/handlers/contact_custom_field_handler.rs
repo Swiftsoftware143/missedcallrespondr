@@ -8,8 +8,8 @@ use crate::{
     config::Claims,
     error::AppError,
     models::contact_custom_field::{
-        ContactCustomField, CreateCustomFieldRequest, UpdateCustomFieldRequest,
-        ContactWithFields, CustomFieldEntry,
+        ContactCustomField, ContactWithFields, CreateCustomFieldRequest, CustomFieldEntry,
+        UpdateCustomFieldRequest,
     },
     state::AppState,
 };
@@ -50,7 +50,8 @@ pub async fn create_custom_field(
 
     if existing {
         return Err(AppError::BadRequest(format!(
-            "A custom field named '{}' already exists", req.field_name
+            "A custom field named '{}' already exists",
+            req.field_name
         )));
     }
 
@@ -73,10 +74,12 @@ pub async fn create_custom_field(
     .execute(&state.pool)
     .await?;
 
-    let field = sqlx::query_as::<_, ContactCustomField>("SELECT * FROM contact_custom_fields WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.pool)
-        .await?;
+    let field = sqlx::query_as::<_, ContactCustomField>(
+        "SELECT * FROM contact_custom_fields WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
     Ok(Json(field))
 }
 
@@ -106,10 +109,12 @@ pub async fn update_custom_field(
     .execute(&state.pool)
     .await?;
 
-    let field = sqlx::query_as::<_, ContactCustomField>("SELECT * FROM contact_custom_fields WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.pool)
-        .await?;
+    let field = sqlx::query_as::<_, ContactCustomField>(
+        "SELECT * FROM contact_custom_fields WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
     Ok(Json(field))
 }
 
@@ -157,12 +162,15 @@ pub async fn get_contact_with_fields(
     .fetch_all(&state.pool)
     .await?;
 
-    let custom_fields: Vec<CustomFieldEntry> = fields.into_iter().map(|f| CustomFieldEntry {
-        field_id: f.field_id,
-        field_name: f.field_name,
-        field_type: f.field_type,
-        value: f.value,
-    }).collect();
+    let custom_fields: Vec<CustomFieldEntry> = fields
+        .into_iter()
+        .map(|f| CustomFieldEntry {
+            field_id: f.field_id,
+            field_name: f.field_name,
+            field_type: f.field_type,
+            value: f.value,
+        })
+        .collect();
 
     Ok(Json(ContactWithFields {
         id: contact.id,
@@ -204,12 +212,15 @@ pub async fn list_contacts_with_fields(
         .await
         .unwrap_or_default();
 
-        let custom_fields: Vec<CustomFieldEntry> = fields.into_iter().map(|f| CustomFieldEntry {
-            field_id: f.field_id,
-            field_name: f.field_name,
-            field_type: f.field_type,
-            value: f.value,
-        }).collect();
+        let custom_fields: Vec<CustomFieldEntry> = fields
+            .into_iter()
+            .map(|f| CustomFieldEntry {
+                field_id: f.field_id,
+                field_name: f.field_name,
+                field_type: f.field_type,
+                value: f.value,
+            })
+            .collect();
 
         result.push(ContactWithFields {
             id: contact.id,

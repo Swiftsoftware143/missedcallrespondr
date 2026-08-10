@@ -1,47 +1,48 @@
 use axum::{
-
     extract::{Extension, State},
     Json,
 };
 
 use serde_json::Value;
 
+use super::models::{create_token, hash_password, verify_password};
 use crate::{
-    config::{AuthResponse, Claims, LoginRequest, RegisterRequest, TeamMember, TeamMemberResponse, ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest},
+    config::{
+        AuthResponse, ChangePasswordRequest, Claims, ForgotPasswordRequest, LoginRequest,
+        RegisterRequest, ResetPasswordRequest, TeamMember, TeamMemberResponse,
+    },
     error::AppError,
     state::AppState,
 };
-use super::models::{create_token, hash_password, verify_password};
 
 pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let existing = sqlx::query_as::<_, TeamMember>(
-        "SELECT * FROM users WHERE email = $1",
-    )
-    .bind(&req.email)
-    .fetch_optional(&state.pool)
-    .await?;
+    let existing = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE email = $1")
+        .bind(&req.email)
+        .fetch_optional(&state.pool)
+        .await?;
 
     if existing.is_some() {
-        return Err(AppError::Conflict("A user with this email already exists. Try signing in.".into()));
+        return Err(AppError::Conflict(
+            "A user with this email already exists. Try signing in.".into(),
+        ));
     }
 
     let account_id = uuid::Uuid::new_v4();
     let account_slug = req.account_name.to_lowercase().replace(' ', "_");
 
-    sqlx::query(
-        "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)",
-    )
-    .bind(account_id)
-    .bind(&req.account_name)
-    .bind(&account_slug)
-    .execute(&state.pool)
-    .await?;
+    sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
+        .bind(account_id)
+        .bind(&req.account_name)
+        .bind(&account_slug)
+        .execute(&state.pool)
+        .await?;
 
     let user_id = uuid::Uuid::new_v4();
-    let password_hash = hash_password(&req.password).map_err(|e| AppError::Internal(e.to_string()))?;
+    let password_hash =
+        hash_password(&req.password).map_err(|e| AppError::Internal(e.to_string()))?;
     let now = chrono::Utc::now().naive_utc();
 
     sqlx::query(
@@ -60,7 +61,7 @@ pub async fn register(
 
     // Auto-assign Free plan with 50 starter credits
     let free_plan = sqlx::query_as::<_, (uuid::Uuid,)>(
-        "SELECT id FROM plans WHERE slug = 'free' AND is_active = true LIMIT 1"
+        "SELECT id FROM plans WHERE slug = 'free' AND is_active = true LIMIT 1",
     )
     .fetch_optional(&state.pool)
     .await?;
@@ -105,7 +106,10 @@ pub async fn register(
             "removed_tags": [],
             "triggered_by": "signup"
         });
-        let url = format!("{}/api/v1/webhooks/cross-app/tag-sync", cs_state.coreswift_url);
+        let url = format!(
+            "{}/api/v1/webhooks/cross-app/tag-sync",
+            cs_state.coreswift_url
+        );
         if !cs_state.coreswift_url.is_empty() {
             let _ = reqwest::Client::new()
                 .post(&url)
@@ -132,13 +136,11 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let user = sqlx::query_as::<_, TeamMember>(
-        "SELECT * FROM users WHERE email = $1",
-    )
-    .bind(&req.email)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
+    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE email = $1")
+        .bind(&req.email)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
 
     let valid = verify_password(&req.password, &user.password_hash)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -169,13 +171,11 @@ pub async fn me(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<Json<TeamMemberResponse>, AppError> {
-    let user = sqlx::query_as::<_, TeamMember>(
-        "SELECT * FROM users WHERE id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
 
     Ok(Json(user.into()))
 }
@@ -186,25 +186,27 @@ pub async fn change_password(
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     if req.new_password.len() < 8 {
-        return Err(AppError::BadRequest("New password must be at least 8 characters".into()));
+        return Err(AppError::BadRequest(
+            "New password must be at least 8 characters".into(),
+        ));
     }
 
-    let user = sqlx::query_as::<_, TeamMember>(
-        "SELECT * FROM users WHERE id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
 
     let valid = verify_password(&req.current_password, &user.password_hash)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     if !valid {
-        return Err(AppError::Unauthorized("Current password is incorrect".into()));
+        return Err(AppError::Unauthorized(
+            "Current password is incorrect".into(),
+        ));
     }
 
-    let new_hash = hash_password(&req.new_password)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let new_hash =
+        hash_password(&req.new_password).map_err(|e| AppError::Internal(e.to_string()))?;
 
     sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
         .bind(&new_hash)
@@ -212,7 +214,9 @@ pub async fn change_password(
         .execute(&state.pool)
         .await?;
 
-    Ok(Json(serde_json::json!({"message": "Password updated successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "Password updated successfully"}),
+    ))
 }
 
 pub async fn update_profile(
@@ -220,33 +224,34 @@ pub async fn update_profile(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let name = req.get("name")
+    let name = req
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("name is required".into()))?;
-    
+
     if name.trim().is_empty() {
         return Err(AppError::BadRequest("name cannot be empty".into()));
     }
-    
+
     sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
         .bind(name)
         .bind(claims.sub)
         .execute(&state.pool)
         .await?;
-    
-    Ok(Json(serde_json::json!({"message": "Profile updated", "name": name})))
+
+    Ok(Json(
+        serde_json::json!({"message": "Profile updated", "name": name}),
+    ))
 }
 
 pub async fn forgot_password(
     State(state): State<AppState>,
     Json(req): Json<ForgotPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if let Some(user) = sqlx::query_as::<_, TeamMember>(
-        "SELECT * FROM users WHERE email = $1",
-    )
-    .bind(&req.email)
-    .fetch_optional(&state.pool)
-    .await?
+    if let Some(user) = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE email = $1")
+        .bind(&req.email)
+        .fetch_optional(&state.pool)
+        .await?
     {
         let token = uuid::Uuid::new_v4().to_string();
         let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
@@ -254,16 +259,15 @@ pub async fn forgot_password(
         sqlx::query("UPDATE password_resets SET used = true WHERE user_id = $1 AND used = false")
             .bind(user.id)
             .execute(&state.pool)
-            .await.ok();
+            .await
+            .ok();
 
-        sqlx::query(
-            "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)",
-        )
-        .bind(user.id)
-        .bind(&token)
-        .bind(expires_at)
-        .execute(&state.pool)
-        .await?;
+        sqlx::query("INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)")
+            .bind(user.id)
+            .bind(&token)
+            .bind(expires_at)
+            .execute(&state.pool)
+            .await?;
 
         // Send password reset email via template system
         let vars = serde_json::json!({
@@ -277,13 +281,21 @@ pub async fn forgot_password(
             &user.email,
             "password_reset",
             &vars,
-        ).await {
+        )
+        .await
+        {
             Ok(_) => tracing::info!("Password reset email sent to {}", user.email),
-            Err(e) => tracing::error!("Failed to send password reset email to {}: {}", user.email, e),
+            Err(e) => tracing::error!(
+                "Failed to send password reset email to {}: {}",
+                user.email,
+                e
+            ),
         }
     }
 
-    Ok(Json(serde_json::json!({"message": "If the email exists, a password reset link has been sent"})))
+    Ok(Json(
+        serde_json::json!({"message": "If the email exists, a password reset link has been sent"}),
+    ))
 }
 
 pub async fn reset_password(
@@ -291,7 +303,9 @@ pub async fn reset_password(
     Json(req): Json<ResetPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     if req.new_password.len() < 8 {
-        return Err(AppError::BadRequest("New password must be at least 8 characters".into()));
+        return Err(AppError::BadRequest(
+            "New password must be at least 8 characters".into(),
+        ));
     }
 
     use sqlx::Row;
@@ -306,8 +320,8 @@ pub async fn reset_password(
     let reset_id: uuid::Uuid = reset.get("id");
     let user_id: uuid::Uuid = reset.get("user_id");
 
-    let new_hash = hash_password(&req.new_password)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let new_hash =
+        hash_password(&req.new_password).map_err(|e| AppError::Internal(e.to_string()))?;
 
     sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
         .bind(&new_hash)
@@ -320,9 +334,10 @@ pub async fn reset_password(
         .execute(&state.pool)
         .await?;
 
-    Ok(Json(serde_json::json!({"message": "Password has been reset successfully"})))
+    Ok(Json(
+        serde_json::json!({"message": "Password has been reset successfully"}),
+    ))
 }
-
 
 pub async fn get_usage(
     State(state): State<AppState>,
@@ -332,4 +347,3 @@ pub async fn get_usage(
     let usage = crate::features::get_usage_json(&state.pool, tid).await;
     Ok(Json(usage))
 }
-

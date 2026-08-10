@@ -4,12 +4,7 @@ use axum::{
 };
 use std::collections::HashMap;
 
-use crate::{
-    config::Claims,
-    error::AppError,
-    models::call_log::CallLog,
-    state::AppState,
-};
+use crate::{config::Claims, error::AppError, models::call_log::CallLog, state::AppState};
 
 pub async fn list_call_logs(
     Extension(claims): Extension<Claims>,
@@ -38,7 +33,9 @@ pub async fn export_call_logs(
     .fetch_all(&state.pool)
     .await?;
 
-    let mut csv = String::from("ID,Caller Number,Called Number,Duration,Disposition,Cost,Recorded,Notes,Created At\n");
+    let mut csv = String::from(
+        "ID,Caller Number,Called Number,Duration,Disposition,Cost,Recorded,Notes,Created At\n",
+    );
     for item in items {
         csv.push_str(&format!(
             "{},{},{},{},{},{},{},{},{}\n",

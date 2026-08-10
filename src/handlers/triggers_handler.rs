@@ -10,17 +10,17 @@
 //!   GET/PUT/DELETE /api/v1/triggers/redirect/:id
 //!   PUT        /api/v1/portfolio-companies/:id/smtp
 
-use axum::{
-    extract::{Path, State, Extension},
-    Json,
-};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use uuid::Uuid;
-use chrono::{DateTime, Utc};
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
+use axum::{
+    extract::{Extension, Path, State},
+    Json,
+};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Email Trigger Types
@@ -121,7 +121,7 @@ pub async fn list_email_triggers(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {
     let triggers = sqlx::query_as::<_, EmailTrigger>(
-        "SELECT * FROM campaign_email_triggers WHERE tenant_id = $1 ORDER BY name"
+        "SELECT * FROM campaign_email_triggers WHERE tenant_id = $1 ORDER BY name",
     )
     .bind(claims.aid)
     .fetch_all(&state.pool)
@@ -147,15 +147,27 @@ pub async fn create_email_trigger(
     }
 
     let portfolio_id = if let Some(ref pid) = body.portfolio_company_id {
-        Some(Uuid::parse_str(pid).map_err(|_| AppError::BadRequest("Invalid portfolio_company_id".into()))?)
+        Some(
+            Uuid::parse_str(pid)
+                .map_err(|_| AppError::BadRequest("Invalid portfolio_company_id".into()))?,
+        )
     } else {
         None
     };
 
     let trigger_event = body.trigger_event.unwrap_or_else(|| "on_win".to_string());
-    let valid_events = ["on_win", "on_enter", "on_quiz_result", "on_loss", "on_raffle_entry"];
+    let valid_events = [
+        "on_win",
+        "on_enter",
+        "on_quiz_result",
+        "on_loss",
+        "on_raffle_entry",
+    ];
     if !valid_events.contains(&trigger_event.as_str()) {
-        return Err(AppError::BadRequest(format!("Invalid trigger_event. Must be one of: {}", valid_events.join(", "))));
+        return Err(AppError::BadRequest(format!(
+            "Invalid trigger_event. Must be one of: {}",
+            valid_events.join(", ")
+        )));
     }
 
     let id = Uuid::new_v4();
@@ -180,12 +192,11 @@ pub async fn create_email_trigger(
     .execute(&state.pool)
     .await?;
 
-    let trigger = sqlx::query_as::<_, EmailTrigger>(
-        "SELECT * FROM campaign_email_triggers WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_one(&state.pool)
-    .await?;
+    let trigger =
+        sqlx::query_as::<_, EmailTrigger>("SELECT * FROM campaign_email_triggers WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
 
     Ok(Json(json!({ "trigger": trigger })))
 }
@@ -196,11 +207,10 @@ pub async fn get_email_trigger(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let trigger_id = Uuid::parse_str(&id)
-        .map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
+    let trigger_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
 
     let trigger = sqlx::query_as::<_, EmailTrigger>(
-        "SELECT * FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2"
+        "SELECT * FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2",
     )
     .bind(trigger_id)
     .bind(claims.aid)
@@ -218,12 +228,11 @@ pub async fn update_email_trigger(
     Path(id): Path<String>,
     Json(body): Json<UpdateEmailTriggerInput>,
 ) -> Result<Json<Value>, AppError> {
-    let trigger_id = Uuid::parse_str(&id)
-        .map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
+    let trigger_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
 
     // Verify ownership
     let existing = sqlx::query_as::<_, EmailTrigger>(
-        "SELECT * FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2"
+        "SELECT * FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2",
     )
     .bind(trigger_id)
     .bind(claims.aid)
@@ -243,7 +252,7 @@ pub async fn update_email_trigger(
         r#"UPDATE campaign_email_triggers
            SET name = $1, trigger_event = $2, subject_template = $3, body_template = $4,
                from_name = $5, from_email = $6, is_active = $7, updated_at = NOW()
-           WHERE id = $8"#
+           WHERE id = $8"#,
     )
     .bind(&name)
     .bind(&trigger_event)
@@ -256,12 +265,11 @@ pub async fn update_email_trigger(
     .execute(&state.pool)
     .await?;
 
-    let trigger = sqlx::query_as::<_, EmailTrigger>(
-        "SELECT * FROM campaign_email_triggers WHERE id = $1"
-    )
-    .bind(trigger_id)
-    .fetch_one(&state.pool)
-    .await?;
+    let trigger =
+        sqlx::query_as::<_, EmailTrigger>("SELECT * FROM campaign_email_triggers WHERE id = $1")
+            .bind(trigger_id)
+            .fetch_one(&state.pool)
+            .await?;
 
     Ok(Json(json!({ "trigger": trigger })))
 }
@@ -272,16 +280,14 @@ pub async fn delete_email_trigger(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let trigger_id = Uuid::parse_str(&id)
-        .map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
+    let trigger_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
 
-    let result = sqlx::query(
-        "DELETE FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2"
-    )
-    .bind(trigger_id)
-    .bind(claims.aid)
-    .execute(&state.pool)
-    .await?;
+    let result =
+        sqlx::query("DELETE FROM campaign_email_triggers WHERE id = $1 AND tenant_id = $2")
+            .bind(trigger_id)
+            .bind(claims.aid)
+            .execute(&state.pool)
+            .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Email trigger not found".into()));
@@ -300,7 +306,7 @@ pub async fn list_redirect_triggers(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {
     let triggers = sqlx::query_as::<_, RedirectTrigger>(
-        "SELECT * FROM campaign_redirect_triggers WHERE tenant_id = $1 ORDER BY name"
+        "SELECT * FROM campaign_redirect_triggers WHERE tenant_id = $1 ORDER BY name",
     )
     .bind(claims.aid)
     .fetch_all(&state.pool)
@@ -323,13 +329,22 @@ pub async fn create_redirect_trigger(
     }
 
     let portfolio_id = if let Some(ref pid) = body.portfolio_company_id {
-        Some(Uuid::parse_str(pid).map_err(|_| AppError::BadRequest("Invalid portfolio_company_id".into()))?)
+        Some(
+            Uuid::parse_str(pid)
+                .map_err(|_| AppError::BadRequest("Invalid portfolio_company_id".into()))?,
+        )
     } else {
         None
     };
 
     let trigger_event = body.trigger_event.unwrap_or_else(|| "on_win".to_string());
-    let valid_events = ["on_win", "on_enter", "on_quiz_result", "on_loss", "on_raffle_entry"];
+    let valid_events = [
+        "on_win",
+        "on_enter",
+        "on_quiz_result",
+        "on_loss",
+        "on_raffle_entry",
+    ];
     if !valid_events.contains(&trigger_event.as_str()) {
         return Err(AppError::BadRequest("Invalid trigger_event".to_string()));
     }
@@ -354,7 +369,7 @@ pub async fn create_redirect_trigger(
     .await?;
 
     let trigger = sqlx::query_as::<_, RedirectTrigger>(
-        "SELECT * FROM campaign_redirect_triggers WHERE id = $1"
+        "SELECT * FROM campaign_redirect_triggers WHERE id = $1",
     )
     .bind(id)
     .fetch_one(&state.pool)
@@ -369,11 +384,10 @@ pub async fn get_redirect_trigger(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let trigger_id = Uuid::parse_str(&id)
-        .map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
+    let trigger_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
 
     let trigger = sqlx::query_as::<_, RedirectTrigger>(
-        "SELECT * FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2"
+        "SELECT * FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2",
     )
     .bind(trigger_id)
     .bind(claims.aid)
@@ -391,11 +405,10 @@ pub async fn update_redirect_trigger(
     Path(id): Path<String>,
     Json(body): Json<UpdateRedirectTriggerInput>,
 ) -> Result<Json<Value>, AppError> {
-    let trigger_id = Uuid::parse_str(&id)
-        .map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
+    let trigger_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
 
     let existing = sqlx::query_as::<_, RedirectTrigger>(
-        "SELECT * FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2"
+        "SELECT * FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2",
     )
     .bind(trigger_id)
     .bind(claims.aid)
@@ -411,7 +424,7 @@ pub async fn update_redirect_trigger(
     sqlx::query(
         r#"UPDATE campaign_redirect_triggers
            SET name = $1, trigger_event = $2, redirect_url = $3, is_active = $4, updated_at = NOW()
-           WHERE id = $5"#
+           WHERE id = $5"#,
     )
     .bind(&name)
     .bind(&trigger_event)
@@ -422,7 +435,7 @@ pub async fn update_redirect_trigger(
     .await?;
 
     let trigger = sqlx::query_as::<_, RedirectTrigger>(
-        "SELECT * FROM campaign_redirect_triggers WHERE id = $1"
+        "SELECT * FROM campaign_redirect_triggers WHERE id = $1",
     )
     .bind(trigger_id)
     .fetch_one(&state.pool)
@@ -437,16 +450,14 @@ pub async fn delete_redirect_trigger(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let trigger_id = Uuid::parse_str(&id)
-        .map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
+    let trigger_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid ID".into()))?;
 
-    let result = sqlx::query(
-        "DELETE FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2"
-    )
-    .bind(trigger_id)
-    .bind(claims.aid)
-    .execute(&state.pool)
-    .await?;
+    let result =
+        sqlx::query("DELETE FROM campaign_redirect_triggers WHERE id = $1 AND tenant_id = $2")
+            .bind(trigger_id)
+            .bind(claims.aid)
+            .execute(&state.pool)
+            .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Redirect trigger not found".into()));
@@ -468,9 +479,17 @@ pub async fn get_smtp_config(
     let pc_id = Uuid::parse_str(&id)
         .map_err(|_| AppError::BadRequest("Invalid portfolio company ID".into()))?;
 
-    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Option<String>)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+    >(
         "SELECT smtp_provider, smtp_api_key, smtp_from_email, smtp_from_name
-         FROM portfolio_companies WHERE id = $1 AND tenant_id = $2"
+         FROM portfolio_companies WHERE id = $1 AND tenant_id = $2",
     )
     .bind(pc_id)
     .bind(claims.aid)
@@ -481,7 +500,7 @@ pub async fn get_smtp_config(
     // Mask the API key for security
     let api_key = row.1.as_ref().map(|k| {
         if k.len() > 8 {
-            format!("{}...{}", &k[..4], &k[k.len()-4..])
+            format!("{}...{}", &k[..4], &k[k.len() - 4..])
         } else {
             "****".to_string()
         }
@@ -508,7 +527,7 @@ pub async fn update_smtp_config(
 
     // Verify ownership
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM portfolio_companies WHERE id = $1 AND tenant_id = $2)"
+        "SELECT EXISTS(SELECT 1 FROM portfolio_companies WHERE id = $1 AND tenant_id = $2)",
     )
     .bind(pc_id)
     .bind(claims.aid)

@@ -14,18 +14,17 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         Self {
-            database_url: std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://swift:swift@localhost:5432/missedcallrespondr".into()),
+            database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgres://swift:swift@localhost:5432/missedcallrespondr".into()
+            }),
             jwt_secret: std::env::var("JWT_SECRET")
                 .unwrap_or_else(|_| "missedcallrespondr_jwt_secret_key_2024".into()),
             server_port: std::env::var("SERVER_PORT")
                 .unwrap_or_else(|_| "8088".into())
                 .parse()
                 .unwrap_or(8088),
-            server_host: std::env::var("SERVER_HOST")
-                .unwrap_or_else(|_| "0.0.0.0".into()),
-            internal_sync_key: std::env::var("INTERNAL_SYNC_KEY")
-                .unwrap_or_else(|_| "".into()),
+            server_host: std::env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".into()),
+            internal_sync_key: std::env::var("INTERNAL_SYNC_KEY").unwrap_or_else(|_| "".into()),
             funnelswift_url: std::env::var("FUNNELSWIFT_URL")
                 .unwrap_or_else(|_| "http://localhost:8080".into()),
         }

@@ -1,28 +1,44 @@
+use argon2::password_hash::SaltString;
+use argon2::{Argon2, PasswordHasher};
 use axum::{
     extract::{Extension, Path, State},
     Json,
 };
+use rand::rngs::OsRng;
 use serde_json::{json, Value};
 use uuid::Uuid;
-use argon2::{Argon2, PasswordHasher};
-use argon2::password_hash::SaltString;
-use rand::rngs::OsRng;
 
-use chrono::Utc;
+use crate::auth::models::create_token;
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::auth::models::create_token;
+use chrono::Utc;
 
 /// Admin sync endpoint called by CoreSwift
 pub async fn portfolio_sync(
     State(state): State<AppState>,
     Json(req): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
-    let sync_id = req.get("id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()).unwrap_or_else(Uuid::new_v4);
-    let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("Company").to_string();
-    let email = req.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let description = req.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let sync_id = req
+        .get("id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .unwrap_or_else(Uuid::new_v4);
+    let name = req
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Company")
+        .to_string();
+    let email = req
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let description = req
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     if email.is_empty() {
         return Err(AppError::BadRequest("email is required".into()));
@@ -36,7 +52,10 @@ pub async fn portfolio_sync(
         .unwrap_or(0);
 
     if existing > 0 {
-        return Err(AppError::Conflict(format!("A user with email {} already exists", email)));
+        return Err(AppError::Conflict(format!(
+            "A user with email {} already exists",
+            email
+        )));
     }
 
     // Create tenant
@@ -52,7 +71,12 @@ pub async fn portfolio_sync(
 
     // Create user
     let user_id = uuid::Uuid::new_v4();
-    let generated_password = Uuid::new_v4().to_string().replace("-", "").chars().take(12).collect::<String>();
+    let generated_password = Uuid::new_v4()
+        .to_string()
+        .replace("-", "")
+        .chars()
+        .take(12)
+        .collect::<String>();
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     let password_hash = argon2
@@ -61,17 +85,17 @@ pub async fn portfolio_sync(
         .to_string();
 
     // Check for duplicate email
-    let email_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)",
-    )
-    .bind(&email)
-    .fetch_one(&state.pool)
-    .await
-    .unwrap_or(false);
+    let email_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)")
+            .bind(&email)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(false);
 
     if email_exists {
         return Err(AppError::BadRequest(format!(
-            "User with email '{}' already exists", email
+            "User with email '{}' already exists",
+            email
         )));
     }
 
@@ -121,10 +145,13 @@ pub async fn impersonate(
     Json(req): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
     if claims.role != "agency_admin" {
-        return Err(AppError::Unauthorized("Only agency admins can impersonate".into()));
+        return Err(AppError::Unauthorized(
+            "Only agency admins can impersonate".into(),
+        ));
     }
 
-    let target_tenant_id = req.get("tenant_id")
+    let target_tenant_id = req
+        .get("tenant_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| AppError::BadRequest("valid account_id is required".into()))?;
@@ -164,19 +191,22 @@ pub async fn list_all_tenants(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<Value>, AppError> {
     // Simple auth check — verify token has admin access
-    let auth_header = headers.get("Authorization")
+    let auth_header = headers
+        .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(|| AppError::Unauthorized("Missing auth token".into()))?;
-    
+
     // Validate token
     let claims = crate::auth::models::validate_token(auth_header, &state.config.jwt_secret)
         .map_err(|_| AppError::Unauthorized("Invalid token".into()))?;
-    
+
     if claims.role != "agency_admin" && claims.role != "admin" && claims.role != "super_admin" {
-        return Err(AppError::Unauthorized("Not authorized to list tenants".into()));
+        return Err(AppError::Unauthorized(
+            "Not authorized to list tenants".into(),
+        ));
     }
-    
+
     use sqlx::Row;
     let rows = sqlx::query(
         r#"SELECT 
@@ -189,7 +219,7 @@ pub async fn list_all_tenants(
         FROM tenants t
         LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id
         LEFT JOIN plans p ON p.id = tp.plan_id
-        ORDER BY t.created_at DESC"#
+        ORDER BY t.created_at DESC"#,
     )
     .fetch_all(&state.pool)
     .await?;
@@ -228,22 +258,22 @@ pub async fn add_credits(
     use sqlx::Row;
     let tenant_id = Uuid::parse_str(&tenant_id_str)
         .map_err(|_| AppError::BadRequest("Invalid tenant ID".into()))?;
-    let amount = body.get("amount")
+    let amount = body
+        .get("amount")
         .and_then(|v| v.as_i64())
-        .ok_or_else(|| AppError::BadRequest("amount (integer) required".into()))? as i32;
-    
+        .ok_or_else(|| AppError::BadRequest("amount (integer) required".into()))?
+        as i32;
+
     if amount <= 0 {
         return Err(AppError::BadRequest("Amount must be positive".into()));
     }
-    
+
     // Upsert tenant_plan with credit increase
-    let existing = sqlx::query(
-        "SELECT credit_balance FROM tenant_plans WHERE tenant_id = $1"
-    )
-    .bind(tenant_id)
-    .fetch_optional(&state.pool)
-    .await?;
-    
+    let existing = sqlx::query("SELECT credit_balance FROM tenant_plans WHERE tenant_id = $1")
+        .bind(tenant_id)
+        .fetch_optional(&state.pool)
+        .await?;
+
     match existing {
         Some(row) => {
             let current: i32 = row.try_get("credit_balance").unwrap_or(0);
@@ -256,11 +286,11 @@ pub async fn add_credits(
             .bind(tenant_id)
             .execute(&state.pool)
             .await?;
-        },
+        }
         None => {
             // Try to find any plan to associate, or use a dummy fallback
             let plan = sqlx::query_scalar::<_, Uuid>(
-                "SELECT id FROM plans ORDER BY sort_order ASC LIMIT 1"
+                "SELECT id FROM plans ORDER BY sort_order ASC LIMIT 1",
             )
             .fetch_optional(&state.pool)
             .await?;
@@ -275,11 +305,13 @@ pub async fn add_credits(
                 .execute(&state.pool)
                 .await?;
             } else {
-                return Err(AppError::Internal("No plans exist. Create a plan first.".into()));
+                return Err(AppError::Internal(
+                    "No plans exist. Create a plan first.".into(),
+                ));
             }
         }
     }
-    
+
     Ok(Json(json!({
         "message": format!("Added {} credits", amount),
         "tenant_id": tenant_id_str

@@ -73,8 +73,7 @@ pub async fn push_contact_to_workflowswift(state: &AppState, contact: &Contact) 
         req = req.header("X-Internal-Key", &internal_key);
     }
 
-    match req.send().await
-    {
+    match req.send().await {
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();

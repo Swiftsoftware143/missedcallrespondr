@@ -31,7 +31,8 @@ pub async fn create_integration(
     Json(req): Json<CreateIntegrationRequest>,
 ) -> Result<Json<Integration>, AppError> {
     let tenant_id: Uuid = claims.aid;
-    features::enforce_feature_limit(&state.pool, tenant_id, "max_integrations", "Integrations").await?;
+    features::enforce_feature_limit(&state.pool, tenant_id, "max_integrations", "Integrations")
+        .await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
     let is_active = req.is_active.unwrap_or(true);
@@ -123,5 +124,7 @@ pub async fn test_integration(
     .await?
     .ok_or_else(|| AppError::NotFound("Integration not found".into()))?;
 
-    Ok(Json(serde_json::json!({"status": "test_passed", "message": "Integration test successful"})))
+    Ok(Json(
+        serde_json::json!({"status": "test_passed", "message": "Integration test successful"}),
+    ))
 }

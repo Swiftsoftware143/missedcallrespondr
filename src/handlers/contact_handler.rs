@@ -8,8 +8,9 @@ use uuid::Uuid;
 use crate::{
     config::Claims,
     error::AppError,
+    features,
     models::contact::{Contact, CreateContactRequest, UpdateContactRequest},
-    state::AppState, features,
+    state::AppState,
 };
 
 pub async fn list_contacts(
@@ -46,7 +47,8 @@ pub async fn create_contact(
 
             if existing {
                 return Err(AppError::BadRequest(format!(
-                    "A contact with email '{}' already exists", email
+                    "A contact with email '{}' already exists",
+                    email
                 )));
             }
         }
@@ -81,7 +83,12 @@ pub async fn create_contact(
     let item_clone = item.clone();
     tokio::spawn(async move {
         super::workflowswift_push::push_contact_to_workflowswift(&state_clone, &item_clone).await;
-        super::coreswift_push::push_contact_to_coreswift(&state_clone, &item_clone, "contact_creation").await;
+        super::coreswift_push::push_contact_to_coreswift(
+            &state_clone,
+            &item_clone,
+            "contact_creation",
+        )
+        .await;
     });
 
     Ok(Json(item))
@@ -92,14 +99,13 @@ pub async fn get_contact(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Contact>, AppError> {
-    let item = sqlx::query_as::<_, Contact>(
-        "SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(claims.aid)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
+    let item =
+        sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
     Ok(Json(item))
 }
 
@@ -109,14 +115,13 @@ pub async fn update_contact(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateContactRequest>,
 ) -> Result<Json<Contact>, AppError> {
-    let existing = sqlx::query_as::<_, Contact>(
-        "SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(claims.aid)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
+    let existing =
+        sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
 
     let now = chrono::Utc::now().naive_utc();
     sqlx::query(
@@ -142,7 +147,8 @@ pub async fn update_contact(
     let state_clone = state.clone();
     let item_clone = item.clone();
     tokio::spawn(async move {
-        super::coreswift_push::push_contact_to_coreswift(&state_clone, &item_clone, "tag_update").await;
+        super::coreswift_push::push_contact_to_coreswift(&state_clone, &item_clone, "tag_update")
+            .await;
     });
 
     Ok(Json(item))

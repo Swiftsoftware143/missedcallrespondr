@@ -33,7 +33,13 @@ pub async fn create_message_template(
     Json(req): Json<CreateMessageTemplateRequest>,
 ) -> Result<Json<MessageTemplate>, AppError> {
     let tenant_id: Uuid = claims.aid;
-    features::enforce_feature_limit(&state.pool, tenant_id, "max_message_templates", "Message Templates").await?;
+    features::enforce_feature_limit(
+        &state.pool,
+        tenant_id,
+        "max_message_templates",
+        "Message Templates",
+    )
+    .await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();
 
@@ -50,10 +56,11 @@ pub async fn create_message_template(
     .execute(&state.pool)
     .await?;
 
-    let item = sqlx::query_as::<_, MessageTemplate>("SELECT * FROM message_templates WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.pool)
-        .await?;
+    let item =
+        sqlx::query_as::<_, MessageTemplate>("SELECT * FROM message_templates WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
     Ok(Json(item))
 }
 
@@ -84,10 +91,11 @@ pub async fn update_message_template(
     .execute(&state.pool)
     .await?;
 
-    let item = sqlx::query_as::<_, MessageTemplate>("SELECT * FROM message_templates WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.pool)
-        .await?;
+    let item =
+        sqlx::query_as::<_, MessageTemplate>("SELECT * FROM message_templates WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
     Ok(Json(item))
 }
 
@@ -105,5 +113,7 @@ pub async fn delete_message_template(
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Message template not found".into()));
     }
-    Ok(Json(serde_json::json!({"message": "Message template deleted"})))
+    Ok(Json(
+        serde_json::json!({"message": "Message template deleted"}),
+    ))
 }

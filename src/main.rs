@@ -1,12 +1,12 @@
-mod email;
 mod auth;
 mod config;
 mod db;
+mod email;
 mod error;
+mod features;
 mod handlers;
 mod models;
 mod routes;
-mod features;
 mod state;
 
 use std::net::SocketAddr;
@@ -24,11 +24,11 @@ async fn main() -> anyhow::Result<()> {
     let workflowswift_url = std::env::var("WORKFLOWSWIFT_URL")
         .unwrap_or_else(|_| "http://localhost:8085/api/incoming".into());
 
-    let coreswift_url = std::env::var("CORESWIFT_URL")
-        .unwrap_or_else(|_| "http://localhost:8084".into());
+    let coreswift_url =
+        std::env::var("CORESWIFT_URL").unwrap_or_else(|_| "http://localhost:8084".into());
 
-    let funnelswift_url = std::env::var("FUNNELSWIFT_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".into());
+    let funnelswift_url =
+        std::env::var("FUNNELSWIFT_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
     let app_state = state::AppState {
         pool,

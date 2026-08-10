@@ -29,14 +29,13 @@ pub async fn get_voicemail(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Voicemail>, AppError> {
-    let item = sqlx::query_as::<_, Voicemail>(
-        "SELECT * FROM voicemails WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(claims.aid)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Voicemail not found".into()))?;
+    let item =
+        sqlx::query_as::<_, Voicemail>("SELECT * FROM voicemails WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Voicemail not found".into()))?;
     Ok(Json(item))
 }
 
@@ -46,14 +45,13 @@ pub async fn update_voicemail(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateVoicemailRequest>,
 ) -> Result<Json<Voicemail>, AppError> {
-    let existing = sqlx::query_as::<_, Voicemail>(
-        "SELECT * FROM voicemails WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(claims.aid)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Voicemail not found".into()))?;
+    let existing =
+        sqlx::query_as::<_, Voicemail>("SELECT * FROM voicemails WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Voicemail not found".into()))?;
 
     let now = chrono::Utc::now().naive_utc();
     sqlx::query(

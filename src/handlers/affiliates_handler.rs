@@ -212,13 +212,11 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let result = sqlx::query(
-        r#"DELETE FROM affiliates WHERE id = $1 AND tenant_id = $2"#,
-    )
-    .bind(&id)
-    .bind(claims.aid)
-    .execute(&state.pool)
-    .await?;
+    let result = sqlx::query(r#"DELETE FROM affiliates WHERE id = $1 AND tenant_id = $2"#)
+        .bind(&id)
+        .bind(claims.aid)
+        .execute(&state.pool)
+        .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Affiliate not found".into()));

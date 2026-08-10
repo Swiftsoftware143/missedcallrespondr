@@ -14,12 +14,11 @@ pub async fn get_settings(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TenantSetting>>, AppError> {
-    let items = sqlx::query_as::<_, TenantSetting>(
-        "SELECT * FROM tenant_settings WHERE tenant_id = $1",
-    )
-    .bind(claims.aid)
-    .fetch_all(&state.pool)
-    .await?;
+    let items =
+        sqlx::query_as::<_, TenantSetting>("SELECT * FROM tenant_settings WHERE tenant_id = $1")
+            .bind(claims.aid)
+            .fetch_all(&state.pool)
+            .await?;
     Ok(Json(items))
 }
 

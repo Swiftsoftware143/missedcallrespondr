@@ -3,11 +3,11 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::FromRow;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -91,21 +91,42 @@ pub async fn create_plan(
     Json(req): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let id = Uuid::new_v4();
-    let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let slug = req.get("slug").and_then(|v| v.as_str())
+    let name = req
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let slug = req
+        .get("slug")
+        .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| name.to_lowercase().replace(' ', "-"));
-    let description = req.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let price_monthly = req.get("price_monthly").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let price_yearly = req.get("price_yearly").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let description = req
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let price_monthly = req
+        .get("price_monthly")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let price_yearly = req
+        .get("price_yearly")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let features = req.get("features");
-    let is_active = req.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true);
+    let is_active = req
+        .get("is_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     if name.is_empty() {
         return Err(AppError::BadRequest("Plan name is required".into()));
     }
 
-    let payment_provider = req.get("payment_provider").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let payment_provider = req
+        .get("payment_provider")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     sqlx::query(
         r#"INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active, payment_provider)
@@ -123,7 +144,10 @@ pub async fn create_plan(
     .execute(&state.pool)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(json!({"id": id, "message": "Plan created"}))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"id": id, "message": "Plan created"})),
+    ))
 }
 
 pub async fn update_plan(
@@ -140,22 +164,63 @@ pub async fn update_plan(
     .await?
     .ok_or_else(|| AppError::NotFound("Plan not found".into()))?;
 
-    let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let name = if name.is_empty() { existing.try_get::<String,_>("name").unwrap_or_default() } else { name };
-    let slug = req.get("slug").and_then(|v| v.as_str()).map(|s| s.to_string())
+    let name = req
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name = if name.is_empty() {
+        existing.try_get::<String, _>("name").unwrap_or_default()
+    } else {
+        name
+    };
+    let slug = req
+        .get("slug")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
         .unwrap_or_else(|| existing.try_get::<String, _>("slug").unwrap_or_default());
-    let description = req.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let description: Option<String> = description.or_else(|| existing.try_get::<Option<String>, _>("description").ok().flatten());
-    let price_monthly = req.get("price_monthly").and_then(|v| v.as_f64()).unwrap_or_else(|| existing.try_get::<f64, _>("price_monthly").unwrap_or(0.0));
-    let price_yearly = req.get("price_yearly").and_then(|v| v.as_f64()).unwrap_or_else(|| existing.try_get::<f64, _>("price_yearly").unwrap_or(0.0));
-    let features = req.get("features").cloned().or_else(|| existing.try_get::<Option<serde_json::Value>, _>("features").ok().flatten());
-    let is_active = req.get("is_active").and_then(|v| v.as_bool()).unwrap_or_else(|| existing.try_get::<bool, _>("is_active").unwrap_or(true));
-    let payment_provider: Option<String> = req.get("payment_provider").and_then(|v| v.as_str()).map(|s| s.to_string())
-        .or_else(|| existing.try_get::<Option<String>, _>("payment_provider").ok().flatten());
+    let description = req
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let description: Option<String> = description.or_else(|| {
+        existing
+            .try_get::<Option<String>, _>("description")
+            .ok()
+            .flatten()
+    });
+    let price_monthly = req
+        .get("price_monthly")
+        .and_then(|v| v.as_f64())
+        .unwrap_or_else(|| existing.try_get::<f64, _>("price_monthly").unwrap_or(0.0));
+    let price_yearly = req
+        .get("price_yearly")
+        .and_then(|v| v.as_f64())
+        .unwrap_or_else(|| existing.try_get::<f64, _>("price_yearly").unwrap_or(0.0));
+    let features = req.get("features").cloned().or_else(|| {
+        existing
+            .try_get::<Option<serde_json::Value>, _>("features")
+            .ok()
+            .flatten()
+    });
+    let is_active = req
+        .get("is_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or_else(|| existing.try_get::<bool, _>("is_active").unwrap_or(true));
+    let payment_provider: Option<String> = req
+        .get("payment_provider")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            existing
+                .try_get::<Option<String>, _>("payment_provider")
+                .ok()
+                .flatten()
+        });
 
     sqlx::query(
         r#"UPDATE plans SET name=$1, slug=$2, description=$3, price_monthly=$4, price_yearly=$5,
-           features=$6, is_active=$7, payment_provider=$8 WHERE id=$9"#
+           features=$6, is_active=$7, payment_provider=$8 WHERE id=$9"#,
     )
     .bind(&name)
     .bind(&slug)
@@ -193,7 +258,9 @@ pub async fn admin_update_plan_features(
     Path(id): Path<Uuid>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let features = req.get("features").ok_or_else(|| AppError::BadRequest("features object required".into()))?;
+    let features = req
+        .get("features")
+        .ok_or_else(|| AppError::BadRequest("features object required".into()))?;
     let features_str = features.to_string();
     sqlx::query(
         "UPDATE plans SET features = COALESCE(features::text, '{}')::jsonb || $1::jsonb, updated_at=NOW() WHERE id=$2"
@@ -209,17 +276,26 @@ pub async fn admin_assign_plan(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let tenant_id = req.get("tenant_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok())
+    let tenant_id = req
+        .get("tenant_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| AppError::BadRequest("Valid tenant_id is required".into()))?;
-    let plan_id = req.get("plan_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok())
+    let plan_id = req
+        .get("plan_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| AppError::BadRequest("Valid plan_id is required".into()))?;
-    let billing_cycle = req.get("billing_cycle").and_then(|v| v.as_str()).unwrap_or("monthly");
+    let billing_cycle = req
+        .get("billing_cycle")
+        .and_then(|v| v.as_str())
+        .unwrap_or("monthly");
 
     let tpid = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, status, billing_cycle)
            VALUES ($1, $2, $3, 'active', $4)
-           ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', updated_at=NOW()"#
+           ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', updated_at=NOW()"#,
     )
     .bind(tpid)
     .bind(tenant_id)

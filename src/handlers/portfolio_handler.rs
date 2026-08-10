@@ -22,15 +22,18 @@ pub async fn list_portfolio_companies(
     .fetch_all(&state.pool)
     .await?;
 
-    let companies: Vec<serde_json::Value> = rows.iter().map(|r| {
-        json!({
-            "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
-            "name": r.try_get::<String,_>("name").unwrap_or_default(),
-            "slug": r.try_get::<String,_>("slug").unwrap_or_default(),
-            "settings": r.try_get::<String,_>("settings").unwrap_or_else(|_| "{}".into()),
-            "is_active": r.try_get::<bool,_>("is_active").unwrap_or(true),
+    let companies: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
+                "name": r.try_get::<String,_>("name").unwrap_or_default(),
+                "slug": r.try_get::<String,_>("slug").unwrap_or_default(),
+                "settings": r.try_get::<String,_>("settings").unwrap_or_else(|_| "{}".into()),
+                "is_active": r.try_get::<bool,_>("is_active").unwrap_or(true),
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(companies))
 }
@@ -41,14 +44,25 @@ pub async fn create_portfolio_company(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let tenant_id: Uuid = claims.aid;
-    features::enforce_feature_limit(&state.pool, tenant_id, "max_portfolio_companys", "Portfolio Companys").await?;
-    let name = body.get("name")
+    features::enforce_feature_limit(
+        &state.pool,
+        tenant_id,
+        "max_portfolio_companys",
+        "Portfolio Companys",
+    )
+    .await?;
+    let name = body
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("name is required".into()))?;
-    let slug = body.get("slug")
+    let slug = body
+        .get("slug")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("slug is required".into()))?;
-    let settings = body.get("settings").map(|v| v.to_string()).unwrap_or_else(|| "{}".into());
+    let settings = body
+        .get("settings")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "{}".into());
 
     let id = Uuid::new_v4();
 
@@ -101,19 +115,24 @@ pub async fn update_portfolio_company(
     Path(id): Path<Uuid>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let _existing = sqlx::query(
-        "SELECT id FROM portfolio_companies WHERE id = $1 AND tenant_id = $2"
-    )
-    .bind(id)
-    .bind(claims.aid)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Portfolio company not found".into()))?;
+    let _existing =
+        sqlx::query("SELECT id FROM portfolio_companies WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Portfolio company not found".into()))?;
 
     let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let slug = body.get("slug").and_then(|v| v.as_str()).unwrap_or("");
-    let settings_str = body.get("settings").map(|v| v.to_string()).unwrap_or_else(|| "{}".into());
-    let is_active = body.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true);
+    let settings_str = body
+        .get("settings")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "{}".into());
+    let is_active = body
+        .get("is_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     sqlx::query(
         "UPDATE portfolio_companies SET name = COALESCE(NULLIF($1, ''), name), slug = COALESCE(NULLIF($2, ''), slug), settings = CASE WHEN $3::jsonb = '{}'::jsonb THEN settings ELSE $3::jsonb END, is_active = $4, updated_at = NOW() WHERE id = $5"
@@ -127,7 +146,7 @@ pub async fn update_portfolio_company(
     .await?;
 
     let row = sqlx::query(
-        "SELECT id, name, slug, settings::text, is_active FROM portfolio_companies WHERE id = $1"
+        "SELECT id, name, slug, settings::text, is_active FROM portfolio_companies WHERE id = $1",
     )
     .bind(id)
     .fetch_one(&state.pool)
@@ -148,21 +167,45 @@ pub async fn internal_create_portfolio_company(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let key = headers.get("x-internal-key").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let key = headers
+        .get("x-internal-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if key != state.config.internal_sync_key {
         return Err(AppError::Unauthorized("Invalid internal key".into()));
     }
 
-    let tenant_id = body.get("tenant_id")
+    let tenant_id = body
+        .get("tenant_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| AppError::BadRequest("tenant_id required".into()))?;
 
-    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("Company").to_string();
-    let slug = body.get("slug").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| name.to_lowercase().replace(' ', "-"));
-    let email = body.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let domain = body.get("domain").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let description = body.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let name = body
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Company")
+        .to_string();
+    let slug = body
+        .get("slug")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| name.to_lowercase().replace(' ', "-"));
+    let email = body
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let domain = body
+        .get("domain")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let description = body
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let id = Uuid::new_v4();
 
     // Ensure tenant exists (FK constraint)
@@ -179,7 +222,8 @@ pub async fn internal_create_portfolio_company(
         "email": email,
         "description": description,
         "domain": domain,
-    }).to_string();
+    })
+    .to_string();
 
     sqlx::query(
         "INSERT INTO portfolio_companies (id, tenant_id, name, slug, settings) VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (id) DO NOTHING"

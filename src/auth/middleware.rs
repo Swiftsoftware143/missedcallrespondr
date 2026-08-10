@@ -7,8 +7,8 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::state::AppState;
 use super::models::validate_token;
+use crate::state::AppState;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
