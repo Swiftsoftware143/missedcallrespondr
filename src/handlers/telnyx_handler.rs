@@ -490,7 +490,7 @@ pub async fn delete_number(
             let _ = client
                 .delete(format!(
                     "https://api.telnyx.com/v2/phone_numbers/{}",
-                    &number.number.trim_start_matches('+')
+                    number.number.trim_start_matches('+')
                 ))
                 .header("Authorization", format!("Bearer {}", conf.api_key))
                 .send()

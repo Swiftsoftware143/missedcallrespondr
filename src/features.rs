@@ -125,6 +125,7 @@ async fn count_usage(pool: &PgPool, tenant_id: Uuid, feature_key: &str) -> Resul
 }
 
 /// Backwards-compat wrapper
+#[allow(dead_code)]
 pub async fn check_feature_limit(
     pool: &PgPool,
     tenant_id: Uuid,
