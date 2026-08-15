@@ -120,6 +120,25 @@ pub async fn register(
         }
     });
 
+    // Send welcome email
+    let wl_pool = state.pool.clone();
+    let wl_email = req.email.clone();
+    let wl_name = req.name.clone();
+    tokio::spawn(async move {
+        let vars = serde_json::json!({
+            "name": wl_name,
+            "email": wl_email,
+            "app_name": "MissedCall Respondr",
+            "login_url": "https://app.missedcallrespondr.com"
+        });
+        let nil = uuid::Uuid::nil();
+        if let Err(e) =
+            crate::email::send_template_email(&wl_pool, nil, &wl_email, "welcome", &vars).await
+        {
+            tracing::warn!("Welcome email failed for {}: {}", wl_email, e);
+        }
+    });
+
     Ok(Json(AuthResponse {
         token,
         team_member: TeamMemberResponse {

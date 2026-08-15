@@ -487,6 +487,12 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/telnyx-config",
             get(telnyx_handler::get_admin_config).put(telnyx_handler::put_admin_config),
         )
+        // Site configuration
+        .route(
+            "/api/v1/admin/site",
+            get(crate::handlers::site_handler::get_site)
+                .put(crate::handlers::site_handler::update_site),
+        )
         // Payment Providers (admin)
         .route(
             "/api/v1/payment-providers",
