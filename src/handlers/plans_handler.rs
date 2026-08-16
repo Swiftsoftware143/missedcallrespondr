@@ -272,6 +272,80 @@ pub async fn admin_update_plan_features(
     Ok(Json(json!({"message": "Features updated"})))
 }
 
+/// Fire-and-forget notification to FunnelSwift that a tenant upgraded to a paid plan,
+/// so the referring affiliate is credited (permanent, no expiry).
+async fn notify_funnelswift_upgrade(
+    funnelswift_url: &str,
+    internal_sync_key: &str,
+    email: &str,
+    plan_name: &str,
+    plan_price: f64,
+    event_id: &str,
+) {
+    if email.is_empty() || funnelswift_url.is_empty() {
+        return;
+    }
+    let url = format!(
+        "{}/api/v1/internal/affiliate/upgrade-event",
+        funnelswift_url.trim_end_matches('/')
+    );
+    let key = internal_sync_key.to_string();
+    let payload = serde_json::json!({
+        "source_app": "missedcallrespondr",
+        "email": email,
+        "plan_name": plan_name,
+        "plan_price": plan_price,
+        "event_id": event_id,
+    });
+    tokio::spawn(async move {
+        let _ = reqwest::Client::new()
+            .post(&url)
+            .header("x-internal-key", key)
+            .json(&payload)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await;
+    });
+}
+
+/// Resolve the tenant's owner email + plan, and notify FunnelSwift if it's a PAID upgrade.
+async fn attribute_plan_upgrade(state: &AppState, tenant_id: Uuid, plan_id: Uuid) {
+    let plan: Option<(String, Option<f64>)> =
+        sqlx::query_as("SELECT name, price_monthly::float8 FROM plans WHERE id = $1")
+            .bind(plan_id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    let Some((plan_name, price)) = plan else {
+        return;
+    };
+    let plan_price = price.unwrap_or(0.0);
+    if plan_price <= 0.0 {
+        return;
+    }
+    let email: Option<String> = sqlx::query_scalar(
+        "SELECT email FROM users WHERE tenant_id = $1 AND role IN ('admin','company_admin','account_owner') LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+    let Some(email) = email else {
+        return;
+    };
+    notify_funnelswift_upgrade(
+        &state.funnelswift_url,
+        &state.config.internal_sync_key,
+        &email,
+        &plan_name,
+        plan_price,
+        &Uuid::new_v4().to_string(),
+    )
+    .await;
+}
+
 pub async fn admin_assign_plan(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -303,5 +377,9 @@ pub async fn admin_assign_plan(
     .bind(billing_cycle)
     .execute(&state.pool)
     .await?;
+
+    // Credit the referring affiliate if this is a paid-plan assignment.
+    attribute_plan_upgrade(&state, tenant_id, plan_id).await;
+
     Ok(Json(json!({"message": "Plan assigned to account"})))
 }
