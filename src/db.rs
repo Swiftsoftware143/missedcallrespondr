@@ -1,29 +1,66 @@
 use sqlx::PgPool;
 
+/// Runs all migrations in dependency order.
+/// Migrations are idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
-    let sql = include_str!("../migrations/000001_initial.sql");
-    sqlx::raw_sql(sql).execute(pool).await?;
+    let migrations: &[(&str, &str)] = &[
+        (
+            "000001_initial",
+            include_str!("../migrations/000001_initial.sql"),
+        ),
+        (
+            "000002_api_keys",
+            include_str!("../migrations/000002_api_keys.sql"),
+        ),
+        (
+            "000003_portfolio_integrations",
+            include_str!("../migrations/000003_portfolio_integrations.sql"),
+        ),
+        (
+            "000004_add_email_description",
+            include_str!("../migrations/000004_add_email_description.sql"),
+        ),
+        (
+            "000004_password_resets",
+            include_str!("../migrations/000004_password_resets.sql"),
+        ),
+        (
+            "000005_provider_keys",
+            include_str!("../migrations/000005_provider_keys.sql"),
+        ),
+        (
+            "000006_campaign_triggers",
+            include_str!("../migrations/000006_campaign_triggers.sql"),
+        ),
+        (
+            "000007_contact_custom_fields",
+            include_str!("../migrations/000007_contact_custom_fields.sql"),
+        ),
+        (
+            "000008_credit_system",
+            include_str!("../migrations/000008_credit_system.sql"),
+        ),
+        // Note: duplicate 000008_credit_system + 000008_tag_groups_and_tags both executed
+        (
+            "000008_tag_groups_and_tags",
+            include_str!("../migrations/000008_tag_groups_and_tags.sql"),
+        ),
+        (
+            "000009_payment_checkout",
+            include_str!("../migrations/000009_payment_checkout.sql"),
+        ),
+        (
+            "000010_payment_provider",
+            include_str!("../migrations/000010_payment_provider.sql"),
+        ),
+        (
+            "000011_schema_fix",
+            include_str!("../migrations/000011_schema_fix.sql"),
+        ),
+    ];
 
-    let sql2 = include_str!("../migrations/000002_api_keys.sql");
-    sqlx::raw_sql(sql2).execute(pool).await?;
-
-    let sql3 = include_str!("../migrations/000003_portfolio_integrations.sql");
-    sqlx::raw_sql(sql3).execute(pool).await?;
-
-    let sql4 = include_str!("../migrations/000004_password_resets.sql");
-    sqlx::raw_sql(sql4).execute(pool).await?;
-
-    let sql5 = include_str!("../migrations/000005_provider_keys.sql");
-    sqlx::raw_sql(sql5).execute(pool).await?;
-
-    let sql6 = include_str!("../migrations/000006_campaign_triggers.sql");
-    sqlx::raw_sql(sql6).execute(pool).await?;
-
-    let sql7 = include_str!("../migrations/000007_contact_custom_fields.sql");
-    sqlx::raw_sql(sql7).execute(pool).await?;
-
-    let sql8 = include_str!("../migrations/000008_tag_groups_and_tags.sql");
-    sqlx::raw_sql(sql8).execute(pool).await?;
-
+    for (_name, sql) in migrations {
+        sqlx::raw_sql(sql).execute(pool).await?;
+    }
     Ok(())
 }

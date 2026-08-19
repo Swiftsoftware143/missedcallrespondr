@@ -3,6 +3,14 @@ ALTER TABLE tenant_plans ADD COLUMN IF NOT EXISTS credit_balance INTEGER NOT NUL
 ALTER TABLE tenant_plans ADD COLUMN IF NOT EXISTS lifetime_credits INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE tenant_plans ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;
 
+-- Ensure plans table has the canonical pricing/description columns
+-- used by 000008_credit_system seed + plans_handler.rs (description, price_monthly,
+-- price_yearly, sort_order). Idempotent (IF NOT EXISTS).
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_monthly NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_yearly NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+
 -- Create the Free tier plan (lowest tier, price = $0)
 INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order)
 VALUES (

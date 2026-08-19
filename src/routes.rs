@@ -325,7 +325,7 @@ pub fn create_router(state: AppState) -> Router {
             get(crate::handlers::leads_handler::list).post(crate::handlers::leads_handler::create),
         )
         .route(
-            "/api/v1/leads/{id}",
+            "/api/v1/leads/:id",
             get(crate::handlers::leads_handler::get)
                 .put(crate::handlers::leads_handler::update)
                 .delete(crate::handlers::leads_handler::delete),
@@ -336,10 +336,15 @@ pub fn create_router(state: AppState) -> Router {
             get(crate::handlers::deals_handler::list).post(crate::handlers::deals_handler::create),
         )
         .route(
-            "/api/v1/deals/{id}",
+            "/api/v1/deals/:id",
             get(crate::handlers::deals_handler::get)
                 .put(crate::handlers::deals_handler::update)
                 .delete(crate::handlers::deals_handler::delete),
+        )
+        // Deal stage move (pipeline)
+        .route(
+            "/api/v1/deals/:id/move",
+            post(crate::handlers::deals_handler::move_stage),
         )
         // Campaigns
         .route(
@@ -348,10 +353,18 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::campaigns_handler::create),
         )
         .route(
-            "/api/v1/campaigns/{id}",
+            "/api/v1/campaigns/:id",
             get(crate::handlers::campaigns_handler::get)
                 .put(crate::handlers::campaigns_handler::update)
                 .delete(crate::handlers::campaigns_handler::delete),
+        )
+        .route(
+            "/api/v1/campaigns/:id/activate",
+            post(crate::handlers::campaigns_handler::activate),
+        )
+        .route(
+            "/api/v1/campaigns/:id/pause",
+            post(crate::handlers::campaigns_handler::pause),
         )
         // Tickets
         .route(
@@ -360,10 +373,18 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::tickets_handler::create),
         )
         .route(
-            "/api/v1/tickets/{id}",
+            "/api/v1/tickets/:id",
             get(crate::handlers::tickets_handler::get)
                 .put(crate::handlers::tickets_handler::update)
                 .delete(crate::handlers::tickets_handler::delete),
+        )
+        .route(
+            "/api/v1/tickets/stats",
+            get(crate::handlers::tickets_handler::stats),
+        )
+        .route(
+            "/api/v1/tickets/:id/messages",
+            post(crate::handlers::tickets_handler::add_message),
         )
         // Email Templates
         .route(
@@ -372,7 +393,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::email_templates_handler::create),
         )
         .route(
-            "/api/v1/email-templates/{id}",
+            "/api/v1/email-templates/:id",
             get(crate::handlers::email_templates_handler::get)
                 .put(crate::handlers::email_templates_handler::update)
                 .delete(crate::handlers::email_templates_handler::delete),
@@ -384,7 +405,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::import_logs_handler::create),
         )
         .route(
-            "/api/v1/import-logs/{id}",
+            "/api/v1/import-logs/:id",
             get(crate::handlers::import_logs_handler::get)
                 .put(crate::handlers::import_logs_handler::update)
                 .delete(crate::handlers::import_logs_handler::delete),
@@ -396,7 +417,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::export_templates_handler::create),
         )
         .route(
-            "/api/v1/export-templates/{id}",
+            "/api/v1/export-templates/:id",
             get(crate::handlers::export_templates_handler::get)
                 .put(crate::handlers::export_templates_handler::update)
                 .delete(crate::handlers::export_templates_handler::delete),
@@ -408,7 +429,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::calendar_events_handler::create),
         )
         .route(
-            "/api/v1/calendar-events/{id}",
+            "/api/v1/calendar-events/:id",
             get(crate::handlers::calendar_events_handler::get)
                 .put(crate::handlers::calendar_events_handler::update)
                 .delete(crate::handlers::calendar_events_handler::delete),
@@ -420,7 +441,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::clients_handler::create),
         )
         .route(
-            "/api/v1/clients/{id}",
+            "/api/v1/clients/:id",
             get(crate::handlers::clients_handler::get)
                 .put(crate::handlers::clients_handler::update)
                 .delete(crate::handlers::clients_handler::delete),
@@ -432,10 +453,18 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::handlers::workflows_handler::create),
         )
         .route(
-            "/api/v1/workflows/{id}",
+            "/api/v1/workflows/:id",
             get(crate::handlers::workflows_handler::get)
                 .put(crate::handlers::workflows_handler::update)
                 .delete(crate::handlers::workflows_handler::delete),
+        )
+        .route(
+            "/api/v1/workflows/:id/activate",
+            post(crate::handlers::workflows_handler::activate),
+        )
+        .route(
+            "/api/v1/workflows/:id/deactivate",
+            post(crate::handlers::workflows_handler::deactivate),
         )
         // Admin endpoints (cross-app portfolio sync + impersonation)
         .route(
@@ -500,7 +529,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(checkout_handler::upsert_payment_provider),
         )
         .route(
-            "/api/v1/payment-providers/{provider_type}",
+            "/api/v1/payment-providers/:provider_type",
             delete(checkout_handler::delete_payment_provider),
         )
         // Checkout Sessions

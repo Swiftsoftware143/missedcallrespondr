@@ -1,56 +1,177 @@
-//! Stub handler for campaigns
-
-use crate::error::AppError;
-use crate::state::AppState;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
 use serde::Deserialize;
-use serde_json::json;
+use uuid::Uuid;
+
+use crate::{
+    config::Claims,
+    error::AppError,
+    models::campaign::{Campaign, CreateCampaignRequest, UpdateCampaignRequest},
+    state::AppState,
+};
 
 #[derive(Deserialize)]
 pub struct ListQuery {
-    #[allow(dead_code)]
     pub limit: Option<i64>,
-    #[allow(dead_code)]
     pub offset: Option<i64>,
-    #[allow(dead_code)]
-    pub search: Option<String>,
+    pub status: Option<String>,
 }
 
 pub async fn list(
-    State(_state): State<AppState>,
-    Query(_query): Query<ListQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(json!([])))
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<Vec<Campaign>>, AppError> {
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
+    let offset = q.offset.unwrap_or(0).max(0);
+    let items = if let Some(status) = &q.status {
+        sqlx::query_as::<_, Campaign>(
+            "SELECT * FROM campaigns WHERE tenant_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+        )
+        .bind(claims.aid)
+        .bind(status)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.pool)
+        .await?
+    } else {
+        sqlx::query_as::<_, Campaign>(
+            "SELECT * FROM campaigns WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        )
+        .bind(claims.aid)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.pool)
+        .await?
+    };
+    Ok(Json(items))
 }
 
 pub async fn create(
-    State(_state): State<AppState>,
-    Json(_body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(json!({"created": true})))
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(req): Json<CreateCampaignRequest>,
+) -> Result<Json<Campaign>, AppError> {
+    crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_campaigns", "Campaigns")
+        .await?;
+    let id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+    sqlx::query(
+        "INSERT INTO campaigns (id, tenant_id, name, kind, is_active, status, metadata, created_at, updated_at) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    )
+    .bind(id)
+    .bind(claims.aid)
+    .bind(&req.name)
+    .bind(req.kind.as_deref().unwrap_or("manual"))
+    .bind(req.is_active.unwrap_or(true))
+    .bind(req.status.as_deref().unwrap_or("draft"))
+    .bind(req.metadata.clone().unwrap_or(serde_json::json!({})))
+    .bind(now)
+    .bind(now)
+    .execute(&state.pool)
+    .await?;
+    let item = sqlx::query_as::<_, Campaign>("SELECT * FROM campaigns WHERE id = $1")
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await?;
+    Ok(Json(item))
 }
 
 pub async fn get(
-    State(_state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(json!({"id": id})))
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Campaign>, AppError> {
+    let item =
+        sqlx::query_as::<_, Campaign>("SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Campaign not found".into()))?;
+    Ok(Json(item))
 }
 
 pub async fn update(
-    State(_state): State<AppState>,
-    Path(id): Path<String>,
-    Json(_body): Json<serde_json::Value>,
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateCampaignRequest>,
+) -> Result<Json<Campaign>, AppError> {
+    let existing =
+        sqlx::query_as::<_, Campaign>("SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Campaign not found".into()))?;
+    let now = chrono::Utc::now();
+    sqlx::query(
+        "UPDATE campaigns SET name=$1, kind=$2, is_active=$3, status=$4, metadata=$5, updated_at=$6 WHERE id=$7",
+    )
+    .bind(req.name.as_ref().unwrap_or(&existing.name))
+    .bind(req.kind.as_ref().unwrap_or(&existing.kind))
+    .bind(req.is_active.unwrap_or(existing.is_active))
+    .bind(req.status.as_ref().unwrap_or(&existing.status))
+    .bind(req.metadata.clone().unwrap_or(existing.metadata))
+    .bind(now)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
+    let item = sqlx::query_as::<_, Campaign>("SELECT * FROM campaigns WHERE id = $1")
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await?;
+    Ok(Json(item))
+}
+
+pub async fn activate(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(json!({"updated": true, "id": id})))
+    let result = sqlx::query("UPDATE campaigns SET status='active', is_active=true, updated_at=NOW() WHERE id = $1 AND tenant_id = $2")
+        .bind(id)
+        .bind(claims.aid)
+        .execute(&state.pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Campaign not found".into()));
+    }
+    Ok(Json(serde_json::json!({"id": id, "activated": true})))
+}
+
+pub async fn pause(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let result = sqlx::query("UPDATE campaigns SET status='paused', is_active=false, updated_at=NOW() WHERE id = $1 AND tenant_id = $2")
+        .bind(id)
+        .bind(claims.aid)
+        .execute(&state.pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Campaign not found".into()));
+    }
+    Ok(Json(serde_json::json!({"id": id, "paused": true})))
 }
 
 pub async fn delete(
-    State(_state): State<AppState>,
-    Path(id): Path<String>,
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(json!({"deleted": true, "id": id})))
+    let result = sqlx::query("DELETE FROM campaigns WHERE id = $1 AND tenant_id = $2")
+        .bind(id)
+        .bind(claims.aid)
+        .execute(&state.pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Campaign not found".into()));
+    }
+    Ok(Json(serde_json::json!({"deleted": true, "id": id})))
 }
