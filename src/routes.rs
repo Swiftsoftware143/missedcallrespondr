@@ -9,10 +9,10 @@ use crate::{
     auth::{handlers as auth_handlers, middleware::auth_middleware},
     handlers::{
         api_key_handler, call_handler, call_log_handler, checkout_handler,
-        contact_custom_field_handler, contact_handler, dashboard_handler, follow_up_handler,
-        integration_handler, integration_target_handler, message_handler, message_template_handler,
-        portfolio_handler, provider_keys_handler, response_rule_handler, settings_handler,
-        telnyx_handler, voicemail_handler,
+        contact_custom_field_handler, contact_handler, coreswift_integration_handler,
+        dashboard_handler, follow_up_handler, integration_handler, integration_target_handler,
+        message_handler, message_template_handler, portfolio_handler, provider_keys_handler,
+        response_rule_handler, settings_handler, telnyx_handler, voicemail_handler,
     },
     state::AppState,
 };
@@ -189,6 +189,15 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/integrations/:id/test",
             post(integration_handler::test_integration),
+        )
+        // CoreSwift integration surface (Zapier-style deep layer)
+        .route(
+            "/api/v1/integrations/coreswift/status",
+            get(coreswift_integration_handler::status),
+        )
+        .route(
+            "/api/v1/integrations/coreswift/lists",
+            get(coreswift_integration_handler::lists),
         )
         // Dashboard
         .route(

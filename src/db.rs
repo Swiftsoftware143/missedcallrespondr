@@ -57,6 +57,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000011_schema_fix",
             include_str!("../migrations/000011_schema_fix.sql"),
         ),
+        (
+            "000012_coreswift_integration",
+            include_str!("../migrations/000012_coreswift_integration.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

@@ -103,6 +103,47 @@ pub async fn create(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
+
+    // Zapier-style CoreSwift push (best-effort, never blocks/fails the save).
+    // Only runs if the account has connected a CoreSwift personal API key.
+    {
+        let aid = claims.aid;
+        let name = item.name.clone();
+        let phone = item.phone.clone().unwrap_or_default();
+        let email = item.email.clone().unwrap_or_default();
+        let tags = item.tags.clone().unwrap_or_default();
+        let notes = item.notes.clone().unwrap_or_default();
+        let source = item.source.clone();
+        let st = state.clone();
+        tokio::spawn(async move {
+            crate::handlers::coreswift_external::push_lead_to_coreswift(
+                &st,
+                &aid,
+                &name,
+                None, // leads have no company column
+                if email.is_empty() {
+                    None
+                } else {
+                    Some(email.as_str())
+                },
+                if phone.is_empty() {
+                    None
+                } else {
+                    Some(phone.as_str())
+                },
+                &tags,
+                None, // no per-campaign list resolved at standalone create time
+                Some(source.as_str()),
+                if notes.is_empty() {
+                    None
+                } else {
+                    Some(notes.as_str())
+                },
+            )
+            .await;
+        });
+    }
+
     Ok(Json(item))
 }
 

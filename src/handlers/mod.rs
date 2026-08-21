@@ -9,6 +9,8 @@ pub mod checkout_handler;
 pub mod clients_handler;
 pub mod contact_custom_field_handler;
 pub mod contact_handler;
+pub mod coreswift_external;
+pub mod coreswift_integration_handler;
 pub mod coreswift_push;
 pub mod dashboard_handler;
 pub mod deals_handler;
