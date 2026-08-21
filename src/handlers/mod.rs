@@ -21,6 +21,7 @@ pub mod import_logs_handler;
 pub mod integration_handler;
 pub mod integration_target_handler;
 pub mod leads_handler;
+pub mod lists_handler;
 pub mod message_handler;
 pub mod message_template_handler;
 pub mod plans_handler;

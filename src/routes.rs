@@ -11,8 +11,9 @@ use crate::{
         api_key_handler, call_handler, call_log_handler, checkout_handler,
         contact_custom_field_handler, contact_handler, coreswift_integration_handler,
         dashboard_handler, follow_up_handler, integration_handler, integration_target_handler,
-        message_handler, message_template_handler, portfolio_handler, provider_keys_handler,
-        response_rule_handler, settings_handler, telnyx_handler, voicemail_handler,
+        lists_handler, message_handler, message_template_handler, portfolio_handler,
+        provider_keys_handler, response_rule_handler, settings_handler, telnyx_handler,
+        voicemail_handler,
     },
     state::AppState,
 };
@@ -266,6 +267,23 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/provider-keys/:provider",
             delete(provider_keys_handler::delete_provider_key),
+        )
+        // Lists (each campaign owns its own fresh list)
+        .route(
+            "/api/v1/lists",
+            get(lists_handler::list).post(lists_handler::create),
+        )
+        .route(
+            "/api/v1/lists/:id",
+            put(lists_handler::update).delete(lists_handler::delete),
+        )
+        .route(
+            "/api/v1/lists/:id/leads",
+            get(lists_handler::list_leads).post(lists_handler::add_lead),
+        )
+        .route(
+            "/api/v1/lists/:id/leads/:lead_id",
+            delete(lists_handler::remove_lead),
         )
         // Telnyx numbers (authenticated)
         .route(

@@ -77,6 +77,12 @@ pub async fn create(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
+
+    // Each campaign owns its own fresh list, named after the campaign
+    // (campaign "Inbound Plumbing" -> list "Inbound Plumbing").
+    crate::handlers::lists_handler::ensure_campaign_list(&state, &claims.aid, &item.id, &item.name)
+        .await;
+
     Ok(Json(item))
 }
 

@@ -14,6 +14,7 @@ pub mod follow_up;
 pub mod import_log;
 pub mod integration;
 pub mod lead;
+pub mod list;
 pub mod message;
 pub mod message_template;
 pub mod response_rule;

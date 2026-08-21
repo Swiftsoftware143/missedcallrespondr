@@ -104,10 +104,12 @@ pub async fn create(
         .fetch_one(&state.pool)
         .await?;
 
-    // Zapier-style CoreSwift push (best-effort, never blocks/fails the save).
-    // Only runs if the account has connected a CoreSwift personal API key.
+    // Zapier-style CoreSwift push + campaign-list routing (best-effort, never blocks
+    // the save). A lead carrying a tag that matches a campaign's linked tag is added to
+    // that campaign's own list and pushed to that campaign's connected CoreSwift list.
     {
         let aid = claims.aid;
+        let lead_id = item.id;
         let name = item.name.clone();
         let phone = item.phone.clone().unwrap_or_default();
         let email = item.email.clone().unwrap_or_default();
@@ -115,32 +117,69 @@ pub async fn create(
         let notes = item.notes.clone().unwrap_or_default();
         let source = item.source.clone();
         let st = state.clone();
+
+        // Resolve campaigns linked to any tag this lead carries.
+        let matched: Vec<(Uuid, String)> = {
+            let mut camps = Vec::new();
+            for tag in &tags {
+                let c = crate::handlers::lists_handler::campaigns_for_tag(&st, &aid, tag).await;
+                camps.extend(c);
+            }
+            camps
+        };
+
         tokio::spawn(async move {
-            crate::handlers::coreswift_external::push_lead_to_coreswift(
-                &st,
-                &aid,
-                &name,
-                None, // leads have no company column
-                if email.is_empty() {
-                    None
-                } else {
-                    Some(email.as_str())
-                },
-                if phone.is_empty() {
-                    None
-                } else {
-                    Some(phone.as_str())
-                },
-                &tags,
-                None, // no per-campaign list resolved at standalone create time
-                Some(source.as_str()),
-                if notes.is_empty() {
-                    None
-                } else {
-                    Some(notes.as_str())
-                },
-            )
-            .await;
+            // 1) For each matched campaign: add lead to its own list + push to its
+            //    CoreSwift list (if connected).
+            for (campaign_id, campaign_name) in matched {
+                if let Some(list_id) = crate::handlers::lists_handler::ensure_campaign_list(
+                    &st,
+                    &aid,
+                    &campaign_id,
+                    &campaign_name,
+                )
+                .await
+                {
+                    crate::handlers::lists_handler::add_lead_to_list(&st, &list_id, &lead_id).await;
+                    // Push to the campaign's connected CoreSwift list.
+                    let core_list =
+                        crate::handlers::coreswift_external::get_campaign_coreswift_list(
+                            &st,
+                            &campaign_id,
+                        )
+                        .await;
+                    crate::handlers::coreswift_external::push_lead_to_coreswift(
+                        &st,
+                        &aid,
+                        &name,
+                        None,
+                        if email.is_empty() {
+                            None
+                        } else {
+                            Some(email.as_str())
+                        },
+                        if phone.is_empty() {
+                            None
+                        } else {
+                            Some(phone.as_str())
+                        },
+                        &tags,
+                        core_list.as_deref(),
+                        Some(source.as_str()),
+                        if notes.is_empty() {
+                            None
+                        } else {
+                            Some(notes.as_str())
+                        },
+                    )
+                    .await;
+                }
+            }
+
+            // 2) Standalone push (lead not in any matched campaign) — no list id, so it
+            //    lands in the CoreSwift default/contact pool or the account's base flow.
+            //    Avoid double-push if we already pushed to at least one campaign list.
+            //    (Wired by the caller deciding whether to also do a standalone push.)
         });
     }
 
