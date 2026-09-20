@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- AUTH GUARD — canonical login redirect -->
+<script>
+!function(){
+  var p = window.location.pathname;
+  if (p === '/' || p === '/index.html' || p.startsWith('/api/')) return;
+  var t = localStorage.getItem('ws_fs_token') || localStorage.getItem('token') || localStorage.getItem('access_token');
+  if (!t) window.location.replace('/');
+}();
+</script>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MissedCall Respondr — Admin Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.btn-blue{background:#7c3aed}.btn-blue:hover{background:#6d28d9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-purple{background:#ede9fe;color:#6d28d9}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}.dropdown-item{padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px}.dropdown-item:hover{background:#f1f5f9}.text-red-500{color:#ef4444}.upgrade-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999}.upgrade-box{background:#fff;border-radius:20px;padding:32px;text-align:center;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2)}.upgrade-box h2{font-size:20px;color:#1e293b;margin:0 0 8px}.upgrade-box p{color:#64748b;margin:0 0 20px;line-height:1.5}.upgrade-box .btn-upgrade{background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:600;border:none;cursor:pointer}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-text{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}</style>
+</head>
+<body class="min-h-screen">
+<div id="app" class="flex min-h-screen"></div>
+
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.26.4';
+import htm from 'https://esm.sh/htm@3.1.1';
+const html = htm.bind(h);
+const showUpgradePrompt = (msg) => {
+  const div = document.createElement("div");
+  div.className = "upgrade-overlay";
+  div.innerHTML = "<div class='upgrade-box'><h2>🚀 Upgrade Required</h2><p>" + (msg || "This feature requires a higher plan.") + "</p><button class='btn-upgrade' onclick=\"this.closest('.upgrade-overlay').remove()\">Got it</button></div>";
+  document.body.appendChild(div);
+  div.addEventListener("click", (e) => { if (e.target === div) div.remove(); });
+};
+
+
+const API = (() => {
+  const base = window.location.origin + '/api/v1';
+  let token = sessionStorage.getItem('mc_token');
+  let user = JSON.parse(sessionStorage.getItem('mc_user') || 'null');
+
+  const headers = () => ({ 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) });
+  const handle = async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || d.message || 'Request failed'); return d; };
+  const login = (e, p) => fetch(base + '/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:e,password:p}) }).then(handle);
+  const get = (p) => fetch(base + p, {headers:headers()}).then(handle).catch(e => { console.error(e); throw e; });
+  const post = (p, b) => fetch(base + p, {method:'POST', headers:headers(), body:JSON.stringify(b)}).then(handle);
+  const put = (p, b) => fetch(base + p, {method:'PUT', headers:headers(), body:JSON.stringify(b)}).then(handle);
+  const del = (p) => fetch(base + p, {method:'DELETE', headers:headers()}).then(handle);
+  return {
+    login, get, post, put, del,
+    get token(){ return token; },
+    get user(){ return user; },
+    setAuth(t, u){ token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
+    logout(){ token = null; user = null; sessionStorage.removeItem('mc_token'); sessionStorage.removeItem('mc_user'); }
+  };
+})();
+
+const S = { view: 'dashboard', loading: false, error: null, views: {} };
+const _get = API.get, _post = API.post, _put = API.put, _del = API.del;
+API.get = async (p) => _get(p).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
+API.post = async (p, b) => _post(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
+API.put = async (p, b) => _put(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
+API.del = async (p) => _del(p).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
+
+const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
+
+// ---- LOGIN ----
+const LoginView = () => {
+  let email = '', pw = '';
+  const submit = async (e) => { e.preventDefault(); S.loading = true; S.error = null; renderApp();
+    try { const r = await API.login(email, pw); API.setAuth(r.token, r.team_member || r.user); S.view = 'dashboard'; } catch(err) { S.error = err.message; }
+    S.loading = false; renderApp();
+  };
+  return html`<div class="flex items-center justify-center min-h-screen w-full">
+    <div class="card w-full max-w-sm mx-4">
+      <div class="text-center mb-6">
+        <div class="text-3xl mb-2">📞</div>
+        <h1 class="text-xl font-bold text-gray-800">MissedCall Respondr</h1>
+        <p class="text-sm text-gray-500 mt-1">Auto-Response Platform</p>
+      </div>
+      <form onSubmit=${submit} class="space-y-4">
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${email} onInput=${e => email = e.target.value} placeholder="admin@company.com" required /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${pw} onInput=${e => pw = e.target.value} placeholder="......" required /></div>
+        ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
+        <button type="submit" class="btn w-full">Sign In</button>
+      </form>
+    </div>
+  </div>`;
+};
+
+// ---- DASHBOARD ----
+const Dashboard = () => {
+  const st = viewState('dashboard', {});
+  if (!st._loaded) { st._loaded = true;
+    API.get('/dashboard/stats').then(s => { Object.assign(st, s); renderApp(); }).catch(() => {});
+  }
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">Dashboard</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="stat-card"><div class="stat-value">${st.total_rules ?? '...'}</div><div class="stat-label">Response Rules</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_templates ?? '...'}</div><div class="stat-label">Templates</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_contacts ?? '...'}</div><div class="stat-label">Contacts</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_responses ?? '...'}</div><div class="stat-label">Auto-Responses</div></div>
+    </div>
+  </div>`;
+};
+
+// ---- PORTFOLIO ----
+const Portfolio = () => {
+  const st = viewState('portfolio', { list: [], showModal: false, editItem: null, search: '' });
+  const load = async () => { try { const data = await API.get('/portfolio-companies'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/portfolio-companies/' + st.editItem.id, data); else await API.post('/portfolio-companies', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this portfolio company?')) return; await API.del('/portfolio-companies/' + id); load(); };
+  const impersonate = async (company) => {
+    if(!confirm('Impersonate as ' + company.name + '?')) return;
+    try {
+      const r = await API.post('/admin/impersonate', { account_id: company.tenant_id || company.id });
+      sessionStorage.setItem('impersonate_token', r.token);
+      sessionStorage.setItem('impersonate_company', JSON.stringify(company));
+      window.open('https://missedcallrespondr.com', '_blank');
+    } catch(e) { alert('Impersonation failed: ' + e.message); }
+  };
+
+  const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.slug||'').toLowerCase().includes(st.search.toLowerCase()) || (c.domain||'').toLowerCase().includes(st.search.toLowerCase()));
+
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Portfolio Companies</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Company</button></div></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.map(c => html`<tr>
+          <td class="font-medium">${c.name}</td><td class="text-gray-500">${c.slug || c.domain || '-'}</td>
+          <td><button class="btn btn-sm btn-blue" onClick=${() => impersonate(c)} title="Impersonate">🔑 Impersonate</button><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
+        </tr>`)}
+        ${filtered.length === 0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No portfolio companies yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Portfolio Company</h3>
+        ${(() => { let name = st.editItem?.name||'', slug = st.editItem?.slug||'';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Company Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Slug</label><input class="input" value=${slug} onInput=${e => slug = e.target.value} /></div>
+            <div class="flex gap-2 justify-end mt-4">
+              <button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button>
+              <button class="btn" onClick=${() => save({name,slug})}>${st.editItem ? 'Save' : 'Add'}</button>
+            </div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- RESPONSE RULES ----
+const ResponseRules = () => {
+  const st = viewState('rules', { list: [], showModal: false, editItem: null, search: '' });
+  const load = async () => { try { const data = await API.get('/response-rules'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/response-rules/' + st.editItem.id, data); else await API.post('/response-rules', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete?')) return; await API.del('/response-rules/' + id); load(); };
+
+  const filtered = st.list.filter(r => !st.search || (r.name||'').toLowerCase().includes(st.search.toLowerCase()));
+
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Rule</button></div></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Condition</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.map(r => html`<tr>
+          <td class="font-medium">${r.name}</td>
+          <td class="text-gray-500">${r.trigger_condition || r.condition || r.trigger || '-'}</td>
+          <td><span class="badge ${r.active ? 'badge-green' : 'badge-red'}">${r.active ? 'Active' : 'Inactive'}</span></td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(r); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td>
+        </tr>`)}
+        ${filtered.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No response rules yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Response Rule</h3>
+        ${(() => { let name = st.editItem?.name||'', condition = st.editItem?.trigger_condition||st.editItem?.condition||'';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Condition</label><input class="input" value=${condition} onInput=${e => condition = e.target.value} /></div>
+            <div class="flex gap-2 justify-end mt-4">
+              <button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button>
+              <button class="btn" onClick=${() => save({name, trigger_condition:condition, response_type:'sms', response_content:{text:condition}})}>${st.editItem ? 'Save' : 'Add'}</button>
+            </div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- TEMPLATES ----
+const Templates = () => {
+  const st = viewState('templates', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const data = await API.get('/message-templates'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/message-templates/' + st.editItem.id, data); else await API.post('/message-templates', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete?')) return; await API.del('/message-templates/' + id); load(); };
+
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Message Templates</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Template</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Type</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(t => html`<tr>
+          <td class="font-medium">${t.name || '-'}</td>
+          <td><span class="badge badge-blue">${t.type || 'sms'}</span></td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
+        </tr>`)}
+        ${st.list.length === 0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No templates yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Template</h3>
+        ${(() => { let name = st.editItem?.name||'', body = st.editItem?.body||st.editItem?.content||'', type = st.editItem?.type||'sms';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${type} onChange=${e => type = e.target.value}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div>
+            <div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${body} onInput=${e => body = e.target.value}></textarea></div>
+            <div class="flex gap-2 justify-end mt-4">
+              <button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button>
+              <button class="btn" onClick=${() => save({name,body,type})}>${st.editItem ? 'Save' : 'Add'}</button>
+            </div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- CONTACTS ----
+const Contacts = () => {
+  const st = viewState('contacts', { list: [], search: '' });
+  const load = async () => { try { const data = await API.get('/contacts'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.phone||'').toLowerCase().includes(st.search.toLowerCase()) || (c.email||'').toLowerCase().includes(st.search.toLowerCase()));
+
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Contacts</h2><input class="input" style="width:280px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Created</th></tr></thead>
+        <tbody>${filtered.slice(0, 100).map(c => html`<tr>
+          <td class="font-medium">${c.name || c.full_name || '-'}</td>
+          <td class="text-gray-500">${c.phone || '-'}</td>
+          <td class="text-gray-500">${c.email || '-'}</td>
+          <td class="text-gray-500 text-sm">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '-'}</td>
+        </tr>`)}
+        ${filtered.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+};
+
+// ---- LEADS ----
+const Leads = () => {
+  const st = viewState('leads', { list: [], showModal: false, editItem: null, search: '' });
+  const load = async () => { try { const data = await API.get('/leads'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/leads/' + st.editItem.id, data); else await API.post('/leads', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this lead?')) return; await API.del('/leads/' + id); load(); };
+  const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.phone||'').toLowerCase().includes(st.search.toLowerCase()) || (c.email||'').toLowerCase().includes(st.search.toLowerCase()) || (Array.isArray(c.tags) && c.tags.join(' ').toLowerCase().includes(st.search.toLowerCase())));
+  const renderTags = (tags) => (Array.isArray(tags) && tags.length) ? html`<div class="flex flex-wrap gap-1">${tags.map(t => html`<span class="badge badge-blue">${t}</span>`)}</div>` : '<span class="text-gray-400 text-sm">-</span>';
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Leads</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Lead</button></div></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Source</th><th>Tags</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.slice(0,100).map(c => html`<tr>
+          <td class="font-medium">${c.name || '-'}</td><td class="text-gray-500">${c.phone || '-'}</td><td class="text-gray-500">${c.email || '-'}</td>
+          <td><span class="badge ${c.status==='new'?'badge-blue':c.status==='contacted'?'badge-yellow':c.status==='qualified'?'badge-green':'badge-red'}">${c.status || 'new'}</span></td>
+          <td class="text-gray-500">${c.source || '-'}</td>
+          <td>${renderTags(c.tags)}</td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
+        </tr>`)}
+        ${filtered.length === 0 && html`<tr><td colspan="7" class="text-center text-gray-400 py-8">No leads yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Lead</h3>
+        ${(() => { let name = st.editItem?.name||'', phone = st.editItem?.phone||'', email = st.editItem?.email||'', status = st.editItem?.status||'new', source = st.editItem?.source||'call', notes = st.editItem?.notes||'', tags = (st.editItem?.tags||[]).join(', ');
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Phone</label><input class="input" value=${phone} onInput=${e => phone = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Email</label><input class="input" value=${email} onInput=${e => email = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Status</label><select class="input" value=${status} onChange=${e => status = e.target.value}><option value="new">New</option><option value="contacted">Contacted</option><option value="qualified">Qualified</option><option value="lost">Lost</option></select></div>
+            <div><label class="text-sm font-medium block mb-1">Source</label><input class="input" value=${source} onInput=${e => source = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Tags (comma-separated — a lead tagged with a campaign's linked tag lands in that campaign's own list & pushes to CoreSwift)</label><input class="input" value=${tags} onInput=${e => tags = e.target.value} placeholder="e.g. inbound-plumbing, qualified" /></div>
+            <div><label class="text-sm font-medium block mb-1">Notes</label><textarea class="input" rows="3" value=${notes} onInput=${e => notes = e.target.value}></textarea></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({name,phone,email,status,source,notes, tags: tags.split(',').map(t=>t.trim()).filter(Boolean)})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- DEALS ----
+const Deals = () => {
+  const st = viewState('deals', { list: [], showModal: false, editItem: null, search: '' });
+  const load = async () => { try { const data = await API.get('/deals'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/deals/' + st.editItem.id, data); else await API.post('/deals', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this deal?')) return; await API.del('/deals/' + id); load(); };
+  const move = async (d, stage) => { try { const r = await API.post('/deals/' + d.id + '/move', { stage }); alert('Deal moved to ' + r.stage); load(); } catch(e){ alert(e.message); } };
+  const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()));
+  const stageBadge = (s) => { const m = {'new':'badge-blue','qualified':'badge-yellow','negotiation':'badge-green','won':'badge-green','lost':'badge-red'}; return html`<span class="badge ${m[s]||'badge-blue'}">${s||'new'}</span>`; };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Deals</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Deal</button></div></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Value</th><th>Stage</th><th>Prob</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.slice(0,100).map(d => html`<tr>
+          <td class="font-medium">${d.name || '-'}</td><td class="text-gray-500">$${d.value ?? 0}</td><td>${stageBadge(d.stage)}</td>
+          <td class="text-gray-500">${d.probability ?? 10}%</td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { move(d, 'won'); }}>✅ Won</button><button class="btn btn-sm btn-outline" onClick=${() => { show(d); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(d.id)}>Delete</button></td>
+        </tr>`)}
+        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No deals yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Deal</h3>
+        ${(() => { let name = st.editItem?.name||'', value = st.editItem?.value||'', stage = st.editItem?.stage||'new', probability = st.editItem?.probability||10;
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Value</label><input class="input" type="number" value=${value} onInput=${e => value = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Stage</label><select class="input" value=${stage} onChange=${e => stage = e.target.value}><option value="new">New</option><option value="qualified">Qualified</option><option value="negotiation">Negotiation</option><option value="won">Won</option><option value="lost">Lost</option></select></div>
+            <div><label class="text-sm font-medium block mb-1">Probability %</label><input class="input" type="number" value=${probability} onInput=${e => probability = e.target.value} /></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({name, value: parseFloat(value)||0, stage, probability: parseInt(probability)||10})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- WORKFLOWS ----
+const Workflows = () => {
+  const st = viewState('workflows', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const data = await API.get('/workflows'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/workflows/' + st.editItem.id, data); else await API.post('/workflows', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this workflow?')) return; await API.del('/workflows/' + id); load(); };
+  const toggle = async (w) => { try { const ep = w.is_active ? '/workflows/' + w.id + '/deactivate' : '/workflows/' + w.id + '/activate'; await API.post(ep); load(); } catch(e){ alert(e.message); } };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Workflows</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Workflow</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Trigger</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(w => html`<tr>
+          <td class="font-medium">${w.name || '-'}</td><td class="text-gray-500">${w.trigger_event || 'missed_call'}</td>
+          <td><span class="badge ${w.is_active ? 'badge-green' : 'badge-red'}">${w.is_active ? 'Active' : 'Inactive'}</span></td>
+          <td><button class="btn btn-sm ${w.is_active ? 'btn-outline' : 'btn-green'}" onClick=${() => toggle(w)}>${w.is_active ? 'Deactivate' : 'Activate'}</button><button class="btn btn-sm btn-outline" onClick=${() => { show(w); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(w.id)}>Delete</button></td>
+        </tr>`)}
+        ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No workflows yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Workflow</h3>
+        ${(() => { let name = st.editItem?.name||'', trigger_event = st.editItem?.trigger_event||'missed_call';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Trigger</label><select class="input" value=${trigger_event} onChange=${e => trigger_event = e.target.value}><option value="missed_call">Missed Call</option><option value="voicemail">Voicemail</option><option value="sms">SMS</option></select></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({name, trigger_event})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- CAMPAIGNS ----
+const Campaigns = () => {
+  const st = viewState('campaigns', { list: [], tags: [], showModal: false, editItem: null });
+  const load = async () => { try { const data = await API.get('/campaigns'); st.list = Array.isArray(data) ? data : []; } catch(e) { console.error(e); }
+    try { const t = await API.get('/tags'); st.tags = Array.isArray(t) ? t : []; } catch(e) { console.error(e); }
+    renderApp(); };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/campaigns/' + st.editItem.id, data); else await API.post('/campaigns', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this campaign (and its list)?')) return; await API.del('/campaigns/' + id); load(); };
+  const toggle = async (c) => { try { const ep = c.status === 'active' ? '/campaigns/' + c.id + '/pause' : '/campaigns/' + c.id + '/activate'; await API.post(ep); load(); } catch(e){ alert(e.message); } };
+  const tagName = (c) => { const t = (c.metadata && c.metadata.coreswift && c.metadata.coreswift.tag_id); return t || ''; };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Campaigns</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Campaign</button></div>
+    <p class="text-sm text-gray-500 mb-4 -mt-2">Each campaign owns its own fresh list (named after the campaign). Link a tag — a lead carrying that tag is auto-added to the campaign's list and pushed to CoreSwift.</p>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Kind</th><th>Status</th><th>Linked Tag</th><th>Owned List</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(c => html`<tr>
+          <td class="font-medium">${c.name || '-'}</td><td class="text-gray-500">${c.kind || 'manual'}</td>
+          <td><span class="badge ${c.status === 'active' ? 'badge-green' : 'badge-yellow'}">${c.status || 'draft'}</span></td>
+          <td>${tagName(c) ? html`<span class="badge badge-purple">${tagName(c)}</span>` : '<span class="text-gray-400 text-sm">-</span>'}</td>
+          <td class="text-gray-500 text-sm">auto-${c.name || ''}</td>
+          <td><button class="btn btn-sm ${c.status === 'active' ? 'btn-outline' : 'btn-green'}" onClick=${() => toggle(c)}>${c.status === 'active' ? 'Pause' : 'Activate'}</button><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
+        </tr>`)}
+        ${st.list.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8">No campaigns yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Campaign</h3>
+        ${(() => { let name = st.editItem?.name||'', kind = st.editItem?.kind||'manual'; const currentTag = (st.editItem?.metadata && st.editItem.metadata.coreswift && st.editItem.metadata.coreswift.tag_id) || ''; let tagName2 = currentTag;
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Kind</label><select class="input" value=${kind} onChange=${e => kind = e.target.value}><option value="manual">Manual</option><option value="drip">Drip</option><option value="blast">Blast</option></select></div>
+            <div><label class="text-sm font-medium block mb-1">Linked Tag</label><select class="input" value=${tagName2} onChange=${e => tagName2 = e.target.value}><option value="">— None —</option>${st.tags.map(t => html`<option value=${t.name}>${t.name}</option>`)}</select><p class="text-xs text-gray-400 mt-1">Leads carrying this tag (name) auto-route into this campaign's list + CoreSwift.</p></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => { const metadata = ((st.editItem && st.editItem.metadata) || {}); metadata.coreswift = { ...(metadata.coreswift||{}), tag_id: tagName2 || null }; save({name, kind, metadata}); }}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- TICKETS ----
+const Tickets = () => {
+  const st = viewState('tickets', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const data = await API.get('/tickets'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this ticket?')) return; await API.del('/tickets/' + id); load(); };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Tickets</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ New Ticket</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Subject</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(t => html`<tr>
+          <td class="font-medium">${t.subject || '-'}</td>
+          <td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status || 'open'}</span></td>
+          <td class="text-gray-500">${t.priority || 'medium'}</td>
+          <td class="text-gray-500 text-sm">${t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
+        </tr>`)}
+        ${st.list.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No tickets yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'New'} Ticket</h3>
+        ${(() => { let subject = st.editItem?.subject||'', status = st.editItem?.status||'open', priority = st.editItem?.priority||'medium';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${subject} onInput=${e => subject = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Status</label><select class="input" value=${status} onChange=${e => status = e.target.value}><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></div>
+            <div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${priority} onChange=${e => priority = e.target.value}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({subject, status, priority})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- CLIENTS ----
+const Clients = () => {
+  const st = viewState('clients', { list: [], showModal: false, editItem: null, search: '' });
+  const load = async () => { try { const data = await API.get('/clients'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/clients/' + st.editItem.id, data); else await API.post('/clients', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this client?')) return; await API.del('/clients/' + id); load(); };
+  const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.email||'').toLowerCase().includes(st.search.toLowerCase()));
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Clients</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Client</button></div></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Source</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.map(c => html`<tr>
+          <td class="font-medium">${c.name || '-'}</td><td class="text-gray-500">${c.email || '-'}</td><td class="text-gray-500">${c.phone || '-'}</td><td class="text-gray-500">${c.source || '-'}</td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
+        </tr>`)}
+        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No clients yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Client</h3>
+        ${(() => { let name = st.editItem?.name||'', email = st.editItem?.email||'', phone = st.editItem?.phone||'', source = st.editItem?.source||'manual';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Email</label><input class="input" value=${email} onInput=${e => email = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Phone</label><input class="input" value=${phone} onInput=${e => phone = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Source</label><input class="input" value=${source} onInput=${e => source = e.target.value} /></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({name, email, phone, source})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- CALENDAR ----
+const CalendarView = () => {
+  const st = viewState('calendar', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const data = await API.get('/calendar-events'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try { if(st.editItem) await API.put('/calendar-events/' + st.editItem.id, data); else await API.post('/calendar-events', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  };
+  const remove = async (id) => { if(!confirm('Delete this event?')) return; await API.del('/calendar-events/' + id); load(); };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Calendar</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Event</button></div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      ${st.list.map(ev => html`<div class="card">
+        <div class="font-semibold text-gray-800">${ev.title || 'Untitled'}</div>
+        <div class="text-xs text-gray-500 mt-1">${ev.start_at ? new Date(ev.start_at).toLocaleString() : '-'}${ev.end_at ? ' → ' + new Date(ev.end_at).toLocaleString() : ''}</div>
+        <div class="text-sm text-gray-600 mt-1">${ev.event_type || 'call'}</div>
+        <div class="flex gap-2 mt-3"><button class="btn btn-sm btn-outline" onClick=${() => { show(ev); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(ev.id)}>Delete</button></div>
+      </div>`)}
+      ${st.list.length === 0 && html`<div class="col-span-full text-center text-gray-400 py-8">No calendar events yet.</div>`}
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Event</h3>
+        ${(() => { let title = st.editItem?.title||'', event_type = st.editItem?.event_type||'call', start_at = st.editItem?.start_at||'';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Title</label><input class="input" value=${title} onInput=${e => title = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${event_type} onChange=${e => event_type = e.target.value}><option value="call">Call</option><option value="meeting">Meeting</option><option value="follow-up">Follow-up</option></select></div>
+            <div><label class="text-sm font-medium block mb-1">Start (UTC)</label><input class="input" type="datetime-local" value=${start_at ? start_at.slice(0,16) : ''} onInput=${e => start_at = e.target.value} /></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({title, event_type, start_at: start_at ? new Date(start_at).toISOString() : null})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- LISTS ----
+const Lists = () => {
+  const st = viewState('lists', { list: [], showModal: false, editItem: null, expanded: null, expandedLeads: [], campaigns: [] });
+  const load = async () => {
+    try { const data = await API.get('/lists'); st.list = Array.isArray(data) ? data : []; } catch(e) { console.error(e); }
+    try { const c = await API.get('/campaigns'); st.campaigns = Array.isArray(c) ? c : []; } catch(e) { console.error(e); }
+    renderApp(); };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (item) => { st.editItem = item; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => { try { if(st.editItem) await API.put('/lists/' + st.editItem.id, data); else await API.post('/lists', data); st.showModal = false; load(); } catch(e){ alert(e.message); } };
+  const remove = async (id) => { if(!confirm('Delete this list?')) return; await API.del('/lists/' + id); load(); };
+  const toggleExpand = async (l) => {
+    if (st.expanded === l.id) { st.expanded = null; st.expandedLeads = []; renderApp(); return; }
+    st.expanded = l.id; st.expandedLeads = []; renderApp();
+    try { const ld = await API.get('/lists/' + l.id + '/leads'); st.expandedLeads = Array.isArray(ld) ? ld : []; renderApp(); } catch(e){ console.error(e); } };
+  const campaignName = (id) => { const f = st.campaigns.find(c => String(c.id) === String(id)); return f ? f.name : null; };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Lists</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add List</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Campaign</th><th>Leads</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(l => html`<tr>
+          <td class="font-medium">${l.name || '-'}</td>
+          <td class="text-gray-500">${l.campaign_id ? (campaignName(l.campaign_id) || 'Linked') : '<span class="text-gray-400 text-sm">standalone</span>'}</td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => toggleExpand(l)}>${st.expanded === l.id ? 'Hide' : 'View leads'}</button></td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(l); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(l.id)}>Delete</button></td>
+        </tr>`)}
+        ${st.expanded && html`<tr><td colspan="4" class="bg-gray-50"><div class="p-3"><div class="font-semibold text-sm mb-2">Leads in ${(st.list.find(l=>String(l.id)===String(st.expanded))||{}).name||'list'}</div>
+          ${st.expandedLeads.length === 0 ? html`<p class="text-gray-400 text-sm">No leads in this list yet.</p>` : html`<table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Tags</th></tr></thead><tbody>${st.expandedLeads.map(ld => html`<tr><td class="font-medium">${ld.name||'-'}</td><td class="text-gray-500">${ld.phone||'-'}</td><td class="text-gray-500">${ld.email||'-'}</td><td><span class="badge badge-blue">${ld.status||'new'}</span></td><td class="text-gray-500 text-sm">${(ld.tags||[]).join(', ')||'-'}</td></tr>`)}</tbody></table>`}
+        </div></td></tr>`}
+        ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No lists yet. Create a campaign to auto-generate its list, or add a standalone list here.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} List</h3>
+        ${(() => { let name = st.editItem?.name||'', description = st.editItem?.description||'';
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name = e.target.value} /></div>
+            <div><label class="text-sm font-medium block mb-1">Description</label><input class="input" value=${description} onInput=${e => description = e.target.value} /></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({name, description})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- CORE INTEGRATION ----
+const CoreIntegration = () => {
+  const st = viewState('core', { status: null, lists: [], campaigns: [], checked: false });
+  const load = async () => {
+    try { const s = await API.get('/integrations/coreswift/status'); st.status = s; } catch(e) { st.status = { connected: false, error: e.message }; }
+    try { const l = await API.get('/integrations/coreswift/lists'); st.lists = (l && l.lists) || (Array.isArray(l) ? l : []); } catch(e) { st.lists = []; }
+    try { const c = await API.get('/campaigns'); st.campaigns = Array.isArray(c) ? c : []; } catch(e) { console.error(e); }
+    st.checked = true; renderApp(); };
+  if (!st._loaded) { st._loaded = true; load(); }
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">CoreSwift Integration</h2>
+    ${!st.checked ? html`<p class="text-gray-500 text-sm">Checking...</p>` : html`
+    <div class="card mb-4">
+      <h3 class="font-semibold mb-2">Connection Status</h3>
+      ${st.status && st.status.connected
+        ? html`<span class="badge badge-green">✅ Connected</span><p class="text-sm text-gray-500 mt-2">CoreSwift is connected via your personal API key. Leads pushed to CoreSwift land in your account's contact pool / linked campaign lists.</p>`
+        : html`<span class="badge badge-red">⚠️ Not connected</span><p class="text-sm text-gray-500 mt-2">Connect CoreSwift by adding a personal API key (<code>csk_...</code>) under <b>Settings → Integrations</b> with provider <code>coreswift</code>.</p>`}
+    </div>
+    <div class="card mb-4">
+      <h3 class="font-semibold mb-2">Your CoreSwift Lists</h3>
+      ${st.lists.length === 0 ? html`<p class="text-gray-400 text-sm">Connected? No lists found in CoreSwift.</p>`
+        : html`<table class="table"><thead><tr><th>Name</th><th>ID</th></tr></thead><tbody>${st.lists.map(l => html`<tr><td class="font-medium">${l.name||l.title||'-'}</td><td class="text-gray-500">${l.id||'-'}</td></tr>`)}</tbody></table>`}
+    </div>
+    <div class="card">
+      <h3 class="font-semibold mb-2">Campaign → CoreSwift List</h3>
+      <p class="text-sm text-gray-500 mb-2">Leads that carry a campaign's linked tag are pushed to that campaign's own list (via CoreSwift contact sync) and appear under the campaign's list view.</p>
+      <table class="table"><thead><tr><th>Campaign</th><th>Linked Tag</th><th>Auto list</th></tr></thead><tbody>${st.campaigns.map(c => html`<tr><td class="font-medium">${c.name||'-'}</td><td class="text-gray-500">${(c.metadata&&c.metadata.coreswift&&c.metadata.coreswift.tag_id)||'-'}</td><td class="text-gray-500">${c.name||'-'}</td></tr>`)}${st.campaigns.length===0&&html`<tr><td colspan="3" class="text-center text-gray-400 py-6">No campaigns yet.</td></tr>`}</tbody></table>
+    </div>`}
+  </div>`;
+};
+
+// ---- SHELL ----
+const App = () => {
+  if(!API.token) return html`<${LoginView} />`;
+
+  const nav = [
+    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+    { id: 'portfolio', label: 'Portfolio', icon: '🏢' },
+    { id: 'rules', label: 'Response Rules', icon: '⚙️' },
+    { id: 'templates', label: 'Templates', icon: '📋' },
+    { id: 'contacts', label: 'Contacts', icon: '👥' },
+    { id: 'leads', label: 'Leads', icon: '🎯' },
+    { id: 'deals', label: 'Deals', icon: '💰' },
+    { id: 'workflows', label: 'Workflows', icon: '⚡' },
+    { id: 'campaigns', label: 'Campaigns', icon: '📣' },
+    { id: 'lists', label: 'Lists', icon: '📇' },
+    { id: 'core', label: 'CoreSwift', icon: '🔗' },
+    { id: 'tickets', label: 'Tickets', icon: '🎫' },
+    { id: 'clients', label: 'Clients', icon: '🤝' },
+    { id: 'calendar', label: 'Calendar', icon: '📅' },
+      { id: 'site-config', label: 'Site Config', icon: '🌐' }
+  ];
+
+  const SiteConfig = () => {
+  const [data, setData] = S.useState ? (() => { const [d, sd] = S.useState ? [null, null] : [null, null]; try { const [d2, sd2] = [S.__sc_data||null, (v) => { S.__sc_data=v; renderApp(); }]; return [d2, sd2]; } catch(e) { return [null, null]; } })() : [null, null];
+  const loaded = S.__sc_loaded || false;
+  if (!loaded) {
+    S.__sc_loaded = true;
+    API.get('/admin/site').then(d => {
+      S.__sc_data = d;
+      renderApp();
+    }).catch(() => { S.__sc_error = true; renderApp(); });
+  }
+  if (S.__sc_error) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-red-500">Not available.</p></div>`;
+  if (!data) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
+  
+  const hp = data.homepage || {};
+  const f = (n, v, t) => t==='textarea'
+    ? html`<div class="mb-3"><label class="block text-xs font-medium text-gray-600 mb-1">${v}</label><textarea id="field_${n}" rows="3" class="input"></textarea></div>`
+    : html`<div class="mb-3"><label class="block text-xs font-medium text-gray-600 mb-1">${v}</label><input id="field_${n}" class="input"></div>`;
+  const gv = id => { const e = document.getElementById('field_'+id); return e ? e.value : ''; };
+  const sv = (nm, v) => { const e = document.getElementById('field_'+nm); if(e) e.value = v||''; };
+  
+  setTimeout(() => {
+    sv('title',data.title);sv('description',data.description);sv('keywords',data.keywords);
+    sv('canonical_url',data.canonical_url);sv('og_title',data.og_title);sv('og_description',data.og_description);
+    sv('og_image_url',data.og_image_url);sv('favicon_url',data.favicon_url);
+    sv('ga_id',data.ga_id);sv('gtm_id',data.gtm_id);sv('head_scripts',data.head_scripts);sv('body_scripts',data.body_scripts);
+    sv('homepage_headline',hp.headline);sv('homepage_subheadline',hp.subheadline);
+    sv('legal_tos',data.legal_tos);sv('legal_privacy',data.legal_privacy);sv('legal_refunds',data.legal_refunds);
+    sv('schema_json',data.schema_json);
+  }, 50);
+  
+  const save = async () => {
+    const b = {};
+    b.title=gv('title');b.description=gv('description');b.keywords=gv('keywords');
+    b.canonical_url=gv('canonical_url');b.og_title=gv('og_title');b.og_description=gv('og_description');
+    b.og_image_url=gv('og_image_url');b.favicon_url=gv('favicon_url');
+    b.ga_id=gv('ga_id');b.gtm_id=gv('gtm_id');b.head_scripts=gv('head_scripts');b.body_scripts=gv('body_scripts');
+    b.homepage={headline:gv('homepage_headline'),subheadline:gv('homepage_subheadline')};
+    b.legal_tos=gv('legal_tos');b.legal_privacy=gv('legal_privacy');b.legal_refunds=gv('legal_refunds');
+    b.schema_json=gv('schema_json');
+    const st = document.getElementById('sc_status');
+    if(st){st.textContent='Saving...';st.className='text-sm ml-3 text-blue-600';}
+    const r = await API.put('/admin/site',b);
+    if(st){if(r){st.textContent='Saved!';st.className='text-sm ml-3 text-green-600'}else{st.textContent='Error.';st.className='text-sm ml-3 text-red-600'}}
+  };
+  
+  return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-xs text-gray-500 mb-4">SEO, tracking, legal pages, and homepage content. Saved changes regenerate the live marketing site.</p>
+    <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">🔍 SEO & Meta</h3>
+      ${f('title','Page Title')}${f('description','Meta Description','textarea')}${f('keywords','Keywords','textarea')}
+      ${f('canonical_url','Canonical URL')}${f('og_title','OG Title')}${f('og_description','OG Description','textarea')}
+      ${f('og_image_url','OG Image URL')}${f('favicon_url','Favicon URL')}
+    </div>
+    <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">📊 Analytics & Tracking</h3>
+      ${f('ga_id','Google Analytics ID')}${f('gtm_id','Google Tag Manager ID')}
+      ${f('head_scripts','Head Scripts','textarea')}${f('body_scripts','Body Scripts','textarea')}
+    </div>
+    <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">🏠 Homepage</h3>
+      ${f('homepage_headline','Headline','textarea')}${f('homepage_subheadline','Subheadline','textarea')}
+    </div>
+    <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">⚖️ Legal Pages</h3>
+      <p class="text-xs text-gray-400 mb-2">Rendered at /terms.html, /privacy.html, /refunds.html</p>
+      ${f('legal_tos','Terms of Service','textarea')}${f('legal_privacy','Privacy Policy','textarea')}${f('legal_refunds','Refund & Cancellation Policy','textarea')}
+    </div>
+    <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">📋 Structured Data</h3>
+      ${f('schema_json','Schema.org JSON','textarea')}
+    </div>
+    <button class="btn" onClick=${save}>Save Configuration</button><span id="sc_status" class="text-sm ml-3"></span>
+  </div>`;
+};
+
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, workflows: Workflows, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration };
+  const CurrentView = views[S.view] || Dashboard;
+
+  return html`<div class="flex w-full">
+    <div class="sidebar w-56 bg-white border-r border-gray-200 min-h-screen p-3 flex flex-col" style="flex-shrink:0">
+      <div class="flex items-center gap-2 px-3 py-4 mb-2">
+        <span class="text-2xl">📞</span>
+        <span class="nav-text font-bold text-gray-800">MissedCall</span>
+      </div>
+      <div class="flex-1 space-y-1">
+        ${nav.map(n => html`<div class="nav-item ${S.view === n.id ? 'active' : ''}" onClick=${() => { S.view = n.id; renderApp(); }}>
+          <span>${n.icon}</span><span class="nav-text">${n.label}</span>
+        </div>`)}
+      </div>
+      <div class="nav-item text-red-500 mt-auto" onClick=${() => { API.logout(); S.view = 'dashboard'; renderApp(); }}>
+        <span>🚪</span><span class="nav-text">Logout</span>
+      </div>
+    </div>
+    <div class="main flex-1 p-6 overflow-auto">
+      <${CurrentView} />
+    </div>
+  </div>`;
+};
+
+const renderApp = () => render(html`<${App} />`, document.getElementById('app'));
+renderApp();
+</script>
+</body>
+</html>
