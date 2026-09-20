@@ -55,6 +55,11 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/webhooks/paypal",
             post(checkout_handler::paypal_webhook),
         )
+        // Thank-you page lookup (public, id-scoped, non-sensitive summary)
+        .route(
+            "/api/v1/checkout/session/:id",
+            get(checkout_handler::get_checkout_session_public),
+        )
         // FunnelSwift tag provision webhook — auto-provision contacts (no JWT, internal key)
         .route(
             "/api/v1/internal/tag-provision",

@@ -1128,7 +1128,64 @@ async fn mark_session_expired(
     Ok(())
 }
 
-/// Verify Stripe webhook signature using HMAC-SHA256 via `ring`
+/// GET /api/v1/checkout/session/:id
+///
+/// Public, id-scoped lookup used by `thank-you.html` after the payment provider
+/// redirects the buyer back. Exposes only presentation-safe fields — never
+/// account_id, user_id, provider_session_id or metadata.
+pub async fn get_checkout_session_public(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    let id = Uuid::parse_str(&session_id)
+        .map_err(|_| AppError::NotFound("Checkout session not found".into()))?;
+
+    let row = sqlx::query(
+        r#"SELECT cs.id, cs.purchasable_type, cs.amount::text AS amount,
+                  cs.currency, cs.status, cs.created_at,
+                  p.name AS plan_name
+           FROM checkout_sessions cs
+           LEFT JOIN plans p
+                  ON cs.purchasable_type = 'plan' AND p.id = cs.purchasable_id
+           WHERE cs.id = $1"#,
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some(row) = row else {
+        tracing::warn!("checkout session lookup miss: {}", id);
+        return Ok((
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "found": false,
+                "error": "checkout_session_not_found",
+                "note": "No checkout session with that id. If you just paid, your provider receipt is authoritative — contact support if your plan is not active."
+            })),
+        )
+            .into_response());
+    };
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "found": true,
+            "id": row.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
+            "status": row.try_get::<&str,_>("status").unwrap_or(""),
+            "plan_name": row.try_get::<Option<String>,_>("plan_name").unwrap_or(None),
+            "purchasable_type": row.try_get::<&str,_>("purchasable_type").unwrap_or(""),
+            "amount": row.try_get::<&str,_>("amount").unwrap_or("0"),
+            "currency": row.try_get::<&str,_>("currency").unwrap_or("USD"),
+            "login_url": "/login.html",
+            "created_at": row
+                .try_get::<chrono::DateTime<chrono::Utc>,_>("created_at")
+                .map(|t| t.to_rfc3339())
+                .unwrap_or_default(),
+        })),
+    )
+        .into_response())
+}
+
 fn verify_stripe_signature(body: &[u8], signature: &str, secret: &str) -> bool {
     use ring::hmac;
 
