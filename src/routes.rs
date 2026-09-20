@@ -205,6 +205,12 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/integrations/coreswift/lists",
             get(coreswift_integration_handler::lists),
         )
+        // THE INBOUND PATH: proxy hub POST /api/external/contacts (manual "push now" fallback;
+        // the automatic path fires from the capture handlers themselves).
+        .route(
+            "/api/v1/integrations/coreswift/push",
+            post(coreswift_integration_handler::push),
+        )
         // Dashboard
         .route(
             "/api/v1/dashboard/stats",
@@ -272,6 +278,11 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/provider-keys/:provider",
             delete(provider_keys_handler::delete_provider_key),
+        )
+        // Live "Test connection" probe for the Integration Center (CoreSwift = authed hub call).
+        .route(
+            "/api/v1/provider-keys/:provider/test",
+            post(coreswift_integration_handler::test_provider_key),
         )
         // Lists (each campaign owns its own fresh list)
         .route(

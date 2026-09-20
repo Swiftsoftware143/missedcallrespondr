@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MissedCall Respondr — Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/lit-html@2.8.0/lit-html.min.js"></script>
+<script>
+const { html, render } = window['lit-html'];
+
+// ===== API =====
+const API = (() => {
+  const base = window.location.origin + '/api/v1';
+  let token = sessionStorage.getItem('mc_token');
+  let user = JSON.parse(sessionStorage.getItem('mc_user') || 'null');
+  const headers = () => ({ 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) });
+  const handle = async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || d.message || 'Request failed'); return d; };
+  const get = (p) => fetch(base + p, { headers: headers() }).then(handle);
+  const post = (p, b) => fetch(base + p, { method: 'POST', headers: headers(), body: JSON.stringify(b) }).then(handle);
+  const put = (p, b) => fetch(base + p, { method: 'PUT', headers: headers(), body: JSON.stringify(b) }).then(handle);
+  const del = (p) => fetch(base + p, { method: 'DELETE', headers: headers() }).then(handle);
+  return {
+    get, post, put, del,
+    get token() { return token; },
+    get user() { return user; },
+    setAuth(t, u) { token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
+    logout() { token = null; user = null; sessionStorage.removeItem('mc_token'); sessionStorage.removeItem('mc_user'); }
+  };
+})();
+
+const S = { view: 'overview', loading: false, error: null, views: {} };
+const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
+
+// ===== LOGIN =====
+const LoginView = () => {
+  let email = '', pw = '';
+  const submit = async (e) => { e.preventDefault(); S.loading = true; S.error = null; renderApp();
+    try { const r = await API.post('/auth/login', { email, password: pw }); API.setAuth(r.token, r.team_member || r.user || r); S.view = 'overview'; } catch (err) { S.error = err.message; }
+    S.loading = false; renderApp();
+  };
+  return html`<div class="flex items-center justify-center min-h-screen w-full">
+    <div class="card w-full max-w-sm mx-4">
+      <div class="text-center mb-6">
+        <div class="text-3xl mb-2">📞</div>
+        <h1 class="text-xl font-bold text-gray-800">MissedCall Respondr</h1>
+        <p class="text-sm text-gray-500 mt-1">Auto-Response Platform</p>
+      </div>
+      <form onSubmit=${submit} class="space-y-4">
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${email} onInput=${e => email = e.target.value} required /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${pw} onInput=${e => pw = e.target.value} required /></div>
+        ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
+        <button type="submit" class="btn w-full">Sign In</button>
+      </form>
+      <p class="text-sm text-gray-500 mt-4 text-center">New to MissedCall? <a href="/register.html" class="text-blue-600">Create an account</a></p>
+    </div>
+  </div>`;
+};
+
+// ===== OVERVIEW =====
+const Overview = () => {
+  const st = viewState('overview', {});
+  if (!st._loaded) { st._loaded = true;
+    API.get('/dashboard/stats').then(s => Object.assign(st, s)).catch(() => {}).then(renderApp);
+    API.get('/me/usage').then(u => { st.usage = u; renderApp(); }).catch(() => {});
+  }
+  const c = API.user || {};
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">Overview</h2>
+    <div class="card"><p class="text-sm text-gray-600">Welcome back, <b>${c.email || c.name || 'there'}</b>. Here's what's happening with your auto-response setup.</p></div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+      <div class="stat-card"><div class="stat-value">${st.total_rules ?? '...'}</div><div class="stat-label">Response Rules</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_templates ?? '...'}</div><div class="stat-label">Templates</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_contacts ?? '...'}</div><div class="stat-label">Contacts</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_responses ?? '...'}</div><div class="stat-label">Auto-Responses</div></div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="card"><h3 class="font-semibold mb-2">Credits</h3><p class="text-sm text-gray-600">${st.usage && st.usage.available_credits !== undefined ? st.usage.available_credits + ' credits available' : 'Loading…'}</p></div>
+      <div class="card"><h3 class="font-semibold mb-2">Phone Numbers</h3><p class="text-sm text-gray-600">Manage your numbers in the <b>Phone Numbers</b> tab.</p></div>
+    </div>
+  </div>`;
+};
+
+// ===== PHONE NUMBERS =====
+const PhoneNumbers = () => {
+  const st = viewState('phoneNumbers', { list: [] });
+  const load = async () => { try { const d = await API.get('/telnyx/numbers'); st.list = Array.isArray(d) ? d : (Array.isArray(d.numbers) ? d.numbers : []); renderApp(); } catch (e) { console.error(e); st.list = []; renderApp(); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Phone Numbers</h2></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Number</th><th>Status</th><th>Added</th></tr></thead>
+        <tbody>${st.list.map(n => html`<tr><td class="font-medium">${n.number || n.phone_number || n.id || '-'}</td><td><span class="badge ${n.status==='active'||(n.active!==false)?'badge-green':'badge-yellow'}">${n.status||(n.active!==false?'active':'inactive')}</span></td><td class="text-gray-500">${n.created_at?new Date(n.created_at).toLocaleDateString():'-'}</td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No phone numbers. Configure your Telnyx integration to provision numbers.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+};
+
+// ===== RESPONSE RULES =====
+const ResponseRules = () => {
+  const st = viewState('rules', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const d = await API.get('/response-rules'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (i) => { st.editItem = i; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => { try { if (st.editItem) await API.put('/response-rules/' + st.editItem.id, data); else await API.post('/response-rules', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  const remove = async (id) => { if (!confirm('Delete this rule?')) return; await API.del('/response-rules/' + id); load(); };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ Add Rule</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Condition</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(r => html`<tr><td class="font-medium">${r.name||'-'}</td><td class="text-gray-500">${r.condition||r.trigger_condition||'-'}</td><td><span class="badge ${r.active!==false?'badge-green':'badge-red'}">${r.active!==false?'Active':'Inactive'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(r)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No response rules yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'Add'} Rule</h3>
+      ${(() => { let name=st.editItem?.name||'', condition=st.editItem?.trigger_condition||st.editItem?.condition||'', type=st.editItem?.response_type||'sms';
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Condition</label><input class="input" value=${condition} onInput=${e => condition=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Response Type</label><select class="input" value=${type} onChange=${e => type=e.target.value}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name, trigger_condition:condition, response_type:type, response_content:{text:''}})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+    </div></div>`}
+  </div>`;
+};
+
+// ===== TEMPLATES =====
+const Templates = () => {
+  const st = viewState('templates', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const d = await API.get('/message-templates'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (i) => { st.editItem = i; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => { try { if (st.editItem) await API.put('/message-templates/' + st.editItem.id, data); else await API.post('/message-templates', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  const remove = async (id) => { if (!confirm('Delete this template?')) return; await API.del('/message-templates/' + id); load(); };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Message Templates</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ Add Template</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Type</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.name||'-'}</td><td><span class="badge badge-blue">${t.type||'sms'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No templates yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'Add'} Template</h3>
+      ${(() => { let name=st.editItem?.name||'', body=st.editItem?.body||st.editItem?.content||'', type=st.editItem?.type||'sms';
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${type} onChange=${e => type=e.target.value}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${body} onInput=${e => body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name, body, type})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+    </div></div>`}
+  </div>`;
+};
+
+// ===== MESSAGES =====
+const Messages = () => {
+  const st = viewState('messages', { list: [], showModal: false });
+  const load = async () => { try { const d = await API.get('/messages'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const hide = () => { st.showModal = false; renderApp(); };
+  const send = async (data) => { try { await API.post('/messages', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Messages</h2><button class="btn btn-sm btn-green" onClick=${() => { st.showModal = true; renderApp(); }}>+ Send Message</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Sent</th></tr></thead>
+        <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${m.status==='sent'||m.status==='delivered'?'badge-green':'badge-yellow'}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${m.created_at?new Date(m.created_at).toLocaleDateString():'-'}</td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No messages yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">Send Message</h3>
+      ${(() => { let to='', body='';
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">To (phone)</label><input class="input" value=${to} onInput=${e => to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="4" value=${body} onInput=${e => body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => send({ to, body })}>Send</button></div></div>`; })()}
+    </div></div>`}
+  </div>`;
+};
+
+// ===== FOLLOW-UPS =====
+const FollowUps = () => {
+  const st = viewState('followups', { list: [] });
+  if (!st._loaded) { st._loaded = true; API.get('/follow-ups').then(d => { st.list = Array.isArray(d) ? d : []; renderApp(); }).catch(() => {}); }
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">Follow-ups</h2>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Contact</th><th>Scheduled</th><th>Status</th></tr></thead>
+        <tbody>${st.list.map(f => html`<tr><td class="font-medium">${f.contact_name||f.contact_id||'-'}</td><td class="text-gray-500">${f.scheduled_at?new Date(f.scheduled_at).toLocaleString():'-'}</td><td><span class="badge ${f.status==='done'||f.status==='completed'?'badge-green':f.status==='scheduled'?'badge-blue':'badge-yellow'}">${f.status||'scheduled'}</span></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No follow-ups scheduled.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+};
+
+// ===== CONTACTS =====
+const Contacts = () => {
+  const st = viewState('contacts', { list: [], search: '' });
+  if (!st._loaded) { st._loaded = true; API.get('/contacts').then(d => { st.list = Array.isArray(d) ? d : []; renderApp(); }).catch(() => {}); }
+  const filtered = () => st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.phone||'').toLowerCase().includes(st.search.toLowerCase()) || (c.email||'').toLowerCase().includes(st.search.toLowerCase()));
+  const rows = filtered().slice(0,100);
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Contacts</h2><input class="input" style="width:280px" placeholder="Search..." value=${st.search||''} onInput=${e => { st.search = e.target.value; renderApp(); }} /></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Created</th></tr></thead>
+        <tbody>${rows.map(c => html`<tr><td class="font-medium">${c.name||c.full_name||'-'}</td><td class="text-gray-500">${c.phone||'-'}</td><td class="text-gray-500">${c.email||'-'}</td><td class="text-gray-500 text-sm">${c.created_at?new Date(c.created_at).toLocaleDateString():'-'}</td></tr>`)}
+        ${rows.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+};
+
+// ===== TICKETS =====
+const Tickets = () => {
+  const st = viewState('tickets', { list: [], showModal: false, editItem: null });
+  const load = async () => { try { const d = await API.get('/tickets'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const show = (i) => { st.editItem = i; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Tickets</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ New Ticket</button></div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Subject</th><th>Status</th><th>Priority</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.subject||'-'}</td><td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td><td class="text-gray-500">${t.priority||'medium'}</td><td><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No tickets yet.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'New'} Ticket</h3>
+      ${(() => { let subject=st.editItem?.subject||'', status=st.editItem?.status||'open', priority=st.editItem?.priority||'medium';
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${subject} onInput=${e => subject=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Status</label><select class="input" value=${status} onChange=${e => status=e.target.value}><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></div><div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${priority} onChange=${e => priority=e.target.value}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject, status, priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+    </div></div>`}
+  </div>`;
+};
+
+// ===== INTEGRATIONS (Integration Center) =====
+// Renders the LIVE available_providers catalogue (no hardcoded provider array), CoreSwift
+// pinned first as the upgrade path. Keys are BYOK per tenant: stored via
+// POST /api/v1/provider-keys, masked on read, never rendered raw.
+const Integrations = () => {
+  const st = viewState('integrations', { providers: [], keys: [], hubStatus: null, keyInput: {}, baseInput: {}, busy: null, probe: null, error: null, notice: null });
+  const load = async () => {
+    try { const p = await API.get('/available-providers'); st.providers = Array.isArray(p) ? p : (p.providers || []); }
+    catch (e) { st.error = 'Could not load providers: ' + e.message; }
+    try { const k = await API.get('/provider-keys'); st.keys = Array.isArray(k) ? k : (k.keys || []); } catch (e) { st.keys = []; }
+    try { st.hubStatus = await API.get('/integrations/coreswift/status'); } catch (e) { st.hubStatus = null; }
+    renderApp();
+  };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const keyFor = (key) => (st.keys || []).find(k => k.provider === key && k.is_active !== false);
+  const isConnected = (p) => p.key === 'coreswift' ? !!(st.hubStatus && st.hubStatus.connected) : !!keyFor(p.key);
+  // CoreSwift is pinned first (fleet standard); the rest is whatever the catalogue returns.
+  const ordered = () => st.providers.slice().sort((a, b) => (a.key === 'coreswift' ? -1 : 0) - (b.key === 'coreswift' ? -1 : 0) || (a.name || a.key || '').localeCompare(b.name || b.key || ''));
+  const connect = async (p) => {
+    const api_key = (st.keyInput[p.key] || '').trim();
+    if (!api_key) { st.error = 'Paste the ' + (p.name || p.key) + ' key first'; renderApp(); return; }
+    st.busy = p.key; st.error = null; st.probe = null; renderApp();
+    const body = { provider: p.key, api_key };
+    const bu = (st.baseInput[p.key] || '').trim();
+    if (bu) body.base_url = bu;
+    try { await API.post('/provider-keys', body); st.keyInput[p.key] = ''; st.notice = (p.name || p.key) + ' connected'; }
+    catch (e) { st.error = (p.name || p.key) + ': ' + e.message; }
+    st.busy = null; load();
+  };
+  const disconnect = async (p) => {
+    if (!confirm('Disconnect ' + (p.name || p.key) + '?')) return;
+    st.busy = p.key; st.error = null; renderApp();
+    try { await API.del('/provider-keys/' + p.key); st.notice = (p.name || p.key) + ' disconnected'; }
+    catch (e) { st.error = (p.name || p.key) + ': ' + e.message; }
+    st.busy = null; load();
+  };
+  const test = async (p) => {
+    st.busy = p.key; st.probe = null; renderApp();
+    try { const r = await API.post('/provider-keys/' + p.key + '/test', {}); st.probe = { key: p.key, ok: r.ok, message: r.message || '' }; }
+    catch (e) { st.probe = { key: p.key, ok: false, message: e.message }; }
+    st.busy = null; renderApp();
+  };
+  const controls = (p) => {
+    const k = keyFor(p.key);
+    const connected = isConnected(p);
+    const pr = st.probe && st.probe.key === p.key ? st.probe : null;
+    return html`<div class="mt-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="badge ${connected ? 'badge-green' : 'badge-yellow'}">${connected ? 'Connected' : 'Not connected'}</span>
+        ${connected && k ? html`<span class="text-xs text-gray-400">key ${k.api_key}</span>` : ''}
+        ${connected && p.key === 'coreswift' && st.hubStatus && st.hubStatus.base_url ? html`<span class="text-xs text-gray-400">→ ${st.hubStatus.base_url}</span>` : ''}
+      </div>
+      ${connected ? html`<div class="flex gap-2">
+          <button class="btn btn-sm btn-outline" disabled=${st.busy === p.key} onClick=${() => test(p)}>Test connection</button>
+          <button class="btn btn-sm btn-red" disabled=${st.busy === p.key} onClick=${() => disconnect(p)}>Disconnect</button>
+        </div>`
+      : html`<div class="space-y-2">
+          <input class="input" type="password" placeholder=${(p.name || p.key) + ' API key'} value=${st.keyInput[p.key] || ''} onInput=${e => st.keyInput[p.key] = e.target.value} />
+          ${p.requires_base_url ? html`<input class="input" placeholder="Base URL (optional — defaults to the platform URL)" value=${st.baseInput[p.key] || ''} onInput=${e => st.baseInput[p.key] = e.target.value} />` : ''}
+          <div class="flex gap-2">
+            <button class="btn btn-sm" disabled=${st.busy === p.key} onClick=${() => connect(p)}>Connect</button>
+            <button class="btn btn-sm btn-outline" disabled=${st.busy === p.key} onClick=${() => test(p)}>Test connection</button>
+          </div>
+        </div>`}
+      ${pr ? html`<div class="text-xs ${pr.ok ? 'text-green-700' : 'text-amber-700'}">${pr.message || (pr.ok ? 'OK' : 'Failed')}</div>` : ''}
+    </div>`;
+  };
+  const list = ordered();
+  const core = list.find(p => p.key === 'coreswift');
+  const rest = list.filter(p => p.key !== 'coreswift');
+  return html`<div>
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold">Integrations</h2>
+      <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
+    </div>
+    ${st.error ? html`<div class="card" style="border-left:4px solid #dc2626"><b class="text-red-700">Error</b><p class="text-sm text-gray-600 mt-.5">${st.error}</p></div>` : ''}
+    ${st.notice ? html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-600">${st.notice}</p></div>` : ''}
+    ${core ? html`<div class="card" style="border:2px solid #2563eb">
+      <div class="flex items-start justify-between gap-4">
+        <div style="flex:1">
+          <h3 class="font-semibold text-lg">🔗 ${core.name || 'CoreSwift CRM'} <span class="badge badge-blue">Recommended</span></h3>
+          <p class="text-sm text-gray-600 mt-1">${core.description || 'Push leads into CoreSwift CRM'}</p>
+          <p class="text-xs text-gray-500 mt-1">Every caller you capture here lands in CoreSwift automatically — the single home for all of your leads.</p>
+          ${controls(core)}
+        </div>
+        <div style="min-width:210px" class="text-right">
+          <div class="text-sm font-semibold text-blue-700">One CRM for every tool you connect</div>
+          <a class="btn btn-sm" style="display:inline-block;margin-top:8px;text-decoration:none" href="https://coreswiftcrm.com/?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">Get CoreSwift CRM →</a>
+          <div class="mt-2"><a class="text-xs text-blue-600" href="https://coreswiftcrm.com/pricing?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">See plans &amp; upgrade</a></div>
+        </div>
+      </div>
+    </div>` : ''}
+    ${rest.length === 0 && !core ? html`<div class="card text-center text-gray-400 py-8">No providers available yet.</div>` : ''}
+    ${rest.map(p => html`<div class="card">
+      <h3 class="font-semibold">${p.icon ? p.icon + ' ' : ''}${p.name || p.key}</h3>
+      <p class="text-sm text-gray-600 mt-1">${p.description || ''}</p>
+      ${controls(p)}
+    </div>`)}
+  </div>`;
+};
+
+// ===== APP SHELL =====
+const App = () => {
+  if (!API.token) return html`<${LoginView} />`;
+  const nav = [
+    { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'phoneNumbers', label: 'Phone Numbers', icon: '📱' },
+    { id: 'rules', label: 'Response Rules', icon: '⚙️' },
+    { id: 'templates', label: 'Templates', icon: '📋' },
+    { id: 'messages', label: 'Messages', icon: '💬' },
+    { id: 'followups', label: 'Follow-ups', icon: '⏰' },
+    { id: 'contacts', label: 'Contacts', icon: '👥' },
+    { id: 'tickets', label: 'Tickets', icon: '🎫' },
+    { id: 'integrations', label: 'Integrations', icon: '🔗' }
+  ];
+  const views = { overview: Overview, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations };
+  const CurrentView = views[S.view] || Overview;
+  const c = API.user || {};
+  return html`<div class="flex">
+    <div class="sidebar">
+      <div class="flex items-center gap-2 px-3 py-4 mb-2">
+        <span class="text-2xl">📞</span>
+        <span class="nav-txt font-bold text-gray-800">MissedCall</span>
+      </div>
+      <div class="flex-1 space-y-1">
+        ${nav.map(n => html`<div class="nav-item ${S.view===n.id?'active':''}" onClick=${() => { S.view = n.id; renderApp(); }}><span>${n.icon}</span><span class="nav-txt">${n.label}</span></div>`)}
+      </div>
+      <div class="text-xs text-gray-400 px-3 py-2 truncate">${c.email || ''}</div>
+      <div class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span>🚪</span><span class="nav-txt">Logout</span></div>
+    </div>
+    <div class="main"><${CurrentView} /></div>
+  </div>`;
+};
+
+const renderApp = () => render(html`<${App} />`, document.getElementById('app'));
+renderApp();
+</script>
+</body>
+</html>

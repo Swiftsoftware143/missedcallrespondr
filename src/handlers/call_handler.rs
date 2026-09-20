@@ -59,6 +59,37 @@ pub async fn create_call(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
+
+    // Inbound capture → CoreSwift: a logged call whose caller number we know is a captured
+    // lead. Best-effort in a spawned task (never blocks the save, never errors the request)
+    // and a quiet no-op when the tenant has not connected CoreSwift. One CoreSwift code
+    // path: coreswift_external::push_lead_to_coreswift.
+    {
+        let st = state.clone();
+        let caller_name = call.caller_name.clone().unwrap_or_default();
+        let caller_number = call.caller_number.clone();
+        let lead_source = if disposition == "missed" {
+            "missed_call".to_string()
+        } else {
+            disposition.clone()
+        };
+        tokio::spawn(async move {
+            crate::handlers::coreswift_external::push_lead_to_coreswift(
+                &st,
+                &tenant_id,
+                &caller_name,
+                None,
+                None,
+                Some(caller_number.as_str()),
+                &[],
+                None,
+                Some(lead_source.as_str()),
+                None,
+            )
+            .await;
+        });
+    }
+
     Ok(Json(call))
 }
 

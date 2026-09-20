@@ -313,6 +313,35 @@ pub async fn webhook(
     .execute(&state.pool)
     .await?;
 
+    // -- 7b. INBOUND capture → CoreSwift: the caller is a captured lead. This is the REAL
+    //        missed-call capture path, so the push happens automatically — nobody presses a
+    //        button. Best-effort in a spawned task: it never delays or fails the Telnyx
+    //        call-control response, and it quietly no-ops when the tenant has not connected
+    //        CoreSwift (BYOK). Shares the one CoreSwift code path
+    //        (`coreswift_external::push_lead_to_coreswift`).
+    {
+        let st = state.clone();
+        let lead_tenant = tenant_id;
+        let lead_phone = normalized_caller.clone();
+        let called = normalized_called.clone();
+        let note = format!("Auto-captured by MissedCall Respondr: missed call to {called}");
+        tokio::spawn(async move {
+            crate::handlers::coreswift_external::push_lead_to_coreswift(
+                &st,
+                &lead_tenant,
+                "",                        // no caller name on a raw inbound call
+                None,                      // company
+                None,                      // email (not available on a call)
+                Some(lead_phone.as_str()), // phone
+                &[],                       // tags
+                None,                      // list (campaign wiring decides)
+                Some("missed_call"),       // attribution
+                Some(note.as_str()),       // notes
+            )
+            .await;
+        });
+    }
+
     // -- 8. Return Telnyx call-control commands (answer + gather)
     tracing::info!(
         "Processed Telnyx call for tenant {}: call_id={}",

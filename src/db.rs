@@ -61,6 +61,18 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000012_coreswift_integration",
             include_str!("../migrations/000012_coreswift_integration.sql"),
         ),
+        // 000013 shipped on 2026-09-20 (telnyx_config + the 000005 provider seed that never
+        // landed) but was NEVER registered here, so it was applied by hand and a fresh
+        // database would come up without telnyx_config. Registered now — the file is
+        // additive + idempotent (IF NOT EXISTS / ON CONFLICT DO NOTHING).
+        (
+            "000013_telnyx_config",
+            include_str!("../migrations/000013_telnyx_config.sql"),
+        ),
+        (
+            "000014_integration_center",
+            include_str!("../migrations/000014_integration_center.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

@@ -21,6 +21,25 @@ use crate::state::AppState;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
+/// Canonical capture-app slug this app reports to the hub (drives CoreSwift's
+/// "leads by capture app" rollup; the hub normalizes aliases to this same value).
+pub const SOURCE_APP: &str = "missedcallrespondr";
+
+/// Base-URL resolution step 2 (fleet standard): the `coreswift` row in
+/// `integration_provider_presets`. Step 1 is `provider_keys.base_url` (tenant override),
+/// step 3 the `CORESWIFT_URL` env / constant default. Never hardcode-only.
+async fn preset_base_url(state: &AppState) -> Option<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT base_url FROM integration_provider_presets
+         WHERE key = 'coreswift' AND is_active = true AND base_url <> ''",
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|u| u.trim_end_matches('/').to_string())
+}
+
 /// Resolve the account's CoreSwift connection (personal API key + base URL) from
 /// `provider_keys` (provider="coreswift"). Returns None if not connected.
 pub async fn get_coreswift_connection(
@@ -37,20 +56,52 @@ pub async fn get_coreswift_connection(
     .ok()??;
 
     let api_key = row.0;
-    let base_url = row
-        .1
-        .filter(|u| !u.is_empty())
-        .or_else(|| {
-            let def = state.coreswift_url.trim().to_string();
-            if def.is_empty() {
-                None
-            } else {
-                Some(def)
+
+    // 1) tenant override → 2) preset row → 3) env/constant default.
+    let base_url = match row.1.filter(|u| !u.is_empty()) {
+        Some(url) => url,
+        None => match preset_base_url(state).await {
+            Some(url) => url,
+            None => {
+                let def = state.coreswift_url.trim().to_string();
+                if def.is_empty() {
+                    return None;
+                }
+                def
             }
-        })
-        .map(|u| u.trim_end_matches('/').to_string())?;
+        },
+    }
+    .trim_end_matches('/')
+    .to_string();
 
     Some((api_key, base_url))
+}
+
+/// Live probe used by the Integration Center "Test connection" button: an authed
+/// `GET /api/external/lists` against the hub. Returns (status_code, body_snippet).
+pub async fn hub_probe(state: &AppState, account_id: &Uuid) -> Result<(u16, String), String> {
+    let (api_key, base_url) = get_coreswift_connection(state, account_id)
+        .await
+        .ok_or_else(|| "Not connected: store a CoreSwift key first".to_string())?;
+
+    let resp = reqwest::Client::new()
+        .get(format!("{base_url}/api/external/lists"))
+        .bearer_auth(&api_key)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("CoreSwift unreachable at {base_url}: {e}"))?;
+
+    let code = resp.status().as_u16();
+    let body: String = resp
+        .text()
+        .await
+        .unwrap_or_default()
+        .chars()
+        .take(300)
+        .collect();
+
+    Ok((code, body))
 }
 
 /// Is this account connected to CoreSwift?
@@ -145,11 +196,8 @@ pub async fn push_lead_to_coreswift(
     if let Some(c) = company.filter(|c| !c.trim().is_empty()) {
         body.insert("company".into(), json!(c.trim()));
     }
-    body.insert(
-        "source".into(),
-        json!(source.unwrap_or("missedcallrespondr")),
-    );
-    body.insert("source_app".into(), json!("missedcallrespondr"));
+    body.insert("source".into(), json!(source.unwrap_or(SOURCE_APP)));
+    body.insert("source_app".into(), json!(SOURCE_APP));
     if let Some(lid) = list_id.filter(|l| !l.trim().is_empty()) {
         body.insert("list_id".into(), json!(lid.trim()));
     }

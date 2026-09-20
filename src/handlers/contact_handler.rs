@@ -83,10 +83,20 @@ pub async fn create_contact(
     let item_clone = item.clone();
     tokio::spawn(async move {
         super::workflowswift_push::push_contact_to_workflowswift(&state_clone, &item_clone).await;
-        super::coreswift_push::push_contact_to_coreswift(
+        // Inbound → CoreSwift (one CoreSwift code path: coreswift_external). Quiet no-op
+        // when the tenant has not connected CoreSwift.
+        let tags = item_clone.tags.clone().unwrap_or_default();
+        super::coreswift_external::push_lead_to_coreswift(
             &state_clone,
-            &item_clone,
-            "contact_creation",
+            &item_clone.tenant_id,
+            &item_clone.name,
+            item_clone.company.as_deref(),
+            item_clone.email.as_deref(),
+            Some(item_clone.phone.as_str()),
+            &tags,
+            None,
+            Some("contact_creation"),
+            item_clone.notes.as_deref(),
         )
         .await;
     });
@@ -143,12 +153,24 @@ pub async fn update_contact(
         .fetch_one(&state.pool)
         .await?;
 
-    // Best-effort push to CoreSwift (tag changes)
+    // Best-effort push to CoreSwift (tag changes) — one CoreSwift code path.
     let state_clone = state.clone();
     let item_clone = item.clone();
     tokio::spawn(async move {
-        super::coreswift_push::push_contact_to_coreswift(&state_clone, &item_clone, "tag_update")
-            .await;
+        let tags = item_clone.tags.clone().unwrap_or_default();
+        super::coreswift_external::push_lead_to_coreswift(
+            &state_clone,
+            &item_clone.tenant_id,
+            &item_clone.name,
+            item_clone.company.as_deref(),
+            item_clone.email.as_deref(),
+            Some(item_clone.phone.as_str()),
+            &tags,
+            None,
+            Some("tag_update"),
+            item_clone.notes.as_deref(),
+        )
+        .await;
     });
 
     Ok(Json(item))
