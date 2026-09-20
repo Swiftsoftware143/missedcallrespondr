@@ -21,7 +21,7 @@
 <div id="app" class="flex min-h-screen"></div>
 
 <script type="module">
-import { h, render } from 'https://esm.sh/preact@10.26.4';
+import { h, render, useState, useEffect } from 'https://esm.sh/preact@10.26.4';
 import htm from 'https://esm.sh/htm@3.1.1';
 const html = htm.bind(h);
 const showUpgradePrompt = (msg) => {
@@ -623,10 +623,601 @@ const CoreIntegration = () => {
 };
 
 // ---- SHELL ----
+
+/* ===== SwiftOps Operator Console — generic admin-parity engine (injected) ===== */
+const OPSAPI = API;
+const OPS_PANELS = [
+{
+"title": "1. Provider Keys (BYOK)",
+"list": "/provider-keys",
+"actions": [
+{
+"label": "Available providers",
+"method": "GET",
+"path": "/available-providers"
+},
+{
+"label": "Save key",
+"method": "POST",
+"path": "/provider-keys",
+"fields": [
+"provider",
+"api_key",
+"base_url"
+]
+},
+{
+"label": "Delete key",
+"method": "DELETE",
+"path": "/provider-keys/:provider",
+"fields": [
+"provider"
+]
+},
+{
+"label": "JSON body (advanced)",
+"method": "POST",
+"path": "/provider-keys",
+"json": true,
+"fields": [
+"json"
+]
+}
+]
+},
+{
+"title": "2. Payment Providers",
+"list": "/payment-providers",
+"actions": [
+{
+"label": "Upsert provider",
+"method": "POST",
+"path": "/payment-providers",
+"fields": [
+"provider_type",
+"label",
+"api_key",
+"publishable_key",
+"webhook_secret",
+"is_active",
+"is_test_mode"
+]
+},
+{
+"label": "Delete provider",
+"method": "DELETE",
+"path": "/payment-providers/:provider_type",
+"fields": [
+"provider_type"
+]
+},
+{
+"label": "JSON body (advanced)",
+"method": "POST",
+"path": "/payment-providers",
+"json": true,
+"fields": [
+"json"
+]
+}
+]
+},
+{
+"title": "3. Plans & Features",
+"list": "/admin/plans",
+"actions": [
+{
+"label": "Create plan (JSON)",
+"method": "POST",
+"path": "/admin/plans",
+"json": true,
+"fields": [
+"json"
+]
+},
+{
+"label": "Get plan",
+"method": "GET",
+"path": "/admin/plans/:id",
+"fields": [
+"id"
+]
+},
+{
+"label": "Update plan (JSON)",
+"method": "PUT",
+"path": "/admin/plans/:id",
+"json": true,
+"fields": [
+"id",
+"json"
+]
+},
+{
+"label": "Set plan features (JSON)",
+"method": "PUT",
+"path": "/admin/plans/:id/features",
+"json": true,
+"fields": [
+"id",
+"json"
+]
+},
+{
+"label": "Assign plan to tenant",
+"method": "POST",
+"path": "/admin/plans/assign",
+"fields": [
+"tenant_id",
+"plan_id",
+"billing_cycle"
+]
+},
+{
+"label": "Delete plan",
+"method": "DELETE",
+"path": "/admin/plans/:id",
+"fields": [
+"id"
+]
+}
+]
+},
+{
+"title": "4. Tenants, Credits & Impersonation",
+"list": "/admin/tenants",
+"actions": [
+{
+"label": "Add credits",
+"method": "POST",
+"path": "/admin/tenants/:id/credits",
+"fields": [
+"id",
+"amount"
+],
+"numeric": [
+"amount"
+]
+},
+{
+"label": "Impersonate tenant",
+"method": "POST",
+"path": "/admin/impersonate",
+"fields": [
+"tenant_id"
+]
+},
+{
+"label": "Stop impersonation",
+"method": "POST",
+"path": "/admin/stop-impersonation"
+},
+{
+"label": "Delete tenant",
+"method": "DELETE",
+"path": "/admin/tenants/:id",
+"fields": [
+"id"
+]
+}
+]
+},
+{
+"title": "5. API Keys",
+"list": "/api-keys",
+"actions": [
+{
+"label": "Create key",
+"method": "POST",
+"path": "/api-keys",
+"fields": [
+"name",
+"target_url"
+]
+},
+{
+"label": "Update key",
+"method": "PUT",
+"path": "/api-keys/:id",
+"fields": [
+"id",
+"name",
+"target_url",
+"is_active"
+]
+},
+{
+"label": "Delete key",
+"method": "DELETE",
+"path": "/api-keys/:id",
+"fields": [
+"id"
+]
+}
+]
+},
+{
+"title": "6. Telnyx Config & Numbers",
+"list": "/admin/telnyx-config",
+"actions": [
+{
+"label": "Save Telnyx config",
+"method": "PUT",
+"path": "/admin/telnyx-config",
+"fields": [
+"api_key",
+"profile_id",
+"messaging_profile_id"
+]
+},
+{
+"label": "List numbers",
+"method": "GET",
+"path": "/telnyx/numbers"
+},
+{
+"label": "Purchase number",
+"method": "POST",
+"path": "/telnyx/numbers",
+"fields": [
+"number",
+"friendly_name"
+]
+},
+{
+"label": "Release number",
+"method": "DELETE",
+"path": "/telnyx/numbers/:id",
+"fields": [
+"id"
+]
+}
+]
+},
+{
+"title": "7. Email Templates & Settings",
+"list": "/email-templates",
+"actions": [
+{
+"label": "Create template",
+"method": "POST",
+"path": "/email-templates",
+"fields": [
+"name",
+"subject",
+"body",
+"html_body",
+"template_type"
+]
+},
+{
+"label": "Update template (JSON)",
+"method": "PUT",
+"path": "/email-templates/:id",
+"json": true,
+"fields": [
+"id",
+"json"
+]
+},
+{
+"label": "Delete template",
+"method": "DELETE",
+"path": "/email-templates/:id",
+"fields": [
+"id"
+]
+},
+{
+"label": "Get tenant settings",
+"method": "GET",
+"path": "/settings"
+},
+{
+"label": "Update settings (JSON)",
+"method": "PUT",
+"path": "/settings",
+"json": true,
+"fields": [
+"json"
+]
+}
+]
+},
+{
+"title": "8. Integration Targets & Affiliates",
+"list": "/integration-targets",
+"actions": [
+{
+"label": "Create target",
+"method": "POST",
+"path": "/integration-targets",
+"fields": [
+"name",
+"provider",
+"webhook_url",
+"api_key",
+"portfolio_company_id"
+]
+},
+{
+"label": "Update target (JSON)",
+"method": "PUT",
+"path": "/integration-targets/:id",
+"json": true,
+"fields": [
+"id",
+"json"
+]
+},
+{
+"label": "Delete target",
+"method": "DELETE",
+"path": "/integration-targets/:id",
+"fields": [
+"id"
+]
+},
+{
+"label": "List affiliates",
+"method": "GET",
+"path": "/affiliates"
+},
+{
+"label": "Create affiliate",
+"method": "POST",
+"path": "/affiliates",
+"fields": [
+"name",
+"email",
+"industry",
+"commission_rate"
+]
+},
+{
+"label": "Delete affiliate",
+"method": "DELETE",
+"path": "/affiliates/:id",
+"fields": [
+"id"
+]
+}
+]
+},
+{
+"title": "9. Tags, Lists & Campaign Triggers",
+"list": "/tags",
+"actions": [
+{
+"label": "Create tag",
+"method": "POST",
+"path": "/tags",
+"fields": [
+"name",
+"color"
+]
+},
+{
+"label": "Delete tag",
+"method": "DELETE",
+"path": "/tags/:id",
+"fields": [
+"id"
+]
+},
+{
+"label": "List tag groups",
+"method": "GET",
+"path": "/tag-groups"
+},
+{
+"label": "Create tag group",
+"method": "POST",
+"path": "/tag-groups",
+"fields": [
+"name",
+"color",
+"sort_order"
+],
+"numeric": [
+"sort_order"
+]
+},
+{
+"label": "List lists",
+"method": "GET",
+"path": "/lists"
+},
+{
+"label": "Add lead to list",
+"method": "POST",
+"path": "/lists/:id/leads",
+"fields": [
+"id",
+"lead_id"
+]
+},
+{
+"label": "List email triggers",
+"method": "GET",
+"path": "/triggers/email"
+},
+{
+"label": "Create email trigger",
+"method": "POST",
+"path": "/triggers/email",
+"fields": [
+"name",
+"trigger_event",
+"subject_template",
+"body_template",
+"from_name",
+"from_email"
+]
+},
+{
+"label": "List redirect triggers",
+"method": "GET",
+"path": "/triggers/redirect"
+},
+{
+"label": "Create redirect trigger",
+"method": "POST",
+"path": "/triggers/redirect",
+"fields": [
+"name",
+"trigger_event",
+"redirect_url"
+]
+}
+]
+},
+{
+"title": "10. Billing, Call Logs & Portfolio Sync",
+"list": "/checkout/sessions",
+"actions": [
+{
+"label": "Create checkout (JSON)",
+"method": "POST",
+"path": "/checkout/create",
+"json": true,
+"fields": [
+"json"
+]
+},
+{
+"label": "Call logs",
+"method": "GET",
+"path": "/call-logs"
+},
+{
+"label": "Export call logs",
+"method": "GET",
+"path": "/call-logs/export"
+},
+{
+"label": "Usage",
+"method": "GET",
+"path": "/me/usage"
+},
+{
+"label": "Portfolio sync (cross-app)",
+"method": "POST",
+"path": "/admin/portfolio-sync"
+}
+]
+}
+];
+
+const OpsAction = ({ act }) => {
+  const [v, setV] = useState({});
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true); setRes(null);
+    try {
+      let path = act.path;
+      (act.fields || []).forEach(f => { if (path.indexOf(':' + f) >= 0) path = path.replace(':' + f, encodeURIComponent((v[f] || '').trim())); });
+      if (path.indexOf(':') >= 0) throw new Error('missing path parameter: ' + path);
+      let body;
+      if (act.json) { body = JSON.parse((v.json || '{}').trim() || '{}'); }
+      else if (act.method === 'GET' || act.method === 'DELETE') { body = undefined; }
+      else {
+        body = {};
+        (act.fields || []).forEach(f => {
+          if (path.indexOf(':' + f) >= 0) return;
+          const s = (v[f] || '').trim();
+          if (s === '') return;
+          body[f] = (act.numeric || []).indexOf(f) >= 0 ? Number(s) : s;
+        });
+      }
+      const r = act.method === 'GET' ? await OPSAPI.get(path)
+        : act.method === 'POST' ? await OPSAPI.post(path, body || {})
+        : act.method === 'PUT' ? await OPSAPI.put(path, body || {})
+        : await OPSAPI.del(path);
+      setRes({ ok: true, text: JSON.stringify(r, null, 1).slice(0, 3000) });
+    } catch (e) { setRes({ ok: false, text: String((e && e.message) || e) }); }
+    setBusy(false);
+  };
+  return html`<div class="ops-action border rounded-lg p-2 mb-2 bg-gray-50">
+    <div class="flex flex-wrap gap-2 items-end">
+      ${(act.fields || []).map(f => html`<label class="text-xs text-gray-600 flex flex-col">
+        <span>${f}</span>
+        <input class="border rounded px-2 py-1 text-sm ops-f-${f}" style=${f === 'json' ? 'min-width:420px;font-family:monospace' : ''}
+          value=${v[f] || ''} onInput=${e => setV(s => Object.assign({}, s, { [f]: e.target.value }))} />
+      </label>`)}
+      <button class="px-3 py-1 rounded bg-indigo-600 text-white text-sm disabled:opacity-50" disabled=${busy} onClick=${go}>
+        ${busy ? '...' : (act.label || act.method)}</button>
+      ${res && html`<span class="text-xs ${res.ok ? 'text-green-700' : 'text-red-600'}">${res.ok ? 'OK' : 'ERROR'}</span>`}
+    </div>
+    <div class="text-xs text-gray-500 mt-1"><code>${act.method} /api/v1${act.path}</code></div>
+    ${res && html`<pre class="text-xs bg-white border rounded p-2 mt-1 overflow-auto" style="max-height:200px">${res.text}</pre>`}
+  </div>`;
+};
+
+const OpsList = ({ path }) => {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    setBusy(true); setErr(null);
+    try { setData(await OPSAPI.get(path)); } catch (e) { setErr(String((e && e.message) || e)); }
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+  let rows = null;
+  if (Array.isArray(data)) rows = data;
+  else if (data && typeof data === 'object') {
+    const k = Object.keys(data).find(kk => Array.isArray(data[kk]));
+    if (k) rows = data[k];
+  }
+  let body;
+  if (err) body = html`<div class="text-xs text-red-600">${err}</div>`;
+  else if (!data) body = html`<div class="text-xs text-gray-400">loading...</div>`;
+  else if (rows) {
+    const cols = Array.from(rows.slice(0, 5).reduce((a, r) => { if (r && typeof r === 'object') Object.keys(r).forEach(k => a.add(k)); return a; }, new Set())).slice(0, 12);
+    body = html`<div class="text-xs text-gray-500 mb-1">${rows.length} row(s)</div>
+      <div class="overflow-auto" style="max-height:260px"><table class="ops-table text-xs w-full border-collapse">
+        <thead><tr>${cols.map(c => html`<th class="text-left border-b px-2 py-1 bg-gray-100">${c}</th>`)}</tr></thead>
+        <tbody>${rows.slice(0, 50).map(r => html`<tr>${cols.map(c => html`<td class="border-b px-2 py-1 align-top">${r && r[c] != null ? String(typeof r[c] === 'object' ? JSON.stringify(r[c]) : r[c]).slice(0, 80) : ''}</td>`)}</tr>`)}</tbody>
+      </table></div>`;
+  } else {
+    body = html`<pre class="text-xs bg-white border rounded p-2 overflow-auto" style="max-height:200px">${JSON.stringify(data, null, 1).slice(0, 3000)}</pre>`;
+  }
+  return html`<div class="ops-list mb-2">
+    <div class="flex items-center gap-2 mb-1">
+      <code class="text-xs text-gray-500">GET /api/v1${path}</code>
+      <button class="px-2 py-0.5 rounded border text-xs" disabled=${busy} onClick=${load}>${busy ? '...' : 'reload'}</button>
+    </div>${body}</div>`;
+};
+
+const OpsPanel = ({ panel }) => {
+  const [open, setOpen] = useState(false);
+  return html`<div class="ops-panel bg-white border rounded-xl mb-3">
+    <div class="flex items-center justify-between px-4 py-2 cursor-pointer" onClick=${() => setOpen(o => !o)}>
+      <span class="font-semibold text-gray-800 text-sm">${panel.title}</span>
+      <span class="text-xs text-gray-400">${(panel.actions || []).length} controls ${open ? '\u2212' : '+'}</span>
+    </div>
+    ${open && html`<div class="px-4 pb-3 border-t pt-3">
+      ${panel.list && html`<${OpsList} path=${panel.list} />`}
+      ${(panel.actions || []).map(a => html`<${OpsAction} act=${a} />`)}
+    </div>`}
+  </div>`;
+};
+
+const OpsConsole = () => {
+  return html`<div class="ops-console space-y-1" data-ops="console">
+    <h1 class="text-xl font-bold text-gray-800">Operator Console</h1>
+    <p class="text-xs text-gray-500 mb-2">Direct operator controls for admin endpoints that had no UI. Every control calls the existing API with your session token.</p>
+    ${OPS_PANELS.map(p => html`<${OpsPanel} panel=${p} />`)}
+  </div>`;
+};
+
 const App = () => {
   if(!API.token) return html`<${LoginView} />`;
 
   const nav = [
+    { id: 'ops', label: 'Operator Console', icon: '🛠', adminOnly: true },
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'portfolio', label: 'Portfolio', icon: '🏢' },
     { id: 'rules', label: 'Response Rules', icon: '⚙️' },
@@ -714,7 +1305,7 @@ const App = () => {
 };
 
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, workflows: Workflows, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, workflows: Workflows, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole};
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
