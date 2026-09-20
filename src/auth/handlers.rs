@@ -91,34 +91,13 @@ pub async fn register(
     let token = create_token(&claims, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let req_email = req.email.clone();
-    let req_name = req.name.clone();
-
-    // Push to CoreSwift as a SwiftSoftware contact (fire-and-forget)
-    let cs_state = state.clone();
-    tokio::spawn(async move {
-        let payload = serde_json::json!({
-            "source_app": "missedcallrespondr",
-            "tenant_id": "abd8ad22-aa01-4642-9a9f-6bef6a03d85b",
-            "lead": { "name": req_name, "email": req_email },
-            "tags": ["missedcallrespondr:Free"],
-            "added_tags": ["missedcallrespondr:Free"],
-            "removed_tags": [],
-            "triggered_by": "signup"
-        });
-        let url = format!(
-            "{}/api/v1/webhooks/cross-app/tag-sync",
-            cs_state.coreswift_url
-        );
-        if !cs_state.coreswift_url.is_empty() {
-            let _ = reqwest::Client::new()
-                .post(&url)
-                .header("x-internal-key", &cs_state.config.internal_sync_key)
-                .json(&payload)
-                .send()
-                .await;
-        }
-    });
+    // NOTE: the legacy signup -> CoreSwift "cross-app/tag-sync" push was removed here.
+    // It was provably dead: CoreSwift's handler requires `lead.id` (TagSyncLead.id is a
+    // non-optional String) while this payload only ever sent name+email, so every signup
+    // got HTTP 422 and no hub row was ever written. It also authenticated with the
+    // fleet-wide INTERNAL_SYNC_KEY env secret, which the platform standard forbids.
+    // The live inbound hub path is handlers::coreswift_external::push_lead_to_coreswift
+    // (tenant BYOK csk_ key), fired on real captures - not on signup.
 
     // Send welcome email
     let wl_pool = state.pool.clone();
