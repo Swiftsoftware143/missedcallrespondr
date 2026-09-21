@@ -7,6 +7,7 @@ mod features;
 mod handlers;
 mod models;
 mod routes;
+mod security;
 mod state;
 
 use std::net::SocketAddr;
@@ -20,6 +21,17 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Running migrations...");
     db::run_migrations(&pool).await?;
     tracing::info!("Migrations complete");
+
+    // BYOK at-rest encryption posture (PROVIDER_KEY_ENC_SECRET). DISABLED means provider key
+    // writes fail closed rather than storing a plaintext credential.
+    tracing::info!(
+        "Provider key encryption: {} (AES-256 at rest, enc:v1 format)",
+        if security::provider_key_crypto::is_configured() {
+            "enabled"
+        } else {
+            "DISABLED - provider key writes will fail closed"
+        }
+    );
 
     let workflowswift_url = std::env::var("WORKFLOWSWIFT_URL")
         .unwrap_or_else(|_| "http://localhost:8085/api/incoming".into());

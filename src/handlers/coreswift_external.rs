@@ -57,6 +57,23 @@ pub async fn get_coreswift_connection(
 
     let api_key = row.0;
 
+    // The column holds `enc:v1:` ciphertext at rest — decrypt before the key is used against
+    // the hub. Rows written before encryption shipped are plaintext and pass through unchanged.
+    let api_key =
+        match crate::security::provider_key_crypto::decrypt_from_storage(&state.pool, &api_key)
+            .await
+        {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    account = %account_id,
+                    "coreswift: stored key could not be decrypted"
+                );
+                return None;
+            }
+        };
+
     // 1) tenant override → 2) preset row → 3) env/constant default.
     let base_url = match row.1.filter(|u| !u.is_empty()) {
         Some(url) => url,

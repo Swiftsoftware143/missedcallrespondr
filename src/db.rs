@@ -73,6 +73,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000014_integration_center",
             include_str!("../migrations/000014_integration_center.sql"),
         ),
+        (
+            "000015_provider_keys_encrypted_at_rest",
+            include_str!("../migrations/000015_provider_keys_encrypted_at_rest.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

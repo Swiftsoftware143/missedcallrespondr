@@ -73,21 +73,42 @@ pub async fn list_provider_keys(
     .fetch_all(&state.pool)
     .await?;
 
-    let masked: Vec<MaskedProviderKey> = keys
-        .into_iter()
-        .map(|k| MaskedProviderKey {
+    // `pk.api_key` holds `enc:v1:` ciphertext at rest. Decrypt ONLY to build the mask — the
+    // mask must come from the plaintext, because masking the ciphertext would leak the head and
+    // tail of the ciphertext and tell the customer nothing. A row that cannot be decrypted still
+    // returns a mask instead of failing the whole list, and the ciphertext is never returned.
+    let mut masked: Vec<MaskedProviderKey> = Vec::with_capacity(keys.len());
+    for k in keys {
+        let plaintext = match crate::security::provider_key_crypto::decrypt_from_storage(
+            &state.pool,
+            &k.api_key,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    provider = %k.provider,
+                    error = %e,
+                    "provider key could not be decrypted for masking"
+                );
+                String::new()
+            }
+        };
+
+        masked.push(MaskedProviderKey {
             id: k.id,
             tenant_id: k.tenant_id,
             provider: k.provider,
-            api_key: mask_key(&k.api_key),
+            api_key: mask_key(&plaintext),
             base_url: k.base_url,
             metadata: k.metadata,
             is_active: k.is_active,
             scope: k.scope,
             created_at: k.created_at,
             updated_at: k.updated_at,
-        })
-        .collect();
+        });
+    }
 
     Ok(Json(masked))
 }
@@ -151,6 +172,13 @@ pub async fn upsert_provider_key(
 
     let scope = req.scope.unwrap_or_else(|| String::from("tenant"));
 
+    // Encrypt BEFORE the value reaches the database: `api_key` never holds the plaintext. A
+    // missing / too-short master key fails the request instead of storing the credential in the
+    // clear (see crate::security::provider_key_crypto).
+    let encrypted_key =
+        crate::security::provider_key_crypto::encrypt_for_storage(&state.pool, &req.api_key)
+            .await?;
+
     let result = sqlx::query_as::<_, ProviderKey>(
         "INSERT INTO provider_keys (tenant_id, provider, api_key, base_url, metadata, scope)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -164,7 +192,7 @@ pub async fn upsert_provider_key(
     )
     .bind(tenant_id)
     .bind(&req.provider)
-    .bind(&req.api_key)
+    .bind(&encrypted_key)
     .bind(&req.base_url)
     .bind(&req.metadata)
     .bind(&scope)
@@ -174,7 +202,8 @@ pub async fn upsert_provider_key(
     Ok(Json(json!({
         "id": result.id,
         "provider": result.provider,
-        "api_key": mask_key(&result.api_key),
+        // Mask of the value the caller just posted (the column holds ciphertext).
+        "api_key": mask_key(&req.api_key),
         "scope": result.scope,
         "is_active": result.is_active
     })))
