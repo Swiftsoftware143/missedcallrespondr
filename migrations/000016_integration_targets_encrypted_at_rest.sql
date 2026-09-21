@@ -24,16 +24,41 @@
 --
 -- NOT VALID by design: rows written before today (legacy plaintext) would be exempt so the app
 -- keeps reading them, while every NEW insert or update is checked. The table held 0 rows when this
--- shipped, so nothing was grandfathered and the constraint is validated after the deploy with
---     ALTER TABLE integration_targets VALIDATE CONSTRAINT integration_targets_api_key_encrypted
--- NOTE: this file is re-run on every boot (src/db.rs::run_migrations), and the DROP/ADD pair below
--- resets that validated flag on each boot - exactly like the provider_keys guard. New writes stay
--- enforced either way, which is what the guard is for.
+-- shipped, so nothing was grandfathered and the self-heal block at the end of this file validates
+-- the constraint on the first boot it runs.
 --
--- Both statements below are independently valid and idempotent, so a re-run is harmless.
+-- This file is re-run on every boot (src/db.rs::run_migrations), and the DROP/ADD pair below resets
+-- that validated flag on each boot - exactly like the provider_keys guard from 000015. The
+-- self-heal block therefore re-runs the VALIDATE as soon as every existing row is compliant, so
+-- `convalidated = t` ("every row that exists is compliant") is a property the boot path maintains
+-- instead of a flag a human has to re-apply after each start. New writes stay enforced either way,
+-- which is what the guard is for, and a validation failure is caught as check_violation (WARNING,
+-- constraint left NOT VALID, the process still boots). Canonical idiom, with the decision record:
+-- /opt/swift/fleet/templates/guard-constraint-not-valid.sql (kanban t_c9b09cc1).
+--
+-- Every statement below is independently valid and idempotent, so a re-run is harmless.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 ALTER TABLE integration_targets DROP CONSTRAINT IF EXISTS integration_targets_api_key_encrypted;
 
 ALTER TABLE integration_targets ADD CONSTRAINT integration_targets_api_key_encrypted CHECK (api_key IS NULL OR api_key = '' OR api_key LIKE 'enc:v1:%') NOT VALID;
+
+DO $guard$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'integration_targets_api_key_encrypted'
+          AND conrelid = 'integration_targets'::regclass
+          AND convalidated
+    ) THEN
+        BEGIN
+            ALTER TABLE integration_targets VALIDATE CONSTRAINT integration_targets_api_key_encrypted;
+            RAISE NOTICE 'integration_targets.integration_targets_api_key_encrypted validated: every existing row is compliant';
+        EXCEPTION
+            WHEN check_violation THEN
+                RAISE WARNING 'integration_targets.integration_targets_api_key_encrypted still NOT VALID: pre-existing rows violate the guard (backfill them, then re-run this file); new writes are still rejected';
+        END;
+    END IF;
+END
+$guard$;

@@ -15,14 +15,41 @@
 -- allowed so an empty slot is still representable.
 --
 -- NOT VALID by design: rows written before today (legacy plaintext) are exempt so the app keeps
--- reading them, while every NEW insert/update is checked. After the one-off backfill the
--- constraint is validated once with
---     ALTER TABLE provider_keys VALIDATE CONSTRAINT provider_keys_api_key_encrypted
+-- reading them, while every NEW insert/update is checked. From the moment the constraint exists a
+-- plaintext credential can no longer be stored, so the guard is live immediately.
 --
--- Both statements below are independently valid and idempotent, so a re-run is harmless.
+-- NOT VALID is paired with the self-heal block at the end of this file. This file is re-run on
+-- every boot (src/db.rs::run_migrations) and the DROP/ADD pair below resets the flag each time, so
+-- the block re-runs the VALIDATE as soon as every existing row is compliant: `convalidated = t`
+-- ("every row that exists is compliant") is then a property the boot path maintains, not something
+-- a human has to remember to run after the backfill. A validation failure is caught as
+-- check_violation, which leaves the constraint NOT VALID with a WARNING and still lets the process
+-- boot — never an outage, never a silently dropped guard. Canonical idiom, with the decision
+-- record: /opt/swift/fleet/templates/guard-constraint-not-valid.sql (kanban t_c9b09cc1).
+--
+-- Every statement below is independently valid and idempotent, so a re-run is harmless.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 ALTER TABLE provider_keys DROP CONSTRAINT IF EXISTS provider_keys_api_key_encrypted;
 
 ALTER TABLE provider_keys ADD CONSTRAINT provider_keys_api_key_encrypted CHECK (api_key = '' OR api_key LIKE 'enc:v1:%') NOT VALID;
+
+DO $guard$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'provider_keys_api_key_encrypted'
+          AND conrelid = 'provider_keys'::regclass
+          AND convalidated
+    ) THEN
+        BEGIN
+            ALTER TABLE provider_keys VALIDATE CONSTRAINT provider_keys_api_key_encrypted;
+            RAISE NOTICE 'provider_keys.provider_keys_api_key_encrypted validated: every existing row is compliant';
+        EXCEPTION
+            WHEN check_violation THEN
+                RAISE WARNING 'provider_keys.provider_keys_api_key_encrypted still NOT VALID: pre-existing rows violate the guard (backfill them, then re-run this file); new writes are still rejected';
+        END;
+    END IF;
+END
+$guard$;
