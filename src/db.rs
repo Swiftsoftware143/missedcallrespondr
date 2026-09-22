@@ -81,6 +81,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000016_integration_targets_encrypted_at_rest",
             include_str!("../migrations/000016_integration_targets_encrypted_at_rest.sql"),
         ),
+        // 000017 owns the `email_templates` table shape at last: no earlier migration ever
+        // named it, so the live table (missing `is_html`) and the code (three statements
+        // naming it) had drifted apart. Additive + idempotent (CREATE TABLE IF NOT EXISTS +
+        // ADD COLUMN IF NOT EXISTS), so it is a no-op everywhere except for the one missing
+        // column, and a fresh database now gets the table instead of silently missing it.
+        (
+            "000017_email_templates_schema",
+            include_str!("../migrations/000017_email_templates_schema.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

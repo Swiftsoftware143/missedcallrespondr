@@ -1,6 +1,7 @@
 //! Regression armour for the four silent query swallows of card t_08faed51
 //! (`lists_handler::campaigns_for_tag`, both branches of `email_templates_handler::list`,
-//! `plans_handler::attribute_plan_upgrade`).
+//! `plans_handler::attribute_plan_upgrade`) plus the same class of swallow in
+//! `email::lookup_db_template` (card t_99365fd5, the templated-email path).
 //!
 //! Every leg drives the real handler/helper against Postgres that genuinely cannot be
 //! reached (`connect_lazy` to a closed port, 500 ms acquire timeout) and reads back the
@@ -146,6 +147,53 @@ fn email_templates_list_old_shape_answered_empty_and_said_nothing() {
     );
     assert!(
         !log.contains("email_templates.list"),
+        "control: the pre-fix shape logged nothing at all: {log}"
+    );
+}
+
+#[test]
+fn email_template_lookup_logs_the_failure_instead_of_silently_falling_back() {
+    // Card t_99365fd5: src/email.rs used `.fetch_optional(..).await.ok().flatten()`, so the
+    // templated-email lookup could fail (that is exactly what the missing is_html column
+    // did) and send_template_email would quietly send the inline body instead of the DB row.
+    let (row, log) = capture(|| {
+        let pool = dead_pool();
+        async move { crate::email::lookup_db_template(&pool, Uuid::nil(), "welcome").await }
+    });
+    assert!(
+        row.is_none(),
+        "a failed lookup still falls back (the caller must keep sending *some* email)"
+    );
+    assert!(
+        log.contains("email.lookup_db_template: query failed"),
+        "the failure must be logged with its context, not swallowed: {log}"
+    );
+    assert!(
+        log.contains("template_type=welcome"),
+        "the log must say which template could not be loaded: {log}"
+    );
+}
+
+#[test]
+fn email_template_lookup_old_shape_fell_back_and_said_nothing() {
+    // Control leg: the exact pre-fix expression on the same dead pool. It must produce the
+    // same `None` with no log line at all — that is the silence this fix removed.
+    let (row, log) = capture(|| {
+        let pool = dead_pool();
+        async move {
+            sqlx::query_as::<_, (Uuid,)>("SELECT id FROM email_templates LIMIT 1")
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+        }
+    });
+    assert!(
+        row.is_none(),
+        "control: the pre-fix shape turned a failed lookup into 'no template'"
+    );
+    assert!(
+        !log.contains("lookup_db_template"),
         "control: the pre-fix shape logged nothing at all: {log}"
     );
 }

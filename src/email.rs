@@ -30,34 +30,30 @@ pub async fn send_template_email(
     let app_name = "MissedCall Respondr";
     let app_url = "https://app.missedcallrespondr.com";
 
-    // Try to load template from DB
-    let template = sqlx::query_as::<_, EmailTemplateRow>(
-        r#"SELECT id, name, subject, body, html_body, is_html, is_default
-           FROM email_templates
-           WHERE template_type = $1 AND (aid = $2 OR is_default = true)
-           ORDER BY is_default ASC, created_at DESC
-           LIMIT 1"#,
-    )
-    .bind(template_type)
-    .bind(tenant_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
+    // Load template from DB. A lookup FAILURE is no longer swallowed: `lookup_db_template`
+    // logs it with this function's name and the error, then the caller falls back to the
+    // inline body — so "no template configured" and "the query failed" stop looking alike.
+    let template = lookup_db_template(pool, tenant_id, template_type).await;
 
     match template {
         Some(t) => {
             let subject = render_template(
                 &t.subject
+                    .clone()
                     .unwrap_or_else(|| get_default_subject(template_type, app_name)),
                 vars,
+            );
+            tracing::info!(
+                "email.send_template_email: using db template {template_type} (id={}, name={:?}) subject={subject:?}",
+                t.id,
+                t.name
             );
             let html_body = t
                 .html_body
                 .as_ref()
                 .map(|h| render_template(h, vars))
                 .unwrap_or_default();
-            let text_body = render_template(&t.body.unwrap_or_default(), vars);
+            let text_body = render_template(&t.body.clone().unwrap_or_default(), vars);
             let use_html = t.is_html.unwrap_or(true);
 
             send_email_request(
@@ -68,7 +64,50 @@ pub async fn send_template_email(
             )
             .await
         }
-        None => send_inline(to, template_type, vars, app_name, app_url).await,
+        None => {
+            tracing::info!(
+                "email.send_template_email: no usable db template for template_type={template_type} (tenant {tenant_id}) — sending the inline body"
+            );
+            send_inline(to, template_type, vars, app_name, app_url).await
+        }
+    }
+}
+
+/// Fetch the tenant's template (or the global default) for `template_type`.
+///
+/// Returns `None` both when there is no template row and when the query failed — but a
+/// failure is logged first, which is the whole point: previously this was
+/// `.fetch_optional(..).await.ok().flatten()`, so a query that never ran (a missing column,
+/// a lock, a connection error) was indistinguishable from "nothing configured", and
+/// `send_template_email` fell back to the inline body without a word. That silent fallback
+/// is what hid this app's `email_templates.is_html` schema drift (card t_99365fd5); the
+/// column now exists (migration 000017), and if it ever drifts again this logs it.
+pub async fn lookup_db_template(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    template_type: &str,
+) -> Option<EmailTemplateRow> {
+    match sqlx::query_as::<_, EmailTemplateRow>(
+        r#"
+        SELECT id, name, subject, body, html_body, is_html, is_default
+        FROM email_templates
+        WHERE template_type = $1 AND (aid = $2 OR is_default = true)
+        ORDER BY is_default ASC, created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(template_type)
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::warn!(
+                "email.lookup_db_template: query failed (template_type={template_type}, tenant_id={tenant_id}): {e} — falling back to the inline body"
+            );
+            None
+        }
     }
 }
 
@@ -221,7 +260,7 @@ async fn send_email_request(
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct EmailTemplateRow {
+pub struct EmailTemplateRow {
     #[allow(dead_code)]
     id: Uuid,
     #[allow(dead_code)]

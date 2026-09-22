@@ -13,17 +13,19 @@ use crate::state::AppState;
 
 /// Full email template row.
 ///
-/// Two fields used to disagree with the live table, and every read collapsed or
+/// One field used to disagree with the live table, and every read collapsed or
 /// 500'd because of it:
 ///  - `aid` is NULLABLE (the live global template has aid = NULL, and the table's
 ///    own unique index is `(template_type, COALESCE(aid, nil), is_default)`).
 ///    Required as `Uuid` it failed with `unexpected null` on every row — which
 ///    `list` turned into `200 {"count":1,"items":[]}` and `get` into a 500.
-///  - `is_html` is not a column of this app's `email_templates` table (verified
-///    with `\d`); `#[sqlx(default)]` keeps a read from erroring on a column the
-///    table never had, and still decodes the real value if the column is added.
-///    The schema drift this reflects (POST/PUT also name `is_html`) is tracked
-///    separately — it is a loud 500, not one of this change's silent swallows.
+///  - `is_html` was NOT a column of this app's `email_templates` table (verified
+///    with `\d`), while `create`/`update` below and the templated-email lookup in
+///    src/email.rs all named it: POST/PUT answered 500 `column "is_html" of
+///    relation "email_templates" does not exist` and the lookup failed silently.
+///    Migration 000017 (card t_99365fd5) adds the column and makes this repo the
+///    owner of the table shape, so the real value now decodes; `#[sqlx(default)]`
+///    stays as belt-and-braces for the read side.
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct EmailTemplate {
     pub id: Uuid,
