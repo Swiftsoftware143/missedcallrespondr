@@ -51,7 +51,12 @@ pub struct ListQuery {
 
 #[derive(Deserialize)]
 pub struct CreateInput {
-    pub name: String,
+    /// `name`, `subject` and `template_type` are all `NOT NULL` with no server default in
+    /// the live table, so they are `Option` here only to tell "absent" apart from "present"
+    /// and answer a 400 that names the field — see `create` below. `deserialize` itself
+    /// must not reject them, or a missing field would 422 out of the `Json` extractor with
+    /// a plain-text body instead of this app's `{"error": "…"}` shape.
+    pub name: Option<String>,
     pub subject: Option<String>,
     pub body: Option<String>,
     pub html_body: Option<String>,
@@ -60,6 +65,9 @@ pub struct CreateInput {
     pub template_type: Option<String>,
 }
 
+/// Deliberately still all-`Option`: this handler is a COALESCE partial update, so an absent
+/// field means "leave it alone". `www-admin/index.html` drives it as raw JSON (`"json": true`)
+/// so the caller controls exactly which keys are present. Only `create` has to reject absence.
 #[derive(Deserialize)]
 pub struct UpdateInput {
     pub name: Option<String>,
@@ -69,6 +77,16 @@ pub struct UpdateInput {
     pub is_html: Option<bool>,
     pub is_default: Option<bool>,
     pub template_type: Option<String>,
+}
+
+/// Presence check for a column that is `NOT NULL` with no server default.
+///
+/// Returns the app's own 400 shape, `{"error": "<field> is required"}`, matching the wording
+/// already used elsewhere in this codebase (auth/handlers.rs, portfolio_handler.rs). An empty
+/// string is deliberately NOT rejected: it inserts fine today, and tightening that would be a
+/// behaviour change on a request that currently succeeds.
+fn required_field(field: &str, value: Option<String>) -> Result<String, AppError> {
+    value.ok_or_else(|| AppError::BadRequest(format!("{field} is required")))
 }
 
 /// GET /api/v1/email-templates
@@ -130,26 +148,63 @@ pub async fn get(
 }
 
 /// POST /api/v1/email-templates
+///
+/// The columns this handler fills from the request — `name`, `subject`, `template_type` —
+/// are `NOT NULL` with no server default, but were bound straight through as `Option<String>`.
+/// A request that omitted one therefore reached Postgres and came back as a **500 carrying the
+/// raw SQL error**, e.g. (card t_1774cee3, reproduced live):
+///   `null value in column "template_type" of relation "email_templates" violates not-null constraint`
+/// `subject` failed identically and was found while fixing that. All three are now checked here
+/// and answered as 400 naming the missing field — the contract `www-admin/index.html` already
+/// sends (`Create template` = name, subject, body, html_body, template_type).
+///
+/// `aid` was bound as `Uuid::nil()`, which nothing in this app means: the live global default
+/// row has `aid IS NULL`, and the table's own index is
+/// `UNIQUE (template_type, COALESCE(aid, nil), is_default) WHERE aid IS NULL AND is_default = true`.
+/// This route carries no tenant context, so `aid` can only mean "global" — and a nil-uuid row
+/// was both invisible to `lookup_db_template`'s `aid = $2` and outside that index, which is how
+/// a second global default for one `template_type` could be inserted silently. `NULL` puts the
+/// row back inside the index, so a real duplicate is now a 409 that names the field.
 pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<CreateInput>,
 ) -> Result<Json<Value>, AppError> {
+    let name = required_field("name", body.name)?;
+    let subject = required_field("subject", body.subject)?;
+    let template_type = required_field("template_type", body.template_type)?;
+
     let id = Uuid::new_v4();
-    let aid = Uuid::nil();
+    // Global template. See the doc comment: the live default row is `aid IS NULL`, and the
+    // partial unique index only covers `aid IS NULL`.
+    let aid: Option<Uuid> = None;
 
     sqlx::query(
         r#"INSERT INTO email_templates (id, aid, name, subject, body, html_body, is_html, is_default, template_type)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#
     )
     .bind(id).bind(aid)
-    .bind(&body.name)
-    .bind(&body.subject)
+    .bind(&name)
+    .bind(&subject)
     .bind(&body.body)
     .bind(&body.html_body)
     .bind(body.is_html.unwrap_or(true))
     .bind(body.is_default.unwrap_or(false))
-    .bind(&body.template_type)
-    .execute(&state.pool).await?;
+    .bind(&template_type)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| match &e {
+        // The table says at most one global default per `template_type`. Answer that as a
+        // Conflict that names the field rather than leaking the index error as a 500.
+        sqlx::Error::Database(db) if db.constraint() == Some("idx_email_templates_unique") => {
+            tracing::warn!(
+                "email_templates.create: rejected a second global default (template_type={template_type})"
+            );
+            AppError::Conflict(format!(
+                "a default template for template_type '{template_type}' already exists"
+            ))
+        }
+        _ => AppError::from(e),
+    })?;
 
     let item = sqlx::query_as::<_, EmailTemplate>("SELECT * FROM email_templates WHERE id = $1")
         .bind(id)
@@ -206,5 +261,41 @@ pub async fn delete(
         .execute(&state.pool)
         .await?;
 
-    Ok(Json(json!({"status": "deleted"})))
+    Ok(Json(json!({ "status": "deleted" })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::required_field;
+    use crate::error::AppError;
+
+    /// Every `NOT NULL`-without-default column `create` fills must be refused before the
+    /// statement is built, naming the field, so Postgres never sees the NULL. Card t_1774cee3:
+    /// `template_type` used to reach the database and answer 500 with the raw SQL error.
+    #[test]
+    fn absent_not_null_fields_are_named_in_a_400() {
+        for field in ["name", "subject", "template_type"] {
+            match required_field(field, None) {
+                Err(AppError::BadRequest(msg)) => {
+                    assert_eq!(
+                        msg,
+                        format!("{field} is required"),
+                        "field not named: {msg}"
+                    );
+                }
+                other => panic!("expected BadRequest for a missing {field}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn present_values_pass_through_unchanged() {
+        assert_eq!(
+            required_field("template_type", Some("welcome".into())).unwrap(),
+            "welcome"
+        );
+        // An empty string inserts fine today; tightening it would change a request that
+        // currently succeeds, so it must stay accepted.
+        assert_eq!(required_field("name", Some(String::new())).unwrap(), "");
+    }
 }
