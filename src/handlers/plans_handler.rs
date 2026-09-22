@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::FromRow;
@@ -25,16 +25,65 @@ pub struct Plan {
     pub is_active: bool,
     pub sort_order: i32,
     pub payment_provider: Option<String>,
-    pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
+    pub updated_at: Option<NaiveDateTime>,
+}
+
+// ---------------------------------------------------------------------------
+// Decode helpers
+//
+// `plans.created_at` / `updated_at` are `timestamp without time zone` and
+// `price_monthly` / `price_yearly` are `numeric`. Decoding the timestamps as
+// `DateTime<Utc>` and the numerics as `f64` fails in sqlx, and every call site
+// used to swallow that failure (`try_get(..).ok()` / `.unwrap_or(0.0)`), so the
+// admin plans table rendered NULL dates and $0.00 prices for four live rows with
+// no log line and no 500. The types below match the columns; a decode failure is
+// now logged instead of collapsing into the chrono/serde default.
+// ---------------------------------------------------------------------------
+
+/// A `timestamp without time zone` column, emitted as RFC3339 UTC. This app
+/// writes these with `NOW()` from a UTC session, so the naive value is UTC.
+fn ts_utc(row: &sqlx::postgres::PgRow, col: &str) -> Option<String> {
+    use sqlx::Row;
+    match row.try_get::<Option<NaiveDateTime>, _>(col) {
+        Ok(v) => v.map(|d| d.and_utc().to_rfc3339()),
+        Err(e) => {
+            tracing::warn!(column = col, error = %e, "plans: timestamp decode failed");
+            None
+        }
+    }
+}
+
+/// A `numeric` money column. sqlx has no `f64` decode for NUMERIC, so every
+/// SELECT below casts the column to `float8` — the same convention this file
+/// already uses in `attribute_plan_upgrade`. If that cast is ever dropped, this
+/// says so instead of reporting $0.00 for a paid plan.
+fn money(row: &sqlx::postgres::PgRow, col: &str) -> f64 {
+    use sqlx::Row;
+    match row.try_get::<Option<f64>, _>(col) {
+        Ok(Some(v)) => v,
+        Ok(None) => 0.0,
+        Err(e) => {
+            tracing::warn!(
+                column = col,
+                error = %e,
+                "plans: numeric decode failed — the SELECT must cast this column to float8"
+            );
+            0.0
+        }
+    }
 }
 
 pub async fn list_plans(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
+    // NOTE: price_monthly/price_yearly are `numeric`; the ::float8 cast is what
+    // makes them decodable as f64 (see `money`).
     let rows = sqlx::query(
-        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order, payment_provider, created_at, updated_at FROM plans ORDER BY sort_order ASC, price_monthly ASC"
+        "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
+         price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
+         created_at, updated_at FROM plans ORDER BY sort_order ASC, price_monthly ASC",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -45,14 +94,14 @@ pub async fn list_plans(
             "name": r.try_get::<String,_>("name").unwrap_or_default(),
             "slug": r.try_get::<String,_>("slug").unwrap_or_default(),
             "description": r.try_get::<Option<String>,_>("description").ok().flatten(),
-            "price_monthly": r.try_get::<f64,_>("price_monthly").unwrap_or(0.0),
-            "price_yearly": r.try_get::<f64,_>("price_yearly").unwrap_or(0.0),
+            "price_monthly": money(r, "price_monthly"),
+            "price_yearly": money(r, "price_yearly"),
             "features": r.try_get::<Option<serde_json::Value>,_>("features").ok().flatten(),
             "is_active": r.try_get::<bool,_>("is_active").unwrap_or(true),
             "sort_order": r.try_get::<i32, _>("sort_order").unwrap_or(0),
             "payment_provider": r.try_get::<Option<String>,_>("payment_provider").ok().flatten(),
-            "created_at": r.try_get::<Option<DateTime<Utc>>,_>("created_at").ok().flatten().map(|d| d.to_string()),
-            "updated_at": r.try_get::<Option<DateTime<Utc>>,_>("updated_at").ok().flatten().map(|d| d.to_string()),
+            "created_at": ts_utc(r, "created_at"),
+            "updated_at": ts_utc(r, "updated_at"),
         })
     }).collect();
 
@@ -65,7 +114,9 @@ pub async fn get_plan(
 ) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
     let row = sqlx::query(
-        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order, payment_provider, created_at, updated_at FROM plans WHERE id = $1"
+        "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
+         price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
+         created_at, updated_at FROM plans WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -77,12 +128,14 @@ pub async fn get_plan(
         "name": row.try_get::<String,_>("name").unwrap_or_default(),
         "slug": row.try_get::<String,_>("slug").unwrap_or_default(),
         "description": row.try_get::<Option<String>,_>("description").ok().flatten(),
-        "price_monthly": row.try_get::<f64,_>("price_monthly").unwrap_or(0.0),
-        "price_yearly": row.try_get::<f64,_>("price_yearly").unwrap_or(0.0),
+        "price_monthly": money(&row, "price_monthly"),
+        "price_yearly": money(&row, "price_yearly"),
         "features": row.try_get::<Option<serde_json::Value>,_>("features").ok().flatten(),
         "is_active": row.try_get::<bool,_>("is_active").unwrap_or(true),
         "sort_order": row.try_get::<i32,_>("sort_order").unwrap_or(0),
         "payment_provider": row.try_get::<Option<String>,_>("payment_provider").ok().flatten(),
+        "created_at": ts_utc(&row, "created_at"),
+        "updated_at": ts_utc(&row, "updated_at"),
     }})))
 }
 
@@ -157,7 +210,8 @@ pub async fn update_plan(
 ) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
     let existing = sqlx::query(
-        "SELECT id, name, slug, description, price_monthly, price_yearly, features, is_active, sort_order FROM plans WHERE id = $1"
+        "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
+         price_yearly::float8 AS price_yearly, features, is_active, sort_order FROM plans WHERE id = $1"
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -192,11 +246,11 @@ pub async fn update_plan(
     let price_monthly = req
         .get("price_monthly")
         .and_then(|v| v.as_f64())
-        .unwrap_or_else(|| existing.try_get::<f64, _>("price_monthly").unwrap_or(0.0));
+        .unwrap_or_else(|| money(&existing, "price_monthly"));
     let price_yearly = req
         .get("price_yearly")
         .and_then(|v| v.as_f64())
-        .unwrap_or_else(|| existing.try_get::<f64, _>("price_yearly").unwrap_or(0.0));
+        .unwrap_or_else(|| money(&existing, "price_yearly"));
     let features = req.get("features").cloned().or_else(|| {
         existing
             .try_get::<Option<serde_json::Value>, _>("features")

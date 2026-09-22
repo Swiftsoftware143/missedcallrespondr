@@ -1,12 +1,24 @@
 //! Affiliates handler for MissedCall Respondr
 //! DB-backed CRUD using the affiliates table.
+//!
+//! Schema of record is this app's own migration `000011_schema_fix.sql`:
+//!   id uuid PK, tenant_id uuid NOT NULL, user_id uuid NULL, code varchar(64) UNIQUE,
+//!   commission_rate numeric(6,4) NOT NULL, is_active bool NOT NULL,
+//!   created_at timestamptz NOT NULL.
+//!
+//! This file previously described a *FunnelSwift* affiliates table (text `id`,
+//! `name`/`email`/`industry`/`tax_docs`/`updated_at`) — cross-app bleed. Against
+//! this app's real table that meant: `GET /affiliates/{id}` 500'd with
+//! `operator does not exist: uuid = text` on every call, and `POST /affiliates`
+//! could not even deserialize (it demanded `name`, which no column holds). The
+//! decode types below are the real column types.
 
 use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     Json,
 };
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::FromRow;
@@ -20,36 +32,42 @@ use crate::state::AppState;
 // Models
 // ---------------------------------------------------------------------------
 
+/// Every statement below selects the real schema's columns explicitly and casts
+/// `commission_rate::float8` — `commission_rate` is `numeric` and sqlx has no `f64`
+/// decode for NUMERIC, the same convention `plans_handler.rs` uses for
+/// `plans.price_monthly`. The column list is written out at each call site rather
+/// than built from a constant, because the fleet decode-type audit
+/// (`/opt/swift/bin/fleet-dbtype-audit.py`) only honours a `col::cast` it can see
+/// inside the statement's own literal.
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct Affiliate {
-    pub id: String,
+    pub id: Uuid,
     pub tenant_id: Uuid,
-    pub name: String,
-    pub email: String,
-    pub industry: Option<String>,
-    pub commission_rate: Option<f64>,
-    pub tax_docs: Option<Value>,
+    pub user_id: Option<Uuid>,
+    pub code: String,
+    pub commission_rate: f64,
     pub is_active: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
 }
 
+/// `deny_unknown_fields` is deliberate: the old contract accepted `name`/`email`
+/// and silently had nowhere to put them. A caller that sends a field this table
+/// cannot store now gets a 422 naming it, instead of a 201 that lied.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateAffiliateRequest {
-    pub name: String,
-    pub email: String,
-    pub industry: Option<String>,
+    pub code: Option<String>,
+    pub user_id: Option<Uuid>,
     pub commission_rate: Option<f64>,
-    pub tax_docs: Option<Value>,
+    pub is_active: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateAffiliateRequest {
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub industry: Option<String>,
+    pub code: Option<String>,
+    pub user_id: Option<Uuid>,
     pub commission_rate: Option<f64>,
-    pub tax_docs: Option<Value>,
     pub is_active: Option<bool>,
 }
 
@@ -64,10 +82,12 @@ pub struct ListQuery {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn generate_affiliate_id() -> String {
+/// A unique referral code. `code` is UNIQUE across the table, and 36^10 of
+/// namespace makes a collision a non-event rather than a retry loop.
+fn generate_affiliate_code() -> String {
     let now = chrono::Utc::now();
     let date_part = now.format("%m%d%Y").to_string();
-    let random_part: String = (0..5)
+    let random_part: String = (0..10)
         .map(|_| {
             let n = rand::random::<u8>() % 36;
             if n < 10 {
@@ -90,16 +110,14 @@ pub async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let limit = query.limit.unwrap_or(50);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
+    let offset = query.offset.unwrap_or(0).max(0);
 
     let affiliates = if let Some(search) = &query.search {
         sqlx::query_as::<_, Affiliate>(
-            r#"SELECT * FROM affiliates
-               WHERE tenant_id = $1
-                 AND (name ILIKE $2 OR email ILIKE $2)
-               ORDER BY created_at DESC
-               LIMIT $3 OFFSET $4"#,
+            "SELECT id, tenant_id, user_id, code, commission_rate::float8 AS commission_rate, \
+             is_active, created_at FROM affiliates \
+             WHERE tenant_id = $1 AND code ILIKE $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
         )
         .bind(claims.aid)
         .bind(format!("%{}%", search))
@@ -109,10 +127,9 @@ pub async fn list(
         .await?
     } else {
         sqlx::query_as::<_, Affiliate>(
-            r#"SELECT * FROM affiliates
-               WHERE tenant_id = $1
-               ORDER BY created_at DESC
-               LIMIT $2 OFFSET $3"#,
+            "SELECT id, tenant_id, user_id, code, commission_rate::float8 AS commission_rate, \
+             is_active, created_at FROM affiliates \
+             WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
         )
         .bind(claims.aid)
         .bind(limit)
@@ -121,7 +138,9 @@ pub async fn list(
         .await?
     };
 
-    Ok(Json(json!({ "affiliates": affiliates })))
+    Ok(Json(
+        json!({ "affiliates": affiliates, "total": affiliates.len() }),
+    ))
 }
 
 /// POST /api/v1/affiliates
@@ -130,25 +149,42 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateAffiliateRequest>,
 ) -> Result<(StatusCode, Json<Value>), AppError> {
-    let aff_id = generate_affiliate_id();
+    let code = req
+        .code
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(generate_affiliate_code);
+    let commission_rate = req.commission_rate.unwrap_or(0.0);
+    if !(0.0..=1.0).contains(&commission_rate) {
+        return Err(AppError::BadRequest(
+            "commission_rate must be between 0 and 1".into(),
+        ));
+    }
+    let is_active = req.is_active.unwrap_or(true);
 
-    sqlx::query(
-        r#"INSERT INTO affiliates (id, tenant_id, name, email, industry, commission_rate, tax_docs)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+    let created = sqlx::query_as::<_, Affiliate>(
+        "INSERT INTO affiliates (tenant_id, user_id, code, commission_rate, is_active) \
+         VALUES ($1, $2, $3, $4, $5) \
+         RETURNING id, tenant_id, user_id, code, \
+                   commission_rate::float8 AS commission_rate, is_active, created_at",
     )
-    .bind(&aff_id)
     .bind(claims.aid)
-    .bind(&req.name)
-    .bind(&req.email)
-    .bind(&req.industry)
-    .bind(req.commission_rate)
-    .bind(&req.tax_docs)
-    .execute(&state.pool)
-    .await?;
+    .bind(req.user_id)
+    .bind(&code)
+    .bind(commission_rate)
+    .bind(is_active)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref db) if db.constraint() == Some("affiliates_code_key") => {
+            AppError::Conflict(format!("Affiliate code '{}' already exists", code))
+        }
+        other => AppError::from(other),
+    })?;
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": aff_id, "message": "Affiliate created" })),
+        Json(json!({ "id": created.id, "affiliate": created, "message": "Affiliate created" })),
     ))
 }
 
@@ -156,12 +192,13 @@ pub async fn create(
 pub async fn get(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Affiliate>, AppError> {
     let affiliate = sqlx::query_as::<_, Affiliate>(
-        r#"SELECT * FROM affiliates WHERE id = $1 AND tenant_id = $2"#,
+        "SELECT id, tenant_id, user_id, code, commission_rate::float8 AS commission_rate, \
+         is_active, created_at FROM affiliates WHERE id = $1 AND tenant_id = $2",
     )
-    .bind(&id)
+    .bind(id)
     .bind(claims.aid)
     .fetch_optional(&state.pool)
     .await?
@@ -174,46 +211,56 @@ pub async fn get(
 pub async fn update(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Json(req): Json<UpdateAffiliateRequest>,
 ) -> Result<Json<Value>, AppError> {
-    let existing = sqlx::query_as::<_, Affiliate>(
-        r#"SELECT * FROM affiliates WHERE id = $1 AND tenant_id = $2"#,
+    if let Some(rate) = req.commission_rate {
+        if !(0.0..=1.0).contains(&rate) {
+            return Err(AppError::BadRequest(
+                "commission_rate must be between 0 and 1".into(),
+            ));
+        }
+    }
+
+    let updated = sqlx::query_as::<_, Affiliate>(
+        "UPDATE affiliates SET \
+         code = COALESCE($1, code), \
+         user_id = COALESCE($2, user_id), \
+         commission_rate = COALESCE($3, commission_rate), \
+         is_active = COALESCE($4, is_active) \
+         WHERE id = $5 AND tenant_id = $6 \
+         RETURNING id, tenant_id, user_id, code, \
+                   commission_rate::float8 AS commission_rate, is_active, created_at",
     )
-    .bind(&id)
+    .bind(req.code.as_deref().map(str::trim).filter(|c| !c.is_empty()))
+    .bind(req.user_id)
+    .bind(req.commission_rate)
+    .bind(req.is_active)
+    .bind(id)
     .bind(claims.aid)
     .fetch_optional(&state.pool)
-    .await?
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref db) if db.constraint() == Some("affiliates_code_key") => {
+            AppError::Conflict("Affiliate code already exists".into())
+        }
+        other => AppError::from(other),
+    })?
     .ok_or_else(|| AppError::NotFound("Affiliate not found".into()))?;
 
-    sqlx::query(
-        r#"UPDATE affiliates
-           SET name=$1, email=$2, industry=$3, commission_rate=$4,
-               tax_docs=$5, is_active=$6, updated_at=NOW()
-           WHERE id=$7 AND tenant_id=$8"#,
-    )
-    .bind(req.name.unwrap_or(existing.name))
-    .bind(req.email.unwrap_or(existing.email))
-    .bind(req.industry.or(existing.industry))
-    .bind(req.commission_rate.or(existing.commission_rate))
-    .bind(req.tax_docs.or(existing.tax_docs))
-    .bind(req.is_active.unwrap_or(existing.is_active))
-    .bind(&id)
-    .bind(claims.aid)
-    .execute(&state.pool)
-    .await?;
-
-    Ok(Json(json!({ "message": "Affiliate updated" })))
+    Ok(Json(
+        json!({ "affiliate": updated, "message": "Affiliate updated" }),
+    ))
 }
 
 /// DELETE /api/v1/affiliates/{id}
 pub async fn delete(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, AppError> {
-    let result = sqlx::query(r#"DELETE FROM affiliates WHERE id = $1 AND tenant_id = $2"#)
-        .bind(&id)
+    let result = sqlx::query("DELETE FROM affiliates WHERE id = $1 AND tenant_id = $2")
+        .bind(id)
         .bind(claims.aid)
         .execute(&state.pool)
         .await?;
