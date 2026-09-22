@@ -36,8 +36,13 @@ All transactional emails use the `email_templates` table with `{{variable}}` pla
 ### Template Fields
 
 - **name** — display label
-- **template_type** — `welcome` / `purchase_confirmed` / `password_reset`
-- **subject** — email subject (supports `{{variable}}`)
+- **template_type** — `welcome` / `welcome_credentials` / `purchase_confirmed` / `password_reset`
+  - `welcome` is the self-serve signup mail: the account owner just chose the password, so this
+    template gets no `password` value and its default row carries no `{password}` placeholder.
+  - `welcome_credentials` is the welcome mail for flows that GENERATE the password (checkout,
+    where the email is the only place the customer can learn it). This is the one welcome type
+    whose default row contains the `{password}` block.
+- **subject** — email subject (placeholders are written `{variable}`, e.g. `{app_name}`)
 - **body** — plain text body
 - **html_body** — HTML body
 - **is_html** — HTML or plain text delivery
