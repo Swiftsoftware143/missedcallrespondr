@@ -3,19 +3,59 @@ use sqlx::PgPool;
 use std::env;
 use uuid::Uuid;
 
-/// Render a template string by replacing {{key}} placeholders with values from `vars`.
+/// Render a template string by substituting the placeholders that ARE keys of `vars`.
+///
+/// Two brace conventions are accepted because both are live: every shipped row — and anything an
+/// admin can write from the console today, since the Create/Update form offers no placeholder help
+/// and no validation — uses a SINGLE brace (`Welcome to {app_name}!`), while this function only
+/// ever understood `{{key}}`. So a db template that WAS selected emitted its placeholders
+/// literally: the recipient got `Your password reset code is: {token}` (card t_215941a2, measured
+/// from the sender's own log line on the live welcome row).
+///
+/// The substitution is KEY-DRIVEN, not a regex sweep: only `{k}` / `{{k}}` for a `k` present in
+/// `vars` is replaced, so a template holding a real brace that is not a placeholder — JSON in a
+/// body, a CSS block — survives byte-for-byte. A key that is NOT in `vars` is likewise left
+/// literal, deliberately: an unfilled placeholder must stay visible rather than render as "".
 fn render_template(template: &str, vars: &serde_json::Value) -> String {
     let mut result = template.to_string();
 
     if let Some(obj) = vars.as_object() {
         for (key, value) in obj {
-            let placeholder = format!("{{{{{}}}}}", key);
             let replacement = value.as_str().unwrap_or("");
+            // `{{key}}` FIRST: replacing the single form first would eat the inner braces of a
+            // `{{key}}` placeholder and leave a stray `{}`-wrapped value behind. With this order
+            // both conventions work, which matters because the double form is the one the older
+            // doc comment (and the audit harness) wrote.
+            let placeholder = format!("{{{{{}}}}}", key);
             result = result.replace(&placeholder, replacement);
+            result = result.replace(&format!("{{{}}}", key), replacement);
         }
     }
 
     result
+}
+
+/// The values every template may rely on whichever entry point sent it.
+///
+/// Before this, `{app_name}` and `{login_url}` resolved only on the call sites that happened to
+/// pass them — `auth::register` passed both, the checkout welcome path passed neither — so the
+/// SAME live template rendered differently per entry point (and rendered LITERALLY wherever the
+/// key was missing, which is what the welcome row's subject showed). App-level facts are merged in
+/// as defaults; caller-supplied keys win, so a caller that knows a better value still overrides.
+///
+/// `login_url` is the app base URL, not `<base>/login`: the shipped row writes
+/// `Login: {login_url}/login`, and `auth::register` already passes the bare base for it.
+fn with_app_vars(vars: &serde_json::Value, app_name: &str, app_url: &str) -> serde_json::Value {
+    let mut merged = serde_json::Map::new();
+    merged.insert("app_name".to_string(), json!(app_name));
+    merged.insert("app_url".to_string(), json!(app_url));
+    merged.insert("login_url".to_string(), json!(app_url));
+    if let Some(obj) = vars.as_object() {
+        for (key, value) in obj {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    serde_json::Value::Object(merged)
 }
 
 /// Send a templated email using database-stored templates.
@@ -30,6 +70,10 @@ pub async fn send_template_email(
     let app_name = "MissedCall Respondr";
     let app_url = "https://app.missedcallrespondr.com";
 
+    // A template must render against the SAME values no matter which entry point triggered the
+    // send, so the app-level facts are merged in here rather than left to each call site.
+    let vars = with_app_vars(vars, app_name, app_url);
+
     // Load template from DB. A lookup FAILURE is no longer swallowed: `lookup_db_template`
     // logs it with this function's name and the error, then the caller falls back to the
     // inline body — so "no template configured" and "the query failed" stop looking alike.
@@ -41,7 +85,7 @@ pub async fn send_template_email(
                 &t.subject
                     .clone()
                     .unwrap_or_else(|| get_default_subject(template_type, app_name)),
-                vars,
+                &vars,
             );
             tracing::info!(
                 "email.send_template_email: using db template {template_type} (id={}, name={:?}) subject={subject:?}",
@@ -51,9 +95,9 @@ pub async fn send_template_email(
             let html_body = t
                 .html_body
                 .as_ref()
-                .map(|h| render_template(h, vars))
+                .map(|h| render_template(h, &vars))
                 .unwrap_or_default();
-            let text_body = render_template(&t.body.clone().unwrap_or_default(), vars);
+            let text_body = render_template(&t.body.clone().unwrap_or_default(), &vars);
             let use_html = t.is_html.unwrap_or(true);
 
             send_email_request(
@@ -68,7 +112,7 @@ pub async fn send_template_email(
             tracing::info!(
                 "email.send_template_email: no usable db template for template_type={template_type} (tenant {tenant_id}) — sending the inline body"
             );
-            send_inline(to, template_type, vars, app_name, app_url).await
+            send_inline(to, template_type, &vars, app_name, app_url).await
         }
     }
 }
@@ -345,4 +389,91 @@ pub struct EmailTemplateRow {
     is_html: Option<bool>,
     #[allow(dead_code)]
     is_default: Option<bool>,
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::{render_template, with_app_vars};
+    use serde_json::json;
+
+    /// The shape that was broken live: the shipped rows use a SINGLE brace, so a db template that
+    /// was actually selected logged (and sent) `Welcome to {app_name}!` verbatim.
+    #[test]
+    fn single_brace_placeholders_render() {
+        let vars = json!({"app_name": "MissedCall Respondr", "token": "abc123"});
+        assert_eq!(
+            render_template("Welcome to {app_name}!", &vars),
+            "Welcome to MissedCall Respondr!"
+        );
+        assert_eq!(
+            render_template("Your password reset code is: {token}", &vars),
+            "Your password reset code is: abc123"
+        );
+    }
+
+    /// The previously-documented convention must keep working — the old doc comment promised
+    /// `{{key}}`, and the mcr-notype audit harness still writes it.
+    #[test]
+    fn double_brace_placeholders_still_render() {
+        let vars = json!({"token": "abc123"});
+        assert_eq!(render_template("code {{token}}", &vars), "code abc123");
+        assert_eq!(render_template("code {token}", &vars), "code abc123");
+    }
+
+    /// The trap in the single-brace shape: substitution is KEY-DRIVEN, so a real brace that is not
+    /// a placeholder is left byte-for-byte. A key that is absent from `vars` is also left literal —
+    /// an unfilled placeholder must stay visible, never silently become "".
+    #[test]
+    fn literal_braces_that_are_not_placeholders_survive() {
+        let vars = json!({"name": "David"});
+        assert_eq!(render_template("{\"a\": 1}", &vars), "{\"a\": 1}");
+        assert_eq!(
+            render_template("body { color: red; }", &vars),
+            "body { color: red; }"
+        );
+        assert_eq!(
+            render_template("{not_a_key} and {name}", &vars),
+            "{not_a_key} and David"
+        );
+    }
+
+    /// The live welcome row, verbatim, against the vars `auth::register` supplies.
+    #[test]
+    fn live_welcome_row_renders_via_the_signup_vars() {
+        let vars = with_app_vars(
+            &json!({"name": "David", "email": "d@example.com", "password": "pw"}),
+            "MissedCall Respondr",
+            "https://app.missedcallrespondr.com",
+        );
+        assert_eq!(
+            render_template("Welcome to {app_name}!", &vars),
+            "Welcome to MissedCall Respondr!"
+        );
+        assert_eq!(
+            render_template(
+                "Login: {login_url}/login\nEmail: {email}\nPassword: {password}",
+                &vars
+            ),
+            "Login: https://app.missedcallrespondr.com/login\nEmail: d@example.com\nPassword: pw"
+        );
+    }
+
+    /// App-level defaults are filled in for every call site, and a caller that knows better wins.
+    #[test]
+    fn app_vars_are_defaults_caller_values_win() {
+        let merged = with_app_vars(
+            &json!({"app_name": "Caller Wins"}),
+            "MissedCall Respondr",
+            "https://app.missedcallrespondr.com",
+        );
+        assert_eq!(merged["app_name"], json!("Caller Wins"));
+        assert_eq!(
+            merged["login_url"],
+            json!("https://app.missedcallrespondr.com")
+        );
+        assert_eq!(
+            merged["app_url"],
+            json!("https://app.missedcallrespondr.com")
+        );
+    }
 }
