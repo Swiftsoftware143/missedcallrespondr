@@ -209,8 +209,7 @@ pub async fn list_contacts_with_fields(
         )
         .bind(contact.id)
         .fetch_all(&state.pool)
-        .await
-        .unwrap_or_default();
+        .await?;
 
         let custom_fields: Vec<CustomFieldEntry> = fields
             .into_iter()

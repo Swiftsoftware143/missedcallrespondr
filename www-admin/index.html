@@ -21,7 +21,8 @@
 <div id="app" class="flex min-h-screen"></div>
 
 <script type="module">
-import { h, render, useState, useEffect } from 'https://esm.sh/preact@10.26.4';
+import { h, render } from 'https://esm.sh/preact@10.26.4';
+import { useState, useEffect } from 'https://esm.sh/preact@10.26.4/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 const html = htm.bind(h);
 const showUpgradePrompt = (msg) => {
@@ -1104,6 +1105,68 @@ const OPS_PANELS = [
 "label": "Portfolio sync (cross-app)",
 "method": "POST",
 "path": "/admin/portfolio-sync"
+}
+]
+},
+{
+"title": "11. Import Logs & Export Templates",
+"list": "/import-logs",
+"actions": [
+{
+"label": "Export templates",
+"method": "GET",
+"path": "/export-templates"
+},
+{
+"label": "Get export template",
+"method": "GET",
+"path": "/export-templates/:id",
+"fields": [
+"id"
+]
+},
+{
+"label": "Create export template (JSON body: name, entity, format, columns)",
+"method": "POST",
+"path": "/export-templates",
+"json": true,
+"fields": [
+"json"
+]
+},
+{
+"label": "Get import log",
+"method": "GET",
+"path": "/import-logs/:id",
+"fields": [
+"id"
+]
+}
+]
+},
+{
+"title": "12. Portfolio Company SMTP",
+"list": "/portfolio-companies",
+"actions": [
+{
+"label": "Get SMTP config (key comes back masked)",
+"method": "GET",
+"path": "/portfolio-companies/:id/smtp",
+"fields": [
+"id"
+]
+},
+{
+"label": "Save SMTP config (all four fields are overwritten — a blank clears it)",
+"method": "PUT",
+"path": "/portfolio-companies/:id/smtp",
+"fields": [
+"id",
+"smtp_provider",
+"smtp_api_key",
+"smtp_from_email",
+"smtp_from_name"
+]
 }
 ]
 }

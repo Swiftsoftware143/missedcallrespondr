@@ -9,9 +9,18 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="https://cdn.jsdelivr.net/npm/lit-html@2.8.0/lit-html.min.js"></script>
-<script>
-const { html, render } = window['lit-html'];
+<script type="module">
+// preact + htm, exactly the fleet pattern the other shells use (www-admin, WorkflowSwift).
+// The shipped tag loaded cdn.jsdelivr.net/npm/lit-html@2.8.0/lit-html.min.js in a CLASSIC
+// script and then read window['lit-html']: jsDelivr serves that path as a raw ES module, so
+// the browser threw "Unexpected token 'export'", the destructure threw
+// "Cannot destructure property 'html' of 'window.lit-html' as it is undefined", and the
+// dashboard rendered NOTHING — every view, and every fetch it owns, was dead. The shell is
+// written in preact/htm style anyway (onClick=/onInput= props and <${Component} /> tags, 41/25/3
+// occurrences — lit-html supports none of those), so the loader was pointing at the wrong library.
+import { h, render } from 'https://esm.sh/preact@10.26.4';
+import htm from 'https://esm.sh/htm@3.1.1';
+const html = htm.bind(h);
 
 // ===== API =====
 const API = (() => {
@@ -57,6 +66,7 @@ const LoginView = () => {
         <button type="submit" class="btn w-full">Sign In</button>
       </form>
       <p class="text-sm text-gray-500 mt-4 text-center">New to MissedCall? <a href="/register.html" class="text-blue-600">Create an account</a></p>
+      <p class="text-sm text-gray-500 mt-2 text-center"><a href="/forgot-password.html" class="text-blue-600">Forgot password?</a></p>
     </div>
   </div>`;
 };
@@ -97,6 +107,99 @@ const PhoneNumbers = () => {
         <tbody>${st.list.map(n => html`<tr><td class="font-medium">${n.number || n.phone_number || n.id || '-'}</td><td><span class="badge ${n.status==='active'||(n.active!==false)?'badge-green':'badge-yellow'}">${n.status||(n.active!==false?'active':'inactive')}</span></td><td class="text-gray-500">${n.created_at?new Date(n.created_at).toLocaleDateString():'-'}</td></tr>`)}
         ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No phone numbers. Configure your Telnyx integration to provision numbers.</td></tr>`}
       </tbody></table>
+    </div>
+  </div>`;
+};
+
+// ===== CALLS (the missed-call queue + the respond action) =====
+// GET /calls lists this tenant's inbound calls. POST /calls/:id/respond is the product's core
+// action: the handler schedules the call-back follow-up, and it only writes one for a call whose
+// disposition is 'missed' — so the button is offered exactly there (and never faked elsewhere).
+const Calls = () => {
+  const st = viewState('calls', { list: [], responded: {}, busy: null, notice: null, error: null });
+  const load = async () => {
+    try { const d = await API.get('/calls'); st.list = Array.isArray(d) ? d : []; st.error = null; }
+    catch (e) { st.error = 'Could not load calls: ' + e.message; st.list = []; }
+    renderApp();
+  };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const respond = async (c) => {
+    st.busy = c.id; st.notice = null; st.error = null; renderApp();
+    try {
+      const r = await API.post('/calls/' + c.id + '/respond', {});
+      st.responded = Object.assign({}, st.responded, { [c.id]: true });
+      st.notice = (r.message || 'Response queued') + ' — a call-back follow-up was created (see Follow-ups).';
+    } catch (e) { st.error = 'Respond failed: ' + e.message; }
+    st.busy = null; renderApp();
+  };
+  const rows = st.list.slice(0, 100);
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Calls</h2>
+      <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button></div>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Caller</th><th>Called</th><th>When</th><th>Disposition</th><th>Action</th></tr></thead>
+        <tbody>${rows.map(c => html`<tr>
+          <td class="font-medium">${c.caller_name || c.caller_number || '-'}</td>
+          <td class="text-gray-500">${c.called_number || '-'}</td>
+          <td class="text-gray-500 text-sm">${c.call_time ? new Date(c.call_time).toLocaleString() : '-'}</td>
+          <td><span class="badge ${c.disposition === 'missed' ? 'badge-red' : 'badge-blue'}">${c.disposition || '-'}</span></td>
+          <td>${c.disposition === 'missed'
+            ? html`<button class="btn btn-sm ${st.responded[c.id] ? 'btn-outline' : 'btn-green'}" disabled=${st.busy === c.id || !!st.responded[c.id]} onClick=${() => respond(c)}>${st.responded[c.id] ? 'Queued ✓' : 'Respond'}</button>`
+            : html`<span class="text-gray-400 text-sm">—</span>`}</td>
+        </tr>`)}
+        ${rows.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No calls yet. Calls land here from your Telnyx number.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+};
+
+// ===== PROFILE (PUT /auth/profile + PUT /auth/password) =====
+const Profile = () => {
+  const c = API.user || {};
+  const st = viewState('profile', { name: null, notice: null, error: null, busy: false, cur: '', next: '' });
+  if (st.name === null) st.name = c.name || '';
+  const save = async () => {
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      const r = await API.put('/auth/profile', { name: st.name });
+      API.setAuth(API.token, Object.assign({}, c, { name: r.name || st.name }));
+      st.notice = r.message || 'Profile updated';
+    } catch (e) { st.error = 'Save failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+  const changePw = async () => {
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      const r = await API.put('/auth/password', { current_password: st.cur, new_password: st.next });
+      st.notice = r.message || 'Password updated'; st.cur = ''; st.next = '';
+    } catch (e) { st.error = 'Password change failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">Profile</h2>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    <div class="card">
+      <h3 class="font-semibold mb-3">Your details</h3>
+      <div class="space-y-3" style="max-width:420px">
+        <div><label class="text-sm font-medium block mb-1">Email</label>
+          <input class="input" value=${c.email || ''} disabled /></div>
+        <div><label class="text-sm font-medium block mb-1">Name</label>
+          <input class="input" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} /></div>
+        <button class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save profile</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 class="font-semibold mb-3">Change password</h3>
+      <div class="space-y-3" style="max-width:420px">
+        <div><label class="text-sm font-medium block mb-1">Current password</label>
+          <input class="input" type="password" value=${st.cur} onInput=${e => { st.cur = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">New password (min 8)</label>
+          <input class="input" type="password" value=${st.next} onInput=${e => { st.next = e.target.value; }} /></div>
+        <button class="btn btn-sm" disabled=${st.busy} onClick=${changePw}>Update password</button>
+      </div>
     </div>
   </div>`;
 };
@@ -187,19 +290,142 @@ const FollowUps = () => {
 };
 
 // ===== CONTACTS =====
+// Server-side search (GET /contacts/search — q= substring, phone= LIKE pattern), the tenant's
+// custom-field definitions (GET /contacts/custom-fields) rendered as real columns
+// (GET /contacts/with-fields), and per-contact values saved with
+// PUT /contacts/:contact_id/fields/:field_id.
+//
+// Key trap: a DEFINITION comes back keyed by `id`, while the same field inside a contact's
+// `custom_fields` comes back keyed by `field_id`. Reading a definition with `f.field_id` is
+// undefined — which silently rendered every custom column as "—" and made Save iterate zero
+// values, so PUT /contacts/:id/fields/:fid was never sent while the UI reported success.
+const fieldKey = (f) => (f && (f.field_id || f.id)) || '';
 const Contacts = () => {
-  const st = viewState('contacts', { list: [], search: '' });
-  if (!st._loaded) { st._loaded = true; API.get('/contacts').then(d => { st.list = Array.isArray(d) ? d : []; renderApp(); }).catch(() => {}); }
-  const filtered = () => st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.phone||'').toLowerCase().includes(st.search.toLowerCase()) || (c.email||'').toLowerCase().includes(st.search.toLowerCase()));
-  const rows = filtered().slice(0,100);
+  const st = viewState('contacts', {
+    list: [], fields: [], search: '', searching: false, showFields: false, showValues: null,
+    values: {}, draft: { name: '', type: 'text', order: 0 }, responder: '', busy: null,
+    notice: null, error: null
+  });
+  const load = async () => {
+    try { const f = await API.get('/contacts/custom-fields'); st.fields = Array.isArray(f) ? f : []; }
+    catch (e) { st.fields = []; }
+    try {
+      const d = st.fields.length ? await API.get('/contacts/with-fields') : await API.get('/contacts');
+      st.list = Array.isArray(d) ? d : []; st.error = null;
+    } catch (e) { st.error = 'Could not load contacts: ' + e.message; st.list = []; }
+    renderApp();
+  };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  let timer = null;
+  const onSearch = (v) => {
+    st.search = v; renderApp();
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(async () => {
+      st.searching = true; renderApp();
+      const q = (st.search || '').trim();
+      try {
+        const d = q ? await API.get('/contacts/search?q=' + encodeURIComponent(q)) : await API.get('/contacts');
+        st.list = Array.isArray(d) ? d : []; st.error = null;
+      } catch (e) { st.error = 'Search failed: ' + e.message; }
+      st.searching = false; renderApp();
+    }, 300);
+  };
+
+  const addField = async () => {
+    const name = (st.draft.name || '').trim();
+    if (!name) { st.error = 'Field name is required'; renderApp(); return; }
+    st.busy = 'addfield'; st.error = null; renderApp();
+    try {
+      await API.post('/contacts/custom-fields', { field_name: name, field_type: st.draft.type || 'text', field_order: Number(st.draft.order) || 0 });
+      st.draft = { name: '', type: 'text', order: 0 }; st.notice = 'Custom field "' + name + '" created'; st.showFields = false;
+    } catch (e) { st.error = 'Could not add field: ' + e.message; }
+    st.busy = null; load();
+  };
+  const removeField = async (f) => {
+    if (!confirm('Delete the custom field "' + f.field_name + '"? Its per-contact values go too.')) return;
+    st.busy = f.id; st.error = null; renderApp();
+    try { await API.del('/contacts/custom-fields/' + f.id); st.notice = 'Custom field "' + f.field_name + '" deleted'; }
+    catch (e) { st.error = 'Could not delete field: ' + e.message; }
+    st.busy = null; load();
+  };
+
+  const openValues = async (c) => {
+    st.showValues = c; st.values = {}; st.error = null; renderApp();
+    const seed = (c.custom_fields || []).reduce((a, f) => { a[f.field_id] = f.value == null ? '' : f.value; return a; }, {});
+    if (Object.keys(seed).length) { st.values = seed; renderApp(); return; }
+    try {
+      const d = await API.get('/contacts/' + c.id + '/fields');
+      (d.custom_fields || []).forEach(f => { st.values[f.field_id] = f.value == null ? '' : f.value; });
+    } catch (e) { /* no values yet is not an error */ }
+    renderApp();
+  };
+  const saveValues = async () => {
+    const c = st.showValues; if (!c) return;
+    st.busy = 'values'; st.error = null; renderApp();
+    try {
+      for (const f of st.fields) {
+        const v = st.values[fieldKey(f)];
+        if (v === undefined) continue;
+        await API.put('/contacts/' + c.id + '/fields/' + fieldKey(f), { value: v });
+      }
+      st.notice = 'Saved custom fields for ' + (c.name || c.phone || 'contact');
+      st.showValues = null; st.busy = null; load();
+    } catch (e) { st.error = 'Could not save field values: ' + e.message; st.busy = null; renderApp(); }
+  };
+
+  const rows = st.list.slice(0, 100);
   return html`<div>
-    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Contacts</h2><input class="input" style="width:280px" placeholder="Search..." value=${st.search||''} onInput=${e => { st.search = e.target.value; renderApp(); }} /></div>
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold">Contacts</h2>
+      <div class="flex items-center gap-2">
+        <input class="input" style="width:240px" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
+        <button class="btn btn-sm btn-outline" onClick=${() => { st.showFields = !st.showFields; renderApp(); }}>Custom fields (${st.fields.length})</button>
+        <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
+      </div>
+    </div>
+    ${st.searching && html`<p class="text-xs text-gray-400 mb-2">Searching…</p>`}
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    ${st.showFields && html`<div class="card">
+      <h3 class="font-semibold mb-2">Custom field definitions</h3>
+      <table class="table mb-3"><thead><tr><th>Name</th><th>Type</th><th>Order</th><th></th></tr></thead>
+        <tbody>${st.fields.map(f => html`<tr><td class="font-medium">${f.field_name}</td><td class="text-gray-500">${f.field_type}</td><td class="text-gray-500">${f.field_order}</td>
+          <td><button class="btn btn-sm btn-red" disabled=${st.busy === f.id} onClick=${() => removeField(f)}>Delete</button></td></tr>`)}
+          ${st.fields.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-4">No custom fields defined yet.</td></tr>`}
+        </tbody></table>
+      <div class="flex items-end gap-2">
+        <div><label class="text-sm font-medium block mb-1">Field name</label><input class="input" value=${st.draft.name || ''} onInput=${e => { st.draft.name = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" onChange=${e => { st.draft.type = e.target.value; }}>
+          <option value="text">text</option><option value="number">number</option><option value="date">date</option><option value="boolean">boolean</option></select></div>
+        <div><label class="text-sm font-medium block mb-1">Order</label><input class="input" style="width:80px" value=${String(st.draft.order || 0)} onInput=${e => { st.draft.order = e.target.value; }} /></div>
+        <button class="btn btn-sm btn-green" disabled=${st.busy === 'addfield'} onClick=${addField}>Add field</button>
+      </div>
+    </div>`}
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Created</th></tr></thead>
-        <tbody>${rows.map(c => html`<tr><td class="font-medium">${c.name||c.full_name||'-'}</td><td class="text-gray-500">${c.phone||'-'}</td><td class="text-gray-500">${c.email||'-'}</td><td class="text-gray-500 text-sm">${c.created_at?new Date(c.created_at).toLocaleDateString():'-'}</td></tr>`)}
-        ${rows.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
+      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th>${st.fields.map(f => html`<th>${f.field_name}</th>`)}<th></th></tr></thead>
+        <tbody>${rows.map(c => {
+          const vals = (c.custom_fields || []).reduce((a, f) => { a[f.field_id] = f.value; return a; }, {});
+          return html`<tr>
+            <td class="font-medium">${c.name || c.full_name || '-'}</td>
+            <td class="text-gray-500">${c.phone || '-'}</td>
+            <td class="text-gray-500">${c.email || '-'}</td>
+            ${st.fields.map(f => { const k = fieldKey(f); return html`<td class="text-gray-500">${vals[k] != null && vals[k] !== '' ? vals[k] : html`<span class="text-gray-300">—</span>`}</td>`; })}
+            <td>${st.fields.length ? html`<button class="btn btn-sm btn-outline" onClick=${() => openValues(c)}>Fields</button>` : ''}</td>
+          </tr>`; })}
+        ${rows.length === 0 && html`<tr><td colspan=${4 + st.fields.length} class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.showValues && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showValues = null, renderApp())}><div class="modal-content">
+      <h3 class="text-lg font-bold mb-4">Field values — ${st.showValues.name || st.showValues.phone || 'contact'}</h3>
+      <div class="space-y-3">${st.fields.map(f => html`<div><label class="text-sm font-medium block mb-1">${f.field_name}</label>
+        <input class="input" value=${st.values[fieldKey(f)] == null ? '' : st.values[fieldKey(f)]} onInput=${e => { st.values[fieldKey(f)] = e.target.value; }} /></div>`)}
+        ${st.fields.length === 0 && html`<p class="text-sm text-gray-500">Define a custom field first.</p>`}</div>
+      <div class="flex gap-2 justify-end mt-4">
+        <button class="btn btn-outline" onClick=${() => { st.showValues = null; renderApp(); }}>Cancel</button>
+        <button class="btn" disabled=${st.busy === 'values' || st.fields.length === 0} onClick=${saveValues}>Save</button>
+      </div>
+    </div></div>`}
   </div>`;
 };
 
@@ -231,7 +457,7 @@ const Tickets = () => {
 // pinned first as the upgrade path. Keys are BYOK per tenant: stored via
 // POST /api/v1/provider-keys, masked on read, never rendered raw.
 const Integrations = () => {
-  const st = viewState('integrations', { providers: [], keys: [], hubStatus: null, keyInput: {}, baseInput: {}, busy: null, probe: null, error: null, notice: null });
+  const st = viewState('integrations', { providers: [], keys: [], hubStatus: null, keyInput: {}, baseInput: {}, busy: null, probe: null, error: null, notice: null, push: {}, pushRes: null, pushBusy: false });
   const load = async () => {
     try { const p = await API.get('/available-providers'); st.providers = Array.isArray(p) ? p : (p.providers || []); }
     catch (e) { st.error = 'Could not load providers: ' + e.message; }
@@ -293,6 +519,21 @@ const Integrations = () => {
       ${pr ? html`<div class="text-xs ${pr.ok ? 'text-green-700' : 'text-amber-700'}">${pr.message || (pr.ok ? 'OK' : 'Failed')}</div>` : ''}
     </div>`;
   };
+  // Manual "push now" — POST /integrations/coreswift/push is the same code path the automatic
+  // capture uses, exposed for the operator who captured a lead outside the normal flow.
+  const pushNow = async () => {
+    const p = st.push || {};
+    if (!(p.name || '').trim() && !(p.phone || '').trim() && !(p.email || '').trim()) {
+      st.error = 'Give the lead at least a name, a phone or an email'; renderApp(); return;
+    }
+    st.pushBusy = true; st.pushRes = null; st.error = null; renderApp();
+    const body = { name: p.name, company: p.company, email: p.email, phone: p.phone, list_id: p.list_id, notes: p.notes };
+    body.tags = (p.tags || '').split(',').map(s => s.trim()).filter(Boolean);
+    Object.keys(body).forEach(k => { if (body[k] === undefined || body[k] === '') delete body[k]; });
+    try { st.pushRes = { ok: true, text: JSON.stringify(await API.post('/integrations/coreswift/push', body)) }; }
+    catch (e) { st.pushRes = { ok: false, text: 'Push failed: ' + e.message }; }
+    st.pushBusy = false; renderApp();
+  };
   const list = ordered();
   const core = list.find(p => p.key === 'coreswift');
   const rest = list.filter(p => p.key !== 'coreswift');
@@ -318,6 +559,24 @@ const Integrations = () => {
         </div>
       </div>
     </div>` : ''}
+    ${core && st.hubStatus && st.hubStatus.connected ? html`<div class="card" style="border-left:4px solid #059669">
+      <h3 class="font-semibold">Push a lead to CoreSwift now</h3>
+      <p class="text-sm text-gray-600 mt-1">The same push the automatic capture path uses, for a lead you captured by hand.</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
+        <input class="input" placeholder="Name" value=${st.push.name || ''} onInput=${e => { st.push.name = e.target.value; }} />
+        <input class="input" placeholder="Company" value=${st.push.company || ''} onInput=${e => { st.push.company = e.target.value; }} />
+        <input class="input" placeholder="Phone" value=${st.push.phone || ''} onInput=${e => { st.push.phone = e.target.value; }} />
+        <input class="input" placeholder="Email" value=${st.push.email || ''} onInput=${e => { st.push.email = e.target.value; }} />
+        <input class="input" placeholder="Tags (comma separated)" value=${st.push.tags || ''} onInput=${e => { st.push.tags = e.target.value; }} />
+        <input class="input" placeholder="CoreSwift list id (optional)" value=${st.push.list_id || ''} onInput=${e => { st.push.list_id = e.target.value; }} />
+        <input class="input" placeholder="Notes" value=${st.push.notes || ''} onInput=${e => { st.push.notes = e.target.value; }} />
+      </div>
+      <div class="flex items-center gap-3 mt-3">
+        <button class="btn btn-sm btn-green" disabled=${st.pushBusy} onClick=${pushNow}>Push now</button>
+        ${st.pushRes && html`<span class="text-xs ${st.pushRes.ok ? 'text-green-700' : 'text-red-600'}">${st.pushRes.ok ? 'Pushed' : 'Failed'}</span>`}
+      </div>
+      ${st.pushRes && html`<pre class="text-xs bg-gray-50 border rounded p-2 mt-2 overflow-auto" style="max-height:160px">${st.pushRes.text}</pre>`}
+    </div>` : ''}
     ${rest.length === 0 && !core ? html`<div class="card text-center text-gray-400 py-8">No providers available yet.</div>` : ''}
     ${rest.map(p => html`<div class="card">
       <h3 class="font-semibold">${p.icon ? p.icon + ' ' : ''}${p.name || p.key}</h3>
@@ -332,6 +591,7 @@ const App = () => {
   if (!API.token) return html`<${LoginView} />`;
   const nav = [
     { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'calls', label: 'Calls', icon: '📞' },
     { id: 'phoneNumbers', label: 'Phone Numbers', icon: '📱' },
     { id: 'rules', label: 'Response Rules', icon: '⚙️' },
     { id: 'templates', label: 'Templates', icon: '📋' },
@@ -339,9 +599,10 @@ const App = () => {
     { id: 'followups', label: 'Follow-ups', icon: '⏰' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
-    { id: 'integrations', label: 'Integrations', icon: '🔗' }
+    { id: 'integrations', label: 'Integrations', icon: '🔗' },
+    { id: 'profile', label: 'Profile', icon: '👤' }
   ];
-  const views = { overview: Overview, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
