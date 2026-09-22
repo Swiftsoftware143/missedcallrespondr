@@ -79,14 +79,39 @@ pub struct UpdateInput {
     pub template_type: Option<String>,
 }
 
-/// Presence check for a column that is `NOT NULL` with no server default.
+/// Presence check for the columns `create` fills that are `NOT NULL` with no server default.
 ///
-/// Returns the app's own 400 shape, `{"error": "<field> is required"}`, matching the wording
-/// already used elsewhere in this codebase (auth/handlers.rs, portfolio_handler.rs). An empty
-/// string is deliberately NOT rejected: it inserts fine today, and tightening that would be a
-/// behaviour change on a request that currently succeeds.
-fn required_field(field: &str, value: Option<String>) -> Result<String, AppError> {
-    value.ok_or_else(|| AppError::BadRequest(format!("{field} is required")))
+/// Returns the app's own error shape, `{"error": "<field> is required"}`, naming *every* field
+/// the request left out — so a caller that omits two is told about both on the first call
+/// instead of one per round trip. A single missing field keeps the exact wording already used
+/// elsewhere in this codebase (auth/handlers.rs, portfolio_handler.rs).
+///
+/// An empty string is deliberately NOT rejected: it inserts fine today, and tightening it would
+/// be a behaviour change on a request that currently succeeds.
+fn required_create_fields(
+    name: Option<String>,
+    subject: Option<String>,
+    template_type: Option<String>,
+) -> Result<(String, String, String), AppError> {
+    match (name, subject, template_type) {
+        (Some(name), Some(subject), Some(template_type)) => Ok((name, subject, template_type)),
+        (name, subject, template_type) => {
+            let missing: Vec<&str> = [
+                ("name", name.is_none()),
+                ("subject", subject.is_none()),
+                ("template_type", template_type.is_none()),
+            ]
+            .into_iter()
+            .filter(|(_, is_missing)| *is_missing)
+            .map(|(field, _)| field)
+            .collect();
+
+            Err(AppError::BadRequest(match missing.as_slice() {
+                [one] => format!("{one} is required"),
+                many => format!("{} are required", many.join(", ")),
+            }))
+        }
+    }
 }
 
 /// GET /api/v1/email-templates
@@ -169,9 +194,8 @@ pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<CreateInput>,
 ) -> Result<Json<Value>, AppError> {
-    let name = required_field("name", body.name)?;
-    let subject = required_field("subject", body.subject)?;
-    let template_type = required_field("template_type", body.template_type)?;
+    let (name, subject, template_type) =
+        required_create_fields(body.name, body.subject, body.template_type)?;
 
     let id = Uuid::new_v4();
     // Global template. See the doc comment: the live default row is `aid IS NULL`, and the
@@ -266,36 +290,69 @@ pub async fn delete(
 
 #[cfg(test)]
 mod tests {
-    use super::required_field;
+    use super::required_create_fields;
     use crate::error::AppError;
 
-    /// Every `NOT NULL`-without-default column `create` fills must be refused before the
-    /// statement is built, naming the field, so Postgres never sees the NULL. Card t_1774cee3:
-    /// `template_type` used to reach the database and answer 500 with the raw SQL error.
+    fn err_of(name: Option<&str>, subject: Option<&str>, tt: Option<&str>) -> String {
+        let opt = |v: Option<&str>| v.map(str::to_string);
+        match required_create_fields(opt(name), opt(subject), opt(tt)) {
+            Err(AppError::BadRequest(msg)) => msg,
+            other => panic!("expected a 400 naming the fields, got {other:?}"),
+        }
+    }
+
+    /// The defect (card t_1774cee3): `template_type` was bound as a NULL and reached Postgres,
+    /// which answered a 500 carrying the raw SQL error. It must never get that far.
     #[test]
-    fn absent_not_null_fields_are_named_in_a_400() {
+    fn an_absent_template_type_is_named_in_the_400() {
+        assert_eq!(
+            err_of(Some("n"), Some("s"), None),
+            "template_type is required"
+        );
+    }
+
+    /// `subject` is `NOT NULL` too and answered the identical 500; found while fixing the above.
+    #[test]
+    fn an_absent_subject_is_named_in_the_400() {
+        assert_eq!(
+            err_of(Some("n"), None, Some("welcome")),
+            "subject is required"
+        );
+    }
+
+    #[test]
+    fn an_absent_name_is_named_in_the_400() {
+        assert_eq!(err_of(None, Some("s"), Some("welcome")), "name is required");
+    }
+
+    /// Every missing field is reported at once, so the card's own repro body (`{"name": "..."}`)
+    /// still names `template_type` rather than only `subject`.
+    #[test]
+    fn every_absent_field_is_reported_together() {
+        assert_eq!(
+            err_of(Some("n"), None, None),
+            "subject, template_type are required"
+        );
+        let msg = err_of(None, None, None);
         for field in ["name", "subject", "template_type"] {
-            match required_field(field, None) {
-                Err(AppError::BadRequest(msg)) => {
-                    assert_eq!(
-                        msg,
-                        format!("{field} is required"),
-                        "field not named: {msg}"
-                    );
-                }
-                other => panic!("expected BadRequest for a missing {field}, got {other:?}"),
-            }
+            assert!(msg.contains(field), "{field} not named in {msg:?}");
         }
     }
 
     #[test]
     fn present_values_pass_through_unchanged() {
+        let got =
+            required_create_fields(Some("n".into()), Some("s".into()), Some("welcome".into()));
         assert_eq!(
-            required_field("template_type", Some("welcome".into())).unwrap(),
-            "welcome"
+            got.unwrap(),
+            ("n".to_string(), "s".to_string(), "welcome".to_string())
         );
         // An empty string inserts fine today; tightening it would change a request that
         // currently succeeds, so it must stay accepted.
-        assert_eq!(required_field("name", Some(String::new())).unwrap(), "");
+        let empty = required_create_fields(Some(String::new()), Some("s".into()), Some("w".into()));
+        assert_eq!(
+            empty.unwrap(),
+            (String::new(), "s".to_string(), "w".to_string())
+        );
     }
 }
