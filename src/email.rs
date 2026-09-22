@@ -216,6 +216,49 @@ pub async fn send_reset_email(
     send_template_email(pool, tenant_id, to, "password_reset", &vars).await
 }
 
+/// Which HTTP auth scheme a provider expects for its API key.
+///
+/// This is a TRANSPORT detail, not a credential: Mailgun authenticates
+/// `Authorization: Basic base64("api:<private-or-sending-key>")` and answers
+/// `{"Error":"unauthorized"}` to a `Bearer` header *before* it ever looks at the key, so a
+/// perfectly good Mailgun credential presented the old way reads as "the key is bad".
+/// SendGrid/Postmark/Resend-style JSON APIs want `Bearer` (which is where this sender came
+/// from), so that stays the default for every other host.
+///
+/// `EMAIL_API_AUTH=basic|bearer` overrides the guess when a provider changes shape.
+fn auth_scheme(api_url: &str) -> &'static str {
+    match env::var("EMAIL_API_AUTH").map(|v| v.to_ascii_lowercase()) {
+        Ok(v) if v == "basic" => "basic",
+        Ok(v) if v == "bearer" => "bearer",
+        _ => {
+            let host = api_url
+                .split("://")
+                .nth(1)
+                .unwrap_or(api_url)
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if host.contains("mailgun") {
+                "basic"
+            } else {
+                "bearer"
+            }
+        }
+    }
+}
+
+/// Host of `api_url` for logging — the URL carries no secret, but the key never goes near a log.
+fn url_host(api_url: &str) -> &str {
+    api_url
+        .split("://")
+        .nth(1)
+        .unwrap_or(api_url)
+        .split('/')
+        .next()
+        .unwrap_or(api_url)
+}
+
 /// Core email sender — sends via HTTP API (Mailgun, SendGrid, SMTP.com, etc.)
 async fn send_email_request(
     to: &str,
@@ -240,21 +283,52 @@ async fn send_email_request(
             .map(|m| m.insert("html".to_string(), json!(html_body)));
     }
 
+    // The wire shape Mailgun needs is Basic; presenting the key as Bearer is a 401 that
+    // looks like a bad credential (see `auth_scheme`). The scheme is logged, the key is not.
+    let scheme = auth_scheme(&api_url);
+    let auth_header = if scheme == "basic" {
+        use base64::Engine;
+        format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(format!("api:{}", api_key))
+        )
+    } else {
+        format!("Bearer {}", api_key)
+    };
+
     let client = reqwest::Client::new();
     let resp = client
         .post(&api_url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", auth_header)
         .header("Content-Type", "application/json")
         .json(&payload)
         .send()
         .await
         .map_err(|e| format!("Failed to send email request: {}", e))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Email API returned {}: {}", status, text));
+    // Read the body on BOTH paths: on success it is the provider's own receipt (Mailgun:
+    // {"id":"<...>","message":"Queued. Thank you."}), and that receipt is the only proof the
+    // message actually left the box — before this, success returned `Ok(())` and logged
+    // nothing, so "sent" and "silently did nothing" were indistinguishable in this app's logs.
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    let receipt: String = body.chars().take(200).collect();
+
+    if !status.is_success() {
+        // Log the shape of the request alongside the provider's answer: "401" alone cannot
+        // distinguish a rejected KEY from a rejected auth SCHEME, and that distinction is the
+        // difference between "Email API returned 401" and "go rotate the credential".
+        tracing::warn!(
+            "email.provider_response: auth={scheme} host={} to={to} status={status} body={receipt:?}",
+            url_host(&api_url)
+        );
+        return Err(format!("Email API returned {}: {}", status, receipt));
     }
+
+    tracing::info!(
+        "email.provider_response: auth={scheme} host={} to={to} status={status} body={receipt:?}",
+        url_host(&api_url)
+    );
 
     Ok(())
 }
