@@ -157,7 +157,9 @@ pub async fn lookup_db_template(
 
 fn get_default_subject(template_type: &str, app_name: &str) -> String {
     match template_type {
-        "welcome" => format!("Welcome to {}!", app_name),
+        // `welcome_credentials` is the welcome mail for flows that GENERATE the password (checkout):
+        // same wording, but its row carries the credentials block (card t_46d8d40e).
+        "welcome" | "welcome_credentials" => format!("Welcome to {}!", app_name),
         "purchase_confirmed" => "Payment Received — Thank You!".to_string(),
         "password_reset" => "Password Reset Request".to_string(),
         _ => format!("{} Notification", app_name),
@@ -181,7 +183,12 @@ async fn send_inline(
         .unwrap_or("a plan");
 
     match template_type {
-        "welcome" => {
+        // Same body for both welcome types: `welcome_credentials` exists so the CREDENTIALS row can
+        // be a distinct, editable template, but if that row is missing the generated password must
+        // still reach the customer, so the fallback keeps the credentials block (t_46d8d40e). The
+        // self-serve `welcome` fallback therefore renders `Password: ` empty — pre-existing
+        // behaviour, unchanged here, and it leaks nothing (the live default row always exists).
+        "welcome" | "welcome_credentials" => {
             let body = format!(
                 "Welcome to {}, {}!\n\nYour account has been created successfully.\n\nHere are your login credentials:\n\nEmail: {}\nPassword: {}\n\nLogin at: {}/login\n\nYou can now:\n- Set up your missed call responses\n- Configure call forwarding rules\n- Monitor your call activity\n\nFor help, contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
                 app_name, name, email, password, app_url, app_name

@@ -826,6 +826,12 @@ pub fn hash_password(password: &str) -> Result<String, AppError> {
 /// - If user exists with password_hash → send purchase_confirmed email
 /// - If user exists without password_hash → generate temp password, hash, update, send welcome
 /// - If no user → create tenant, create user, send welcome
+///
+/// The welcome send uses `template_type = "welcome_credentials"`, NOT `"welcome"`: this is the one
+/// flow where the password is GENERATED for the customer and is unknowable to them, so the email is
+/// the only place it can be delivered. Self-serve signup (`auth::register`) sends `"welcome"`, whose
+/// default row deliberately carries no password placeholder — the user chose that password two
+/// seconds earlier, and emailing a user-chosen secret only spreads it (card t_46d8d40e).
 async fn deliver_credentials(
     state: &AppState,
     email: &str,
@@ -876,8 +882,14 @@ async fn deliver_credentials(
                 "password": &temp_password,
                 "app_url": "https://app.missedcallrespondr.com",
             });
-            if let Err(e) =
-                email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await
+            if let Err(e) = email::send_template_email(
+                &state.pool,
+                tenant_id,
+                email,
+                "welcome_credentials",
+                &vars,
+            )
+            .await
             {
                 tracing::warn!("Failed to send welcome email to {}: {}", email, e);
             }
@@ -939,7 +951,8 @@ async fn deliver_credentials(
             "app_url": "https://app.missedcallrespondr.com",
         });
         if let Err(e) =
-            email::send_template_email(&state.pool, tenant_id, email, "welcome", &vars).await
+            email::send_template_email(&state.pool, tenant_id, email, "welcome_credentials", &vars)
+                .await
         {
             tracing::warn!("Failed to send welcome email to {}: {}", email, e);
         }
