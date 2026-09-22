@@ -322,18 +322,13 @@ pub async fn create_checkout_session(
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
 
-    let success_url = if let Some(url) = req.get("success_url").and_then(|v| v.as_str()) {
-        url.to_string()
-    } else if let Some(pid) = purchasable_id {
-        sqlx::query_scalar::<_, Option<String>>("SELECT thank_you_url FROM plans WHERE id = $1")
-            .bind(pid)
-            .fetch_optional(&state.pool)
-            .await?
-            .flatten()
-            .unwrap_or_else(|| "/thank-you.html".to_string())
-    } else {
-        "/thank-you.html".to_string()
-    };
+    // `plans` has no thank_you_url column (checked against the live DB): the request's own
+    // success_url wins, otherwise every plan falls back to the shared thank-you page.
+    let success_url = req
+        .get("success_url")
+        .and_then(|v| v.as_str())
+        .map(|url| url.to_string())
+        .unwrap_or_else(|| "/thank-you.html".to_string());
 
     let cancel_url = req
         .get("cancel_url")
