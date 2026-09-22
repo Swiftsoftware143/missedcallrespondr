@@ -114,6 +114,25 @@ fn required_create_fields(
     }
 }
 
+/// The table's own rule, which BOTH write paths can violate:
+/// `idx_email_templates_unique` is UNIQUE (template_type, COALESCE(aid,nil), is_default)
+/// WHERE aid IS NULL AND is_default = true — at most one global default per `template_type`.
+///
+/// `create` mapped that to a 409 naming the field; `update` did not, so an admin using the SPA's
+/// "set is_default" action on a second template of an already-defaulted type got the index error
+/// back as a **500**. Both paths now answer the same 409 in the app's JSON shape
+/// (`{"error": "a default template for template_type '<type>' already exists"}`).
+fn default_conflict(template_type: &str) -> AppError {
+    AppError::Conflict(format!(
+        "a default template for template_type '{template_type}' already exists"
+    ))
+}
+
+/// Is this error the one-default-per-type unique index firing?
+fn is_default_conflict(e: &sqlx::Error) -> bool {
+    matches!(e, sqlx::Error::Database(db) if db.constraint() == Some("idx_email_templates_unique"))
+}
+
 /// GET /api/v1/email-templates
 pub async fn list(
     State(state): State<AppState>,
@@ -216,18 +235,17 @@ pub async fn create(
     .bind(&template_type)
     .execute(&state.pool)
     .await
-    .map_err(|e| match &e {
+    .map_err(|e| {
         // The table says at most one global default per `template_type`. Answer that as a
         // Conflict that names the field rather than leaking the index error as a 500.
-        sqlx::Error::Database(db) if db.constraint() == Some("idx_email_templates_unique") => {
+        if is_default_conflict(&e) {
             tracing::warn!(
                 "email_templates.create: rejected a second global default (template_type={template_type})"
             );
-            AppError::Conflict(format!(
-                "a default template for template_type '{template_type}' already exists"
-            ))
+            default_conflict(&template_type)
+        } else {
+            AppError::from(e)
         }
-        _ => AppError::from(e),
     })?;
 
     let item = sqlx::query_as::<_, EmailTemplate>("SELECT * FROM email_templates WHERE id = $1")
@@ -244,7 +262,7 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateInput>,
 ) -> Result<Json<Value>, AppError> {
-    sqlx::query(
+    let updated = sqlx::query(
         r#"UPDATE email_templates SET
             name = COALESCE($1, name),
             subject = COALESCE($2, subject),
@@ -265,7 +283,33 @@ pub async fn update(
     .bind(&body.template_type)
     .bind(id)
     .execute(&state.pool)
-    .await?;
+    .await;
+
+    // Setting `is_default = true` here can collide with the row that is already the default for
+    // that `template_type` (the SPA's "set is_default" action is exactly that request). Answer it
+    // the same way `create` does — 409 in the app's JSON shape — instead of returning the raw
+    // index error as a 500. Matched out here, not in a `map_err` closure: the message needs the
+    // row's own `template_type`, which requires an await.
+    if let Err(e) = updated {
+        if is_default_conflict(&e) {
+            let existing: Option<String> = sqlx::query_scalar::<_, String>(
+                "SELECT template_type FROM email_templates WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+            let template_type = existing
+                .or_else(|| body.template_type.clone())
+                .unwrap_or_else(|| "this type".to_string());
+            tracing::warn!(
+                "email_templates.update: rejected a second global default (id={id}, template_type={template_type})"
+            );
+            return Err(default_conflict(&template_type));
+        }
+        return Err(AppError::from(e));
+    }
 
     let item = sqlx::query_as::<_, EmailTemplate>("SELECT * FROM email_templates WHERE id = $1")
         .bind(id)
@@ -290,8 +334,22 @@ pub async fn delete(
 
 #[cfg(test)]
 mod tests {
-    use super::required_create_fields;
+    use super::{default_conflict, required_create_fields};
     use crate::error::AppError;
+
+    /// Both write paths answer the table's one-default-per-type rule the same way: a 409 whose
+    /// body is the app's own JSON error naming the type. `update` used to return the raw index
+    /// error as a 500 (card t_e0700e64, captured live before the fix).
+    #[test]
+    fn a_second_default_is_a_conflict_that_names_the_type() {
+        match default_conflict("welcome") {
+            AppError::Conflict(msg) => assert_eq!(
+                msg,
+                "a default template for template_type 'welcome' already exists"
+            ),
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+    }
 
     fn err_of(name: Option<&str>, subject: Option<&str>, tt: Option<&str>) -> String {
         let opt = |v: Option<&str>| v.map(str::to_string);

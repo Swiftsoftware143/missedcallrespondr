@@ -888,8 +888,36 @@ const OPS_PANELS = [
 "subject",
 "body",
 "html_body",
-"template_type"
-]
+"template_type",
+"is_default"
+],
+"booleans": [
+"is_default"
+],
+"checked": [
+"is_default"
+],
+"hints": {
+"is_default": "the template the sender uses for this template_type (one per type)"
+}
+},
+{
+"label": "Set/unset is_default (the template the sender uses)",
+"method": "PUT",
+"path": "/email-templates/:id",
+"fields": [
+"id",
+"is_default"
+],
+"booleans": [
+"is_default"
+],
+"checked": [
+"is_default"
+],
+"hints": {
+"is_default": "tick = this template becomes THE template for its template_type; untick = clear the flag"
+}
 },
 {
 "label": "Update template (JSON)",
@@ -1172,28 +1200,54 @@ const OPS_PANELS = [
 }
 ];
 
+// Pure payload builder for an Ops action. Extracted to module scope so the SHIPPED bytes can be
+// exercised in node (see /opt/swift/scripts/mcr-ops-bool-test.js) instead of eyeballed.
+//
+// `act.booleans` lists fields rendered as checkboxes whose value must reach the API as a real
+// JSON boolean. It exists because `email_templates.is_default` is a bool column: sending the
+// string "true" is a serde type error, which `Json` surfaces as a text/plain 422 the admin SPA
+// cannot read at all (card t_95721228) — i.e. the field would be a silent no-op in the UI.
+// `act.numeric` (pre-existing) is the same idea for numbers.
+const buildOpsBody = (act, v, path) => {
+  if (act.json) return JSON.parse((v.json || '{}').trim() || '{}');
+  if (act.method === 'GET' || act.method === 'DELETE') return undefined;
+  const body = {};
+  (act.fields || []).forEach(f => {
+    // Skip path parameters by looking at the TEMPLATE (`/email-templates/:id`), not the resolved
+    // path: the original code checked the resolved path, where `:id` has already been replaced,
+    // so the check never fired and the path param was sent in the body as well. Harmless for a
+    // handler that ignores unknown keys, but it means `{:id, is_default}` actions carried a
+    // stray `id` string — the field belongs in the path only.
+    if (act.path.indexOf(':' + f) >= 0) return;
+    if ((act.booleans || []).indexOf(f) >= 0) { body[f] = v[f] === true; return; }
+    const s = (v[f] || '').trim();
+    if (s === '') return;
+    body[f] = (act.numeric || []).indexOf(f) >= 0 ? Number(s) : s;
+  });
+  return body;
+};
+
+// Resolve an action's path: every `:field` placeholder is filled from that field's value.
+// Also module scope, and for the same reason as `buildOpsBody` above.
+const opsActionPath = (act, v) => {
+  let path = act.path;
+  (act.fields || []).forEach(f => { if (path.indexOf(':' + f) >= 0) path = path.replace(':' + f, encodeURIComponent(String(v[f] == null ? '' : v[f]).trim())); });
+  return path;
+};
+
 const OpsAction = ({ act }) => {
-  const [v, setV] = useState({});
+  // `act.checked` = boolean fields that start ticked. For "Create template" that means the
+  // common case (an admin creating a template for a type expects the sender to USE it) works
+  // without the admin having to know about is_default; untick it to stage a second template.
+  const [v, setV] = useState(() => { const i = {}; (act.checked || []).forEach(f => { i[f] = true; }); return i; });
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true); setRes(null);
     try {
-      let path = act.path;
-      (act.fields || []).forEach(f => { if (path.indexOf(':' + f) >= 0) path = path.replace(':' + f, encodeURIComponent((v[f] || '').trim())); });
+      const path = opsActionPath(act, v);
       if (path.indexOf(':') >= 0) throw new Error('missing path parameter: ' + path);
-      let body;
-      if (act.json) { body = JSON.parse((v.json || '{}').trim() || '{}'); }
-      else if (act.method === 'GET' || act.method === 'DELETE') { body = undefined; }
-      else {
-        body = {};
-        (act.fields || []).forEach(f => {
-          if (path.indexOf(':' + f) >= 0) return;
-          const s = (v[f] || '').trim();
-          if (s === '') return;
-          body[f] = (act.numeric || []).indexOf(f) >= 0 ? Number(s) : s;
-        });
-      }
+      const body = buildOpsBody(act, v, path);
       const r = act.method === 'GET' ? await OPSAPI.get(path)
         : act.method === 'POST' ? await OPSAPI.post(path, body || {})
         : act.method === 'PUT' ? await OPSAPI.put(path, body || {})
@@ -1204,7 +1258,13 @@ const OpsAction = ({ act }) => {
   };
   return html`<div class="ops-action border rounded-lg p-2 mb-2 bg-gray-50">
     <div class="flex flex-wrap gap-2 items-end">
-      ${(act.fields || []).map(f => html`<label class="text-xs text-gray-600 flex flex-col">
+      ${(act.fields || []).map(f => (act.booleans || []).indexOf(f) >= 0
+        ? html`<label class="text-xs text-gray-600 flex flex-col">
+        <span>${f}${(act.hints || {})[f] ? html` <span class="text-gray-400">— ${act.hints[f]}</span>` : ''}</span>
+        <input type="checkbox" class="border rounded px-2 py-1 ops-f-${f}" checked=${v[f] === true}
+          onChange=${e => setV(s => Object.assign({}, s, { [f]: e.target.checked }))} />
+      </label>`
+        : html`<label class="text-xs text-gray-600 flex flex-col">
         <span>${f}</span>
         <input class="border rounded px-2 py-1 text-sm ops-f-${f}" style=${f === 'json' ? 'min-width:420px;font-family:monospace' : ''}
           value=${v[f] || ''} onInput=${e => setV(s => Object.assign({}, s, { [f]: e.target.value }))} />
