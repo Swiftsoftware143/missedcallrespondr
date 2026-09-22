@@ -592,6 +592,10 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        // One place, every handler: extractor rejections (415/400/422) answer this app's own
+        // JSON error shape instead of axum's unreadable text/plain — see error.rs. Layered
+        // inside CORS so the rewritten response still leaves with the CORS headers.
+        .layer(middleware::from_fn(crate::error::rejection_as_json))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
