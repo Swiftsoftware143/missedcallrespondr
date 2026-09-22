@@ -365,12 +365,19 @@ async fn notify_funnelswift_upgrade(
 /// Resolve the tenant's owner email + plan, and notify FunnelSwift if it's a PAID upgrade.
 async fn attribute_plan_upgrade(state: &AppState, tenant_id: Uuid, plan_id: Uuid) {
     let plan: Option<(String, Option<f64>)> =
-        sqlx::query_as("SELECT name, price_monthly::float8 FROM plans WHERE id = $1")
+        match sqlx::query_as("SELECT name, price_monthly::float8 FROM plans WHERE id = $1")
             .bind(plan_id)
             .fetch_optional(&state.pool)
             .await
-            .ok()
-            .flatten();
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!(
+                    "plans.attribute_plan_upgrade: plan lookup failed (plan_id={plan_id}): {e}"
+                );
+                return;
+            }
+        };
     let Some((plan_name, price)) = plan else {
         return;
     };
@@ -378,14 +385,21 @@ async fn attribute_plan_upgrade(state: &AppState, tenant_id: Uuid, plan_id: Uuid
     if plan_price <= 0.0 {
         return;
     }
-    let email: Option<String> = sqlx::query_scalar(
+    let email: Option<String> = match sqlx::query_scalar(
         "SELECT email FROM users WHERE tenant_id = $1 AND role IN ('admin','company_admin','account_owner') LIMIT 1",
     )
     .bind(tenant_id)
     .fetch_optional(&state.pool)
     .await
-    .ok()
-    .flatten();
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(
+                "plans.attribute_plan_upgrade: owner email lookup failed (tenant_id={tenant_id}): {e}"
+            );
+            return;
+        }
+    };
     let Some(email) = email else {
         return;
     };
@@ -436,4 +450,55 @@ pub async fn admin_assign_plan(
     attribute_plan_upgrade(&state, tenant_id, plan_id).await;
 
     Ok(Json(json!({"message": "Plan assigned to account"})))
+}
+
+#[cfg(test)]
+mod swallow_proof {
+    //! t_08faed51: `attribute_plan_upgrade` used to run its two lookups behind
+    //! `.ok().flatten()`, so a DB failure returned silently instead of logging. Its only
+    //! live caller (`admin_assign_plan`) writes `tenant_plans` first, and no lock can
+    //! block this lookup without blocking that write, so the failure is forced here
+    //! against a Postgres that genuinely refuses the connection.
+    use super::*;
+    use crate::handlers::swallow_tests::{capture, dead_pool, test_state};
+
+    #[test]
+    fn attribute_plan_upgrade_logs_a_failed_plan_lookup() {
+        let (_out, log) = capture(|| {
+            let state: AppState = test_state();
+            async move {
+                attribute_plan_upgrade(&state, Uuid::nil(), Uuid::nil()).await;
+            }
+        });
+        assert!(
+            log.contains("attribute_plan_upgrade: plan lookup failed"),
+            "the failed lookup must be logged: {log}"
+        );
+    }
+
+    #[test]
+    fn attribute_plan_upgrade_old_shape_was_silent() {
+        // control leg: the exact pre-fix expression on the same dead pool.
+        let (plan, log) = capture(|| {
+            let pool = dead_pool();
+            async move {
+                let p: Option<(String, Option<f64>)> =
+                    sqlx::query_as("SELECT name, price_monthly::float8 FROM plans WHERE id = $1")
+                        .bind(Uuid::nil())
+                        .fetch_optional(&pool)
+                        .await
+                        .ok()
+                        .flatten();
+                p
+            }
+        });
+        assert!(
+            plan.is_none(),
+            "control: the pre-fix shape returned None for a failed query"
+        );
+        assert!(
+            !log.contains("attribute_plan_upgrade"),
+            "control: the pre-fix shape logged nothing at all: {log}"
+        );
+    }
 }

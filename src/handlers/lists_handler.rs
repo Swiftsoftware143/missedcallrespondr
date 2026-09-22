@@ -265,11 +265,14 @@ pub async fn add_lead_to_list(state: &AppState, list_id: &Uuid, lead_id: &Uuid) 
 
 /// All campaigns for a tenant that are linked to the given tag id
 /// (metadata.coreswift.tag_id == tag_id). Returns (campaign_id, name).
+///
+/// Returns `Err` when the query fails, so a DB failure can never be mistaken for
+/// "this tenant has no campaigns for that tag" (the caller decides how to surface it).
 pub async fn campaigns_for_tag(
     state: &AppState,
     tenant_id: &Uuid,
     tag_id: &str,
-) -> Vec<(Uuid, String)> {
+) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
     sqlx::query_as::<_, (Uuid, String)>(
         "SELECT id, name FROM campaigns
          WHERE tenant_id = $1
@@ -279,5 +282,4 @@ pub async fn campaigns_for_tag(
     .bind(tag_id)
     .fetch_all(&state.pool)
     .await
-    .unwrap_or_default()
 }

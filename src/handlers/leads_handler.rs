@@ -122,8 +122,12 @@ pub async fn create(
         let matched: Vec<(Uuid, String)> = {
             let mut camps = Vec::new();
             for tag in &tags {
-                let c = crate::handlers::lists_handler::campaigns_for_tag(&st, &aid, tag).await;
-                camps.extend(c);
+                match crate::handlers::lists_handler::campaigns_for_tag(&st, &aid, tag).await {
+                    Ok(c) => camps.extend(c),
+                    Err(e) => tracing::error!(
+                        "leads.create: campaigns_for_tag query failed for tenant {aid} tag {tag}: {e}"
+                    ),
+                }
             }
             camps
         };

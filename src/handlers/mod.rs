@@ -40,3 +40,8 @@ pub mod workflows_handler;
 pub mod workflowswift_push;
 
 pub mod site_handler;
+
+// Test-only: dead-pool + tracing-capture harness and the regression legs for the
+// silent-swallow fixes (card t_08faed51). Excluded from release builds.
+#[cfg(test)]
+mod swallow_tests;

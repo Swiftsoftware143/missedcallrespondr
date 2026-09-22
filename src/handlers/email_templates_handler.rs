@@ -11,15 +11,28 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Full email template row
+/// Full email template row.
+///
+/// Two fields used to disagree with the live table, and every read collapsed or
+/// 500'd because of it:
+///  - `aid` is NULLABLE (the live global template has aid = NULL, and the table's
+///    own unique index is `(template_type, COALESCE(aid, nil), is_default)`).
+///    Required as `Uuid` it failed with `unexpected null` on every row — which
+///    `list` turned into `200 {"count":1,"items":[]}` and `get` into a 500.
+///  - `is_html` is not a column of this app's `email_templates` table (verified
+///    with `\d`); `#[sqlx(default)]` keeps a read from erroring on a column the
+///    table never had, and still decodes the real value if the column is added.
+///    The schema drift this reflects (POST/PUT also name `is_html`) is tracked
+///    separately — it is a loud 500, not one of this change's silent swallows.
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct EmailTemplate {
     pub id: Uuid,
-    pub aid: Uuid,
+    pub aid: Option<Uuid>,
     pub name: String,
     pub subject: Option<String>,
     pub body: Option<String>,
     pub html_body: Option<String>,
+    #[sqlx(default)]
     pub is_html: Option<bool>,
     pub is_default: Option<bool>,
     pub template_type: Option<String>,
@@ -71,7 +84,10 @@ pub async fn list(
         .bind(tt).bind(limit).bind(offset)
         .fetch_all(&state.pool)
         .await
-        .unwrap_or_default()
+        .map_err(|e| {
+            tracing::error!("email_templates.list: filtered query failed (template_type={tt}): {e}");
+            e
+        })?
     } else {
         sqlx::query_as::<_, EmailTemplate>(
             "SELECT * FROM email_templates ORDER BY name LIMIT $1 OFFSET $2",
@@ -80,13 +96,19 @@ pub async fn list(
         .bind(offset)
         .fetch_all(&state.pool)
         .await
-        .unwrap_or_default()
+        .map_err(|e| {
+            tracing::error!("email_templates.list: query failed: {e}");
+            e
+        })?
     };
 
     let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM email_templates")
         .fetch_one(&state.pool)
         .await
-        .unwrap_or(0);
+        .map_err(|e| {
+            tracing::error!("email_templates.list: count query failed: {e}");
+            e
+        })?;
 
     Ok(Json(json!({ "items": items, "count": count })))
 }
