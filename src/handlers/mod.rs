@@ -45,3 +45,7 @@ pub mod site_handler;
 // silent-swallow fixes (card t_08faed51). Excluded from release builds.
 #[cfg(test)]
 mod swallow_tests;
+
+// Test-only: the empty-`x-internal-key` guard legs (card t_eb7736b8). Excluded from release builds.
+#[cfg(test)]
+mod internal_key_guard_tests;

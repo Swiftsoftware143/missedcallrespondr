@@ -171,7 +171,9 @@ pub async fn internal_create_portfolio_company(
         .get("x-internal-key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if key != state.config.internal_sync_key {
+    // Fail closed on an EMPTY configured key: `key != expected` alone authorises a request that
+    // simply omits the header on any host where INTERNAL_SYNC_KEY is unset (class t_eb7736b8).
+    if state.config.internal_sync_key.is_empty() || key != state.config.internal_sync_key {
         return Err(AppError::Unauthorized("Invalid internal key".into()));
     }
 

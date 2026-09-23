@@ -51,8 +51,15 @@ pub async fn handle_tag_provision(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let expected = state.config.internal_sync_key.as_str();
-    if key != expected {
-        tracing::warn!("tag_provision: invalid internal key (got {})", key);
+    if expected.is_empty() || key != expected {
+        // Lengths only. This line used to print the PRESENTED key, so any caller that sent its own
+        // internal key to this endpoint had that key written into this app's logs (aggregated, and
+        // copied into /opt/swift/audits at mode 644) — the log half of class t_eb7736b8.
+        tracing::warn!(
+            "tag_provision: invalid internal key (presented_len={}, configured_len={})",
+            key.len(),
+            expected.len()
+        );
         return Err(AppError::Unauthorized("Invalid internal key".into()));
     }
 
