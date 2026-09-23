@@ -4,6 +4,12 @@
 *~
 .DS_Store
 *.bak
+# Secrets never enter the tree (kanban t_b9b18e04): the real values live in
+# /etc/swift/env/missedcall.env; .env.example is the publishable template.
+.env
+.env.local
+*.pem
+*.key
 missedcall_respondr
 missedcallrespondr
 missedcallrespondr-api
