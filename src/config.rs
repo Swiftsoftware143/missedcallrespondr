@@ -22,11 +22,15 @@ impl AppConfig {
             // Secret: no fallback. A literal here would be a signing key published in this
             // public repo, so a missing JWT_SECRET must stop the process instead.
             jwt_secret: required_secret("JWT_SECRET"),
-            server_port: std::env::var("SERVER_PORT")
+            // Bind address comes from the deploy env, same keys as the rest of the fleet
+            // (ADASwift/IncentiveSwift read HOST/PORT; /etc/swift/env/missedcall.env supplies
+            // HOST=127.0.0.1). The old SERVER_HOST/SERVER_PORT names nothing ever set, so the
+            // service ignored the operator and bound 0.0.0.0:8088 on every interface.
+            server_port: std::env::var("PORT")
                 .unwrap_or_else(|_| "8088".into())
                 .parse()
                 .unwrap_or(8088),
-            server_host: std::env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".into()),
+            server_host: std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
             // Secret: no fallback and no empty value. The internal endpoints compare this
             // against the X-Internal-Key header, so an empty key would authorise a request
             // that simply omits the header.
