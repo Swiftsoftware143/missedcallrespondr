@@ -14,20 +14,38 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         Self {
+            // Placeholder only: main() awaits PgPool::connect() before binding, so a missing
+            // DATABASE_URL fails loudly at startup (see the connection error), never silently.
             database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| {
                 "postgres://swift:swift@localhost:5432/missedcallrespondr".into()
             }),
-            jwt_secret: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "missedcallrespondr_jwt_secret_key_2024".into()),
+            // Secret: no fallback. A literal here would be a signing key published in this
+            // public repo, so a missing JWT_SECRET must stop the process instead.
+            jwt_secret: required_secret("JWT_SECRET"),
             server_port: std::env::var("SERVER_PORT")
                 .unwrap_or_else(|_| "8088".into())
                 .parse()
                 .unwrap_or(8088),
             server_host: std::env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".into()),
-            internal_sync_key: std::env::var("INTERNAL_SYNC_KEY").unwrap_or_else(|_| "".into()),
+            // Secret: no fallback and no empty value. The internal endpoints compare this
+            // against the X-Internal-Key header, so an empty key would authorise a request
+            // that simply omits the header.
+            internal_sync_key: required_secret("INTERNAL_SYNC_KEY"),
             funnelswift_url: std::env::var("FUNNELSWIFT_URL")
                 .unwrap_or_else(|_| "http://localhost:8080".into()),
         }
+    }
+}
+
+/// Read a secret-shaped env var: it must be present and non-empty, otherwise the process
+/// must not start. A silent fallback here would either ship a signing key that is published
+/// in this repo, or let an internal-key gate compare "" against a request that omits the
+/// header. Same shape as WorkflowSwift/src/config.rs.
+fn required_secret(key: &str) -> String {
+    match std::env::var(key) {
+        Ok(value) if !value.trim().is_empty() => value,
+        Ok(_) => panic!("{key} environment variable must not be empty"),
+        Err(_) => panic!("{key} environment variable is required"),
     }
 }
 
