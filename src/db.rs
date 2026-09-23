@@ -90,6 +90,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000017_email_templates_schema",
             include_str!("../migrations/000017_email_templates_schema.sql"),
         ),
+        // 000018 owns the tenant that receives contacts auto-provisioned by the FunnelSwift
+        // tag-provision webhook. The handler used to bind a hardcoded tenant uuid that existed in
+        // NO database, so every provision of a new email died on contacts_tenant_id_fkey with a
+        // 500 (t_c9669881). The handler now resolves its owner by SLUG at runtime; this migration
+        // is what makes that slug exist on a fresh database. Idempotent (ON CONFLICT (slug) DO
+        // NOTHING), so it is a no-op on a database whose operator already owns that slug.
+        (
+            "000018_funnelswift_tenant",
+            include_str!("../migrations/000018_funnelswift_tenant.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

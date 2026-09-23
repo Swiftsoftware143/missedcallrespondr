@@ -69,6 +69,7 @@ pub fn test_state() -> AppState {
             server_host: "127.0.0.1".into(),
             internal_sync_key: String::new(),
             funnelswift_url: "http://127.0.0.1:1".into(),
+            tag_provision_tenant_slug: "funnelswift".into(),
         },
         workflowswift_url: "http://127.0.0.1:1".into(),
         coreswift_url: "http://127.0.0.1:1".into(),
