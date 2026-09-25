@@ -90,11 +90,28 @@ Three templates seeded: Welcome Email, Purchase Confirmation, Password Reset.
 - Health: `curl http://localhost:8088/api/health`
 - DB: `docker exec -it swift-postgres-1 psql -U swift -d missedcallrespondr`
 
+## Payments and the PayPal webhook receiver
+
+- Checkout sessions: `/api/v1/checkout/create`, `/api/v1/checkout/sessions`; providers are
+  configured via `/api/v1/payment-providers` (admin console -> Payment providers).
+- `POST /api/v1/webhooks/paypal` is **signature-verified before anything is written or dispatched**
+  (kanban t_5cf44e1b). The four `paypal-transmission-*` headers are required and the signature is
+  checked against PayPal's `verify-webhook-signature` API, authenticated with the REST
+  `client_id:client_secret` and verified against `PAYPAL_WEBHOOK_ID` (or the `webhook_secret` of the
+  active `paypal` provider row — no redeploy needed). Fail-closed replies, in order:
+  `401 missing_paypal_signature_headers`, `503 paypal_not_configured` (no webhook id or no
+  credential: PayPal is **not** called and nothing is written),
+  `401 paypal_verification_api_error` / `401 paypal_verification_unreachable` (the verdict itself
+  could not be obtained), `401 signature_verification_failed` (a real FAILURE verdict). Only a
+  verified event reaches `payment_webhook_events` and fulfilment.
+
 ## Deployment
 
+The binary is IMAGE-BAKED (no bind mount), so `systemctl restart` / `docker restart` re-runs the
+OLD binary and is **not** a deploy:
+
 ```bash
-cd /opt/swift/MissedCallRespondr
-export CARGO_BUILD_JOBS=1
-cargo build --release
-systemctl restart missedcallrespondr
+/opt/swift/bin/deploy-missedcallrespondr.sh        # rebuilds image, recreates the container,
+                                                   # proves sha256(repo) == sha256(container)
+/opt/swift/bin/deploy-missedcallrespondr.sh --verify   # parity + health only
 ```

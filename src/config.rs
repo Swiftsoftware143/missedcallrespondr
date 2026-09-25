@@ -15,6 +15,21 @@ pub struct AppConfig {
     /// is a NAME cannot drift out of existence: the handler looks the slug up at runtime and
     /// creates the tenant on first use.
     pub tag_provision_tenant_slug: String,
+    /// PayPal's public webhook identifier (PayPal dashboard → app → Webhooks) used by the
+    /// `POST /api/v1/webhooks/paypal` receiver to verify `paypal-transmission-sig` against
+    /// PayPal's `verify-webhook-signature` API.
+    ///
+    /// NOT a secret and NOT the shared internal sync key: it names WHICH webhook configuration
+    /// PayPal must verify against, so it must be independent of INTERNAL_SYNC_KEY and rotating
+    /// that credential cannot invalidate webhook verification (the shape ADASwift
+    /// t_2be56050/t_9a1da415 shipped).
+    ///
+    /// Optional on purpose: unset is not an outage, it is an unconfigured receiver — the webhook
+    /// then answers `503 paypal_not_configured` and processes nothing (kanban t_5cf44e1b).
+    /// Resolution order is this value, then the active `paypal` provider row's `webhook_secret`
+    /// (the field the admin console's Payment providers panel writes), so PayPal can be enabled
+    /// from the console without a redeploy.
+    pub paypal_webhook_id: String,
 }
 
 impl AppConfig {
@@ -48,6 +63,9 @@ impl AppConfig {
             // database and the handler agree; migration 000018 is what makes the row exist.
             tag_provision_tenant_slug: std::env::var("TAG_PROVISION_TENANT_SLUG")
                 .unwrap_or_else(|_| "funnelswift".into()),
+            // Optional, empty when unset: see the field's doc comment. Read once here so the
+            // webhook receiver never has to touch the environment per request.
+            paypal_webhook_id: std::env::var("PAYPAL_WEBHOOK_ID").unwrap_or_default(),
         }
     }
 }
