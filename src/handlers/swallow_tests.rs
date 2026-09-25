@@ -70,6 +70,9 @@ pub fn test_state() -> AppState {
             internal_sync_key: String::new(),
             funnelswift_url: "http://127.0.0.1:1".into(),
             tag_provision_tenant_slug: "funnelswift".into(),
+            // Unconfigured on purpose: the PayPal receiver must answer 503 paypal_not_configured
+            // in this probe state, never as if it had processed anything (kanban t_5cf44e1b).
+            paypal_webhook_id: String::new(),
         },
         workflowswift_url: "http://127.0.0.1:1".into(),
         coreswift_url: "http://127.0.0.1:1".into(),
