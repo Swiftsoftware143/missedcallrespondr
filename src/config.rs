@@ -30,6 +30,13 @@ pub struct AppConfig {
     /// (the field the admin console's Payment providers panel writes), so PayPal can be enabled
     /// from the console without a redeploy.
     pub paypal_webhook_id: String,
+    /// How far a Stripe delivery's `t=` stamp may be from THIS host's clock before the receiver
+    /// refuses it even though its HMAC verified (kanban t_4754e612, the freshness arm of the
+    /// `stripe_webhook` contract, the port of ADASwift t_08628ca6 / WorkflowSwift t_72a4bcdf). An
+    /// absolute difference, so a stamp in the FUTURE is bounded the same way as one in the past.
+    /// Defaults to Stripe's own 300 s; a host whose clock wanders can be widened without a
+    /// rebuild. `STRIPE_WEBHOOK_TOLERANCE_SECS`.
+    pub stripe_signature_tolerance_secs: i64,
 }
 
 impl AppConfig {
@@ -66,6 +73,19 @@ impl AppConfig {
             // Optional, empty when unset: see the field's doc comment. Read once here so the
             // webhook receiver never has to touch the environment per request.
             paypal_webhook_id: std::env::var("PAYPAL_WEBHOOK_ID").unwrap_or_default(),
+            // Stripe signature freshness (kanban t_4754e612). Same posture as the two bounds
+            // above: unset or unparseable falls back to the default (Stripe's own 300 s) rather
+            // than refusing to boot, and the value is clamped so a mistyped one cannot become an
+            // outage — 0 would refuse every delivery whose stamp is not this exact second, and a
+            // day-sized value would hand a captured `Stripe-Signature` header a day-long replay
+            // window.
+            stripe_signature_tolerance_secs: std::env::var("STRIPE_WEBHOOK_TOLERANCE_SECS")
+                .ok()
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .unwrap_or(
+                    crate::handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS,
+                )
+                .clamp(30, 86_400),
         }
     }
 }

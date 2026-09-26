@@ -73,6 +73,10 @@ pub fn test_state() -> AppState {
             // Unconfigured on purpose: the PayPal receiver must answer 503 paypal_not_configured
             // in this probe state, never as if it had processed anything (kanban t_5cf44e1b).
             paypal_webhook_id: String::new(),
+            // The shipped default, so a probe that reaches the Stripe receiver's freshness arm is
+            // judged by the same 300 s the deployment uses (kanban t_4754e612).
+            stripe_signature_tolerance_secs:
+                crate::handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS,
         },
         workflowswift_url: "http://127.0.0.1:1".into(),
         coreswift_url: "http://127.0.0.1:1".into(),
