@@ -27,19 +27,24 @@ async fn numeric_limit(
     slug: &str,
     feature_key: &str,
 ) -> Result<Option<i64>, AppError> {
-    // 1. Dedicated columns
-    let plan_col = match feature_key {
-        "max_leads" | "leads" | "max_contacts" | "contacts" => "max_leads",
-        "max_tags" | "tags" => "max_tags",
-        _ => "",
+    // 1. Dedicated columns. Gate rule 5d (class 14) — a query must not be BUILT at run time, so the
+    // whole query is a COMPILE-TIME literal here. The previous
+    // `format!("SELECT {} FROM plans WHERE slug = $1", plan_col)` built the query text from a
+    // run-time string: the query a request ran was not visible anywhere in this source. Same shape
+    // as ADASwift src/features.rs in b2362eb (kanban t_472d6089).
+    let sql = match feature_key {
+        "max_leads" | "leads" | "max_contacts" | "contacts" => {
+            Some("SELECT max_leads FROM plans WHERE slug = $1")
+        }
+        "max_tags" | "tags" => Some("SELECT max_tags FROM plans WHERE slug = $1"),
+        _ => None,
     };
-    if !plan_col.is_empty() {
+    if let Some(sql) = sql {
         // Dedicated plan columns (max_leads, max_tags) are INT4 (integer).
-        if let Some(v) =
-            sqlx::query_scalar::<_, i32>(&format!("SELECT {} FROM plans WHERE slug = $1", plan_col))
-                .bind(slug)
-                .fetch_optional(pool)
-                .await?
+        if let Some(v) = sqlx::query_scalar::<_, i32>(sql)
+            .bind(slug)
+            .fetch_optional(pool)
+            .await?
         {
             return Ok(Some(v as i64));
         }
@@ -158,20 +163,20 @@ pub async fn check_feature_flag(
     match raw.as_deref() {
         Some("true") | Some("1") => Ok(()),
         None => {
-            // Fall back to dedicated boolean column if it exists (dual-routing etc.)
-            let col = match flag_key {
-                "has_dual_routing" => "has_dual_routing",
-                "has_multi_tenant" => "has_multi_tenant",
-                "has_white_label" => "has_white_label",
-                _ => "",
+            // Fall back to dedicated boolean column if it exists (dual-routing etc.). Whole query as
+            // a compile-time literal — gate 5d, same reason as numeric_limit above.
+            let sql = match flag_key {
+                "has_dual_routing" => Some("SELECT has_dual_routing FROM plans WHERE slug = $1"),
+                "has_multi_tenant" => Some("SELECT has_multi_tenant FROM plans WHERE slug = $1"),
+                "has_white_label" => Some("SELECT has_white_label FROM plans WHERE slug = $1"),
+                _ => None,
             };
-            if !col.is_empty() {
-                let v: Option<bool> =
-                    sqlx::query_scalar(&format!("SELECT {} FROM plans WHERE slug = $1", col))
-                        .bind(&slug)
-                        .fetch_optional(pool)
-                        .await?
-                        .flatten();
+            if let Some(sql) = sql {
+                let v: Option<bool> = sqlx::query_scalar(sql)
+                    .bind(&slug)
+                    .fetch_optional(pool)
+                    .await?
+                    .flatten();
                 if v == Some(true) {
                     return Ok(());
                 }
