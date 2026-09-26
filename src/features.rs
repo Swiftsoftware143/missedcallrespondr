@@ -18,10 +18,19 @@ async fn plan_slug(pool: &PgPool, tenant_id: Uuid) -> Result<Option<String>, App
 }
 
 /// Fetch a numeric limit for a feature_key.
-/// Order of resolution:
-///   1. dedicated `plans` column if the key maps to one,
-///   2. `features` JSONB value (features->>key)::bigint,
-///   3. None (no limit → allow).
+/// Order of resolution (kanban t_0e61628c — one allowance PER DIMENSION, each overridable per plan):
+///   1. `features->>key` — an explicit per-plan OVERRIDE, and it WINS over the plan's own column. The
+///      admin writes it from the panel's own "Set plan features (JSON)" action
+///      (PUT /api/v1/admin/plans/:id/features, src/handlers/plans_handler.rs), so a CONTACT allowance
+///      (or a leads / tags one) can differ from the plan default with no code change and no schema
+///      change. CoreSwift-CRM carries its contact allowance exactly this way: a per-tier
+///      `features.max_contacts` (100 / 500 / 1 000 / 5 000 / 10 000 / 50 000).
+///   2. the dedicated `plans` column for the keys that have one (`max_leads`, `max_tags`) — the
+///      plan's DEFAULT, and where every live plan resolves: no `plans` row in this database carries a
+///      `max_contacts` or `max_leads` features key (census in the t_0e61628c evidence), so adding the
+///      override arm moved no live number.
+///   3. `features->>key` for every other key (max_users, max_rules, max_phone_numbers, ...).
+///   4. None = no limit declared → allow.
 async fn numeric_limit(
     pool: &PgPool,
     slug: &str,
@@ -32,14 +41,21 @@ async fn numeric_limit(
     // `format!("SELECT {} FROM plans WHERE slug = $1", plan_col)` built the query text from a
     // run-time string: the query a request ran was not visible anywhere in this source. Same shape
     // as ADASwift src/features.rs in b2362eb (kanban t_472d6089).
-    let sql = match feature_key {
+    let column_sql = match feature_key {
         "max_leads" | "leads" | "max_contacts" | "contacts" => {
             Some("SELECT max_leads FROM plans WHERE slug = $1")
         }
         "max_tags" | "tags" => Some("SELECT max_tags FROM plans WHERE slug = $1"),
         _ => None,
     };
-    if let Some(sql) = sql {
+    // A key that has a column ALSO has that column as its default, so an explicit features key can
+    // only mean anything if it is read FIRST (t_0e61628c).
+    if column_sql.is_some() {
+        if let Some(v) = jsonb_limit(pool, slug, feature_key).await? {
+            return Ok(Some(v));
+        }
+    }
+    if let Some(sql) = column_sql {
         // Dedicated plan columns (max_leads, max_tags) are INT4 (integer).
         if let Some(v) = sqlx::query_scalar::<_, i32>(sql)
             .bind(slug)
@@ -50,16 +66,34 @@ async fn numeric_limit(
         }
     }
 
-    // 2. JSONB features column (covers max_phone_numbers, max_rules, max_users,
+    // 3. JSONB features column (covers max_phone_numbers, max_rules, max_users,
     //    max_deals, max_workflows, max_campaigns, max_messages, max_integrations,
-    //    max_api_keys, max_follow_ups, max_calls, max_tickets, ...)
-    let v: Option<i64> =
-        sqlx::query_scalar("SELECT (features->>$1)::bigint FROM plans WHERE slug = $2")
-            .bind(feature_key)
-            .bind(slug)
-            .fetch_optional(pool)
-            .await?
-            .flatten();
+    //    max_api_keys, max_follow_ups, max_calls, max_tickets, ...), and a column key whose column
+    //    is NULL.
+    jsonb_limit(pool, slug, feature_key).await
+}
+
+/// Apply a `features->>key` value as a bigint, or `None` when the plan declares no such key.
+///
+/// A PRESENT but non-integer value is treated as ABSENT (kanban t_0e61628c). This expression is
+/// reachable from the admin panel's own "Set plan features (JSON)" action and
+/// `(features->>'max_contacts')::bigint` on a hand-typed value ("unlimited", " 10") aborts the whole
+/// statement — the route answered 500 for every request until the value was fixed. A malformed
+/// override now leaves the plan's declared limit in place instead of breaking the endpoint.
+async fn jsonb_limit(
+    pool: &PgPool,
+    slug: &str,
+    feature_key: &str,
+) -> Result<Option<i64>, AppError> {
+    let v: Option<i64> = sqlx::query_scalar(
+        "SELECT CASE WHEN (features->>$1) ~ '^-?[0-9]+$' THEN (features->>$1)::bigint END \
+         FROM plans WHERE slug = $2",
+    )
+    .bind(feature_key)
+    .bind(slug)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
     Ok(v)
 }
 
@@ -73,6 +107,9 @@ async fn numeric_limit(
 /// CoreSwift-CRM `max_contacts` -> contacts) and the arity of this app's own plan row: the
 /// `POST /api/v1/leads` route (src/handlers/leads_handler.rs:81) enforces the key `max_leads` under
 /// the label "Leads". The contact arm is left exactly as it was.
+///
+/// The ALLOWANCE that arm is compared against is its own key now (`features.max_contacts`, kanban
+/// t_0e61628c) — see `numeric_limit` above. Counting is unchanged by that card.
 async fn count_usage(pool: &PgPool, tenant_id: Uuid, key: &str) -> Result<i64, AppError> {
     let q = match key {
         "max_contacts" | "contacts" => Some("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1"),
