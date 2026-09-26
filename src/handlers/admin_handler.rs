@@ -144,9 +144,15 @@ pub async fn impersonate(
     State(state): State<AppState>,
     Json(req): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
-    if claims.role != "agency_admin" {
+    // ONE definition of "platform admin" in this app (kanban t_92ec2f21): the class gate in
+    // `auth_middleware` already fronts this route, and the panel that calls it
+    // (admin.missedcallrespondr.com, schema section "4. Tenants, Credits & Impersonation") is
+    // handed to a platform admin. The old inline `role != "agency_admin"` was boilerplate from the
+    // initial commit f515e9e and no live row carries `agency_admin` (live census: 2 x admin,
+    // 23 x account_owner), so it made the panel's own Impersonate action dead for every live user.
+    if !crate::auth::middleware::is_platform_admin(&claims.role) {
         return Err(AppError::Unauthorized(
-            "Only agency admins can impersonate".into(),
+            "Only platform admins can impersonate".into(),
         ));
     }
 

@@ -77,10 +77,14 @@ pub async fn upsert_payment_provider(
     Extension(claims): Extension<Claims>,
     Json(req): Json<Value>,
 ) -> ApiResult<impl IntoResponse> {
-    // Super admin only
-    if claims.role != "super_admin" {
+    // Platform-admin only, through the ONE definition of that set (kanban t_92ec2f21) — the class
+    // gate in `auth_middleware` already fronts `/api/v1/payment-providers`, and the panel that
+    // calls this action (admin.missedcallrespondr.com, schema section "2. Payment Providers") is
+    // handed to a platform admin. The old inline `role != "super_admin"` made the panel's own
+    // action dead for every live role (live census: 2 x admin, 23 x account_owner — no super_admin).
+    if !crate::auth::middleware::is_platform_admin(&claims.role) {
         return Err(AppError::Unauthorized(
-            "Only super admins can manage payment providers".into(),
+            "Only platform admins can manage payment providers".into(),
         ));
     }
 
@@ -206,10 +210,14 @@ pub async fn delete_payment_provider(
     Extension(claims): Extension<Claims>,
     Path(provider_type): Path<String>,
 ) -> ApiResult<impl IntoResponse> {
-    // Super admin only
-    if claims.role != "super_admin" {
+    // Platform-admin only, through the ONE definition of that set (kanban t_92ec2f21) — the class
+    // gate in `auth_middleware` already fronts `/api/v1/payment-providers`, and the panel that
+    // calls this action (admin.missedcallrespondr.com, schema section "2. Payment Providers") is
+    // handed to a platform admin. The old inline `role != "super_admin"` made the panel's own
+    // action dead for every live role (live census: 2 x admin, 23 x account_owner — no super_admin).
+    if !crate::auth::middleware::is_platform_admin(&claims.role) {
         return Err(AppError::Unauthorized(
-            "Only super admins can manage payment providers".into(),
+            "Only platform admins can manage payment providers".into(),
         ));
     }
 
