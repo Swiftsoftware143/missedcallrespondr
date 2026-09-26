@@ -64,11 +64,19 @@ async fn numeric_limit(
 }
 
 /// Count current usage for a feature key (per tenant).
+///
+/// `max_leads` / `leads` count the **leads** table (kanban t_39b9a474). It used to be in the arm
+/// above, next to `max_contacts`, so the plan's `max_leads` limit was compared against the CONTACT
+/// count and the `leads` table was bounded by nothing (measured on t_92abc097: `max_leads=1` with
+/// one lead already present answered 200 CREATED). Each plan dimension counts its own entity — the
+/// fleet convention (FunnelSwift `max_leads` -> leads, IncentiveSwift `max_leads` -> leads,
+/// CoreSwift-CRM `max_contacts` -> contacts) and the arity of this app's own plan row: the
+/// `POST /api/v1/leads` route (src/handlers/leads_handler.rs:81) enforces the key `max_leads` under
+/// the label "Leads". The contact arm is left exactly as it was.
 async fn count_usage(pool: &PgPool, tenant_id: Uuid, key: &str) -> Result<i64, AppError> {
     let q = match key {
-        "max_contacts" | "contacts" | "max_leads" | "leads" => {
-            Some("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1")
-        }
+        "max_contacts" | "contacts" => Some("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1"),
+        "max_leads" | "leads" => Some("SELECT COUNT(*) FROM leads WHERE tenant_id = $1"),
         "max_tags" | "tags" => Some("SELECT COUNT(*) FROM tags WHERE tenant_id = $1"),
         "max_phone_numbers" | "phone_numbers" => {
             Some("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1")
