@@ -8,6 +8,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000001_initial",
             include_str!("../migrations/000001_initial.sql"),
         ),
+        // The bootstrap baseline, registered SECOND on purpose: it creates the relations that exist
+        // on live but that NO migration creates (`plans`, `tenant_plans`, `admin_settings`) plus
+        // `tenants.is_active`, and `tenant_plans`' FKs need `tenants` from 000001 above. Without it
+        // 000008/000010/000011/000012/000018 fail on an empty database and the process never binds
+        // a port (t_17cef2e9). No-op on live — every statement is IF NOT EXISTS. See the file header.
+        (
+            "000_baseline_live_schema",
+            include_str!("../migrations/000_baseline_live_schema.sql"),
+        ),
         (
             "000002_api_keys",
             include_str!("../migrations/000002_api_keys.sql"),
@@ -99,6 +108,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         (
             "000018_funnelswift_tenant",
             include_str!("../migrations/000018_funnelswift_tenant.sql"),
+        ),
+        // 000019 shipped 2026-09-26 (t_158bf73d, the Stripe receiver's two refusal arms) and was
+        // NEVER registered here, so it reached NO database, fresh or live — the live
+        // `payment_webhook_events` was missing the `error_message` column and the status CHECK's
+        // two new arms purely because nothing ever ran the file. It is additive + fully idempotent
+        // (`ADD COLUMN IF NOT EXISTS` + `DROP CONSTRAINT IF EXISTS` before `ADD CONSTRAINT`), so
+        // registering it is a no-op on live except that the two objects start existing, and a fresh
+        // build gets them too.
+        (
+            "000019_payment_webhook_status_arms",
+            include_str!("../migrations/000019_payment_webhook_status_arms.sql"),
         ),
     ];
 
