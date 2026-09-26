@@ -19,6 +19,12 @@ use crate::{
 };
 
 pub fn create_router(state: AppState) -> Router {
+    // Body-read deadline (kanban t_7f688018): how long a request body may take to ARRIVE before the
+    // request is answered 408 and its task, connection and partially-read body buffer are released.
+    // The value is the one config.rs clamped and main.rs printed at boot — never re-derived here.
+    let body_read_deadline =
+        crate::body_deadline::BodyReadDeadline::from_secs(state.config.body_read_deadline_secs);
+
     // ── Public routes (no auth required) ──
     let public_routes = Router::new()
         .route("/api/v1/health", get(health_check))
@@ -64,7 +70,20 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/internal/tag-provision",
             post(crate::handlers::tag_provision_handler::handle_tag_provision),
-        );
+        )
+        // THE PUBLIC RECEIVERS FIRST (kanban t_7f688018). `/api/v1/telnyx/webhook`, the two payment
+        // webhooks, the `X-Internal-Key` `/api/v1/internal/*` push routes and the
+        // `/api/v1/auth/*` receivers are the routes a stranger with no credential can reach, and
+        // every one of them reads a body — so every one of them could be parked for ever by a
+        // request head with a `Content-Length` and then silence. Mounted on the whole public
+        // router: the layer's own scope expression (a body-carrying method + a DECLARED body) is
+        // what keeps the three bodyless GET routes on this surface unchanged — proven live, N1
+        // `GET /api/v1/health` with a declared-but-absent body answers 200 at t+0.00 s in BOTH
+        // phases, and a `Content-Length: 0` POST is answered at once too (N2).
+        .layer(middleware::from_fn_with_state(
+            body_read_deadline,
+            crate::body_deadline::body_read_deadline_middleware,
+        ));
 
     // ── Protected routes (auth required) ──
     let protected_routes = Router::new()
@@ -584,6 +603,18 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/checkout/sessions",
             get(checkout_handler::list_checkout_sessions),
         )
+        // Body-read deadline INNERMOST: the FIRST `.layer()` of this chain is the layer CLOSEST to
+        // the handler (axum wraps in application order), so `auth_middleware` — applied next — stays
+        // OUTSIDE it. That ordering is the contract, and it is why mounting this at the merged
+        // router instead would be wrong: an unauthenticated request must be answered 401 at
+        // t+0.00 s with its declared body never buffered, and only a request that HAS a credential
+        // may be made to wait for a body. Proven live in both phases: O1/O2 (no credential,
+        // declared-but-absent body) answer 401 at t+0.00 s, while L11/L12/L13 (a real session, the
+        // same declared-but-absent body) park before the fix and answer 408 ON the bound after it.
+        .layer(middleware::from_fn_with_state(
+            body_read_deadline,
+            crate::body_deadline::body_read_deadline_middleware,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

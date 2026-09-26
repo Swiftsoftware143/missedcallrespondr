@@ -1,4 +1,5 @@
 mod auth;
+mod body_deadline;
 mod config;
 mod db;
 mod email;
@@ -47,6 +48,19 @@ async fn main() -> anyhow::Result<()> {
          logged (STRIPE_WEBHOOK_TOLERANCE_SECS, clamped 30..86400, default {})",
         cfg.stripe_signature_tolerance_secs,
         handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS
+    );
+
+    // Body-read deadline (kanban t_7f688018): how long a request body may take to arrive before the
+    // request is answered 408 and its task, connection and partially-read buffer are released. In
+    // the boot log for the same reason as the bounds above — an operator diagnosing "a webhook
+    // sender is being refused / the app is holding connections" has to read the value in force, and
+    // it is also the number that says whether this host's inbound path is the suspect.
+    tracing::info!(
+        "Request body-read deadline: {}s on every route that reads a body, 408 above that \
+         (BODY_READ_DEADLINE_SECS overrides, clamped {}..={})",
+        cfg.body_read_deadline_secs,
+        body_deadline::MIN_BODY_READ_DEADLINE_SECS,
+        body_deadline::MAX_BODY_READ_DEADLINE_SECS
     );
 
     let coreswift_url =

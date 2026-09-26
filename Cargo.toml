@@ -24,3 +24,14 @@ rust_decimal = { version = "1.42.1", features = ["serde"] }
 ring = "0.17"
 hex = "0.4"
 base64 = "0.22"
+
+[dev-dependencies]
+# Tests only: `ServiceExt::oneshot` drives a real Router through the middleware stack so the
+# body-read deadline is proven to fire (kanban t_7f688018). tower 0.5 is already in the lock as
+# axum's own dependency, so this adds no package — it only makes the trait nameable in tests, and
+# the production graph's feature set is untouched.
+tower = { version = "0.5", features = ["util"] }
+# Tests only: a request body that never arrives is built from a `futures_core::Stream` via
+# `Body::from_stream`. futures-core is already in the production graph (axum-core depends on it),
+# so this makes the trait nameable in tests without adding a package.
+futures-core = "0.3"

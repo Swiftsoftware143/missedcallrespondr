@@ -77,6 +77,9 @@ pub fn test_state() -> AppState {
             // judged by the same 300 s the deployment uses (kanban t_4754e612).
             stripe_signature_tolerance_secs:
                 crate::handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS,
+            // The shipped default, so a probe that reaches the body-read deadline is judged by the
+            // same 30 s the deployment uses (kanban t_7f688018).
+            body_read_deadline_secs: crate::body_deadline::DEFAULT_BODY_READ_DEADLINE_SECS,
         },
         workflowswift_url: "http://127.0.0.1:1".into(),
         coreswift_url: "http://127.0.0.1:1".into(),

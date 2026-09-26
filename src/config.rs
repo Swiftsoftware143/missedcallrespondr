@@ -37,6 +37,17 @@ pub struct AppConfig {
     /// Defaults to Stripe's own 300 s; a host whose clock wanders can be widened without a
     /// rebuild. `STRIPE_WEBHOOK_TOLERANCE_SECS`.
     pub stripe_signature_tolerance_secs: i64,
+    /// How long a request BODY may take to arrive before the request is answered `408` and its
+    /// task, connection and partially-read body buffer are released (kanban t_7f688018, the
+    /// missedcallrespondr arm of the fleet-wide body-read deadline).
+    ///
+    /// A bound on the body's ARRIVAL, not on the handler: these routes verify a signature or a key
+    /// *after* the body is read, so a wall-clock budget over the handler would drop work that was
+    /// legitimately in progress (a verified payment, a captured call). Same posture as the two
+    /// bounds above: unset or unparseable falls back to the default rather than refusing to boot,
+    /// and the value is clamped (5..=300) so a mistyped one cannot become an outage. The clamp and
+    /// the default live in `body_deadline.rs`; `BODY_READ_DEADLINE_SECS` overrides.
+    pub body_read_deadline_secs: u64,
 }
 
 impl AppConfig {
@@ -86,6 +97,17 @@ impl AppConfig {
                     crate::handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS,
                 )
                 .clamp(30, 86_400),
+            // Body-read deadline (kanban t_7f688018). 5 is the floor because below it the bound
+            // starts shedding a legitimately slow sender; 300 the ceiling because above it the
+            // bound stops being one for a stranger holding a connection open on a public receiver.
+            body_read_deadline_secs: std::env::var("BODY_READ_DEADLINE_SECS")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(crate::body_deadline::DEFAULT_BODY_READ_DEADLINE_SECS)
+                .clamp(
+                    crate::body_deadline::MIN_BODY_READ_DEADLINE_SECS,
+                    crate::body_deadline::MAX_BODY_READ_DEADLINE_SECS,
+                ),
         }
     }
 }
