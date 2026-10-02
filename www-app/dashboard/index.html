@@ -75,9 +75,12 @@ const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] =
 
 // ===== LOGIN =====
 const LoginView = () => {
-  let email = '', pw = '';
+  // kanban t_02ef49ca — the login draft lives in the SHARED view object (S.views['login_form']),
+  // never a per-render local: the Sign In handler itself calls renderApp() (S.loading / S.error),
+  // so the old `let email = '', pw = ''` blanked BOTH fields on every attempt.
+  const f = viewState('login_form', { email: '', pw: '' });
   const submit = async (e) => { e.preventDefault(); S.loading = true; S.error = null; renderApp();
-    try { const r = await API.post('/auth/login', { email, password: pw }); API.setAuth(r.token, r.team_member || r.user || r); S.view = 'overview'; } catch (err) { S.error = err.message; }
+    try { const r = await API.post('/auth/login', { email: f.email, password: f.pw }); API.setAuth(r.token, r.team_member || r.user || r); f.email = ''; f.pw = ''; S.view = 'overview'; } catch (err) { S.error = err.message; }
     S.loading = false; renderApp();
   };
   return html`<div class="flex items-center justify-center min-h-screen w-full">
@@ -88,8 +91,8 @@ const LoginView = () => {
         <p class="text-sm text-gray-500 mt-1">Auto-Response Platform</p>
       </div>
       <form onSubmit=${submit} class="space-y-4">
-        <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${email} onInput=${e => email = e.target.value} required /></div>
-        <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${pw} onInput=${e => pw = e.target.value} required /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${f.email} onInput=${e => f.email = e.target.value} required /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${f.pw} onInput=${e => f.pw = e.target.value} required /></div>
         ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
         <button type="submit" class="btn w-full">Sign In</button>
       </form>
@@ -310,7 +313,7 @@ const Messages = () => {
   const hide = () => { st.showModal = false; renderApp(); };
   const send = async (data) => { try { await API.post('/messages', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   return html`<div>
-    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Messages</h2><button class="btn btn-sm btn-green" onClick=${() => { st.showModal = true; renderApp(); }}>+ Send Message</button></div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Messages</h2><button class="btn btn-sm btn-green" onClick=${() => { st.formSeeded = false; st.showModal = true; renderApp(); }}>+ Send Message</button></div>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Sent</th></tr></thead>
         <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${m.status==='sent'||m.status==='delivered'?'badge-green':'badge-yellow'}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${m.created_at?new Date(m.created_at).toLocaleDateString():'-'}</td></tr>`)}
@@ -318,8 +321,11 @@ const Messages = () => {
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">Send Message</h3>
-      ${(() => { let to='', body='';
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">To (phone)</label><input class="input" value=${to} onInput=${e => to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="4" value=${body} onInput=${e => body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => send({ to, body })}>Send</button></div></div>`; })()}
+      ${(() => { const f = viewState('messages_form', { to: '', body: '' });
+        // kanban t_02ef49ca — CREATE-only draft, no row to re-seed from; shared so a renderApp()
+        // while the modal is open cannot reset it to the literals.
+        if (!st.formSeeded) { f.to = ''; f.body = ''; st.formSeeded = true; }
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">To (phone)</label><input class="input" value=${f.to} onInput=${e => f.to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="4" value=${f.body} onInput=${e => f.body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => send({ to: f.to, body: f.body })}>Send</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
