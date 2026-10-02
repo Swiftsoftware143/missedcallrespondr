@@ -203,8 +203,10 @@ fn same_number(left: &str, right: &str) -> bool {
 /// Does this rule fire for this call? Pure, so it is unit-testable without a database.
 pub fn trigger_matches(rule: &ResponseRule, caller: &str, now: NaiveDateTime) -> bool {
     match rule.trigger_condition.trim() {
-        // This service records every inbound ring as a missed call (the webhook answers and records
-        // a voicemail on the tenant's behalf), so "all missed calls" is every inbound call.
+        // This service records every inbound ring as a missed call (the webhook answers the call and
+        // captures the caller as a lead), so "all missed calls" is every inbound call. The old
+        // parenthetical here claimed a voicemail recorded "on the tenant's behalf" — retired with the
+        // voicemail surface (kanban t_1d4fc956): no recording is requested and none is ever stored.
         "all_missed_calls" => true,
         "specific_numbers" => listed_numbers(rule.schedule.as_ref())
             .iter()
