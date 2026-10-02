@@ -138,25 +138,33 @@ const Portfolio = () => {
     try { if(st.editItem) await API.put('/portfolio-companies/' + st.editItem.id, data); else await API.post('/portfolio-companies', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
   };
   const remove = async (id) => { if(!confirm('Delete this portfolio company?')) return; await API.del('/portfolio-companies/' + id); load(); };
-  const impersonate = async (company) => {
-    if(!confirm('Impersonate as ' + company.name + '?')) return;
-    try {
-      const r = await API.post('/admin/impersonate', { account_id: company.tenant_id || company.id });
-      sessionStorage.setItem('impersonate_token', r.token);
-      sessionStorage.setItem('impersonate_company', JSON.stringify(company));
-      window.open('https://missedcallrespondr.com', '_blank');
-    } catch(e) { alert('Impersonation failed: ' + e.message); }
-  };
+  // kanban t_25b8c662 — the per-row "🔑 Impersonate" button that used to live on this tab is
+  // DELETED, not renamed. It could never work, for four independent reasons measured on the live
+  // bytes (t_d11d4157 browser-portfolio.json: POST /api/v1/admin/impersonate -> 400,
+  // "Impersonation failed: valid account_id is required"):
+  //   1. it posted {account_id} while admin_handler::impersonate reads tenant_id;
+  //   2. GET /portfolio-companies binds claims.aid, so this list is ALWAYS the caller's own tenant,
+  //      and its payload carries no tenant_id -- `company.tenant_id || company.id` resolved to a
+  //      portfolio_companies.id, so even a renamed key would have minted a token for a non-tenant id;
+  //   3. the handler answers `impersonation_token` while the button read `r.token`, so a 2xx would
+  //      have stored the string "undefined" (renaming ONLY the key turns a loud failure into a
+  //      quiet lie);
+  //   4. it wrote sessionStorage on admin.missedcallrespondr.com and then opened a DIFFERENT origin
+  //      (sessionStorage is per-origin) -- no session could cross.
+  // A portfolio row is a sub-entity of your OWN tenant, so there is no account here to sign in as.
+  // The operator control that CAN name a tenant is in the Operator Console (every tenant); the note
+  // rendered below points there instead of leaving a button that 400s for every click.
 
   const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.slug||'').toLowerCase().includes(st.search.toLowerCase()) || (c.domain||'').toLowerCase().includes(st.search.toLowerCase()));
 
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Portfolio Companies</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Company</button></div></div>
+    <div class="card" data-portfolio-note="1" style="border-left:4px solid #94a3b8"><p class="text-xs text-gray-600">This list is scoped to <b>your own tenant</b> by the API, and a portfolio company is not an account you can sign in as. To open a customer's tenant, use <b>Operator Console → 🔑 Impersonate a tenant</b> (it lists every tenant).</p></div>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(c => html`<tr>
           <td class="font-medium">${c.name}</td><td class="text-gray-500">${c.slug || c.domain || '-'}</td>
-          <td><button class="btn btn-sm btn-blue" onClick=${() => impersonate(c)} title="Impersonate">🔑 Impersonate</button><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
+          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
         </tr>`)}
         ${filtered.length === 0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No portfolio companies yet.</td></tr>`}
       </tbody></table>
@@ -1406,10 +1414,64 @@ const OpsPanel = ({ panel }) => {
   </div>`;
 };
 
+/* ===== 🔑 IMPERSONATE A TENANT (kanban t_25b8c662) =====
+   The working operator control for `POST /admin/impersonate`, on the only surface that can name a
+   tenant: `GET /admin/tenants` returns EVERY tenant (admin_handler::list_all_tenants), while
+   `GET /portfolio-companies` is caller-scoped to the admin's own tenant. The Portfolio tab used to
+   carry a per-row Impersonate button that this replaces; its four measured defects are documented
+   above that function. Hand-off: the token travels in the URL FRAGMENT -- a fragment is never sent
+   to the server, so it cannot reach nginx's access log or a Referer, and the tenant shell stores it
+   and strips it on arrival (skill: session-credential-out-of-url-and-logs). */
+const ImpersonateTenants = () => {
+  const st = viewState('impersonate', { list: null, err: null, busy: null, msg: null, ok: true });
+  const load = async () => {
+    try {
+      const d = await API.get('/admin/tenants');
+      st.list = Array.isArray(d) ? d : ((d && d.tenants) || []);
+      st.err = null;
+    } catch (e) { st.err = e.message; st.list = null; }
+    st.busy = null; renderApp();
+  };
+  const reload = async () => { st.busy = 'list'; renderApp(); await load(); };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const go = async (t) => {
+    const name = t.name || t.slug || t.id;
+    if (!confirm('Sign in as "' + name + '"?\n\nYou will land in the customer app as that tenant for 15 minutes.')) return;
+    st.busy = t.id; st.msg = null; st.ok = true; renderApp();
+    try {
+      const r = await API.post('/admin/impersonate', { tenant_id: t.id });
+      const tok = r && (r.impersonation_token || r.token);
+      if (!tok) throw new Error('the API answered without an impersonation_token');
+      window.open(TENANT_APP + '/dashboard/#impersonation_token=' + encodeURIComponent(tok)
+        + '&impersonation_tenant=' + encodeURIComponent(name), '_blank', 'noopener');
+      st.msg = 'Opened ' + name + ' in a new tab. That tab is the customer session; this panel is untouched.';
+    } catch (e) { st.ok = false; st.msg = 'Impersonation failed: ' + e.message; }
+    st.busy = null; renderApp();
+  };
+  return html`<div class="card mb-3" data-impersonate="tenant">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-base font-bold text-gray-800">🔑 Impersonate a tenant</h2>
+      <button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button>
+    </div>
+    <p class="text-xs text-gray-500 mb-2">Opens ${TENANT_APP} signed in as the tenant you pick. 15-minute token; your operator session on this panel is not affected.</p>
+    ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}">${st.msg}</div>`}
+    ${st.err && html`<div class="text-sm text-red-600 mb-2">Could not list tenants: ${st.err}</div>`}
+    ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:300px"><table class="table">
+      <thead><tr><th>Tenant</th><th>Slug</th><th>Users</th><th>Plan</th><th></th></tr></thead>
+      <tbody>${st.list.map(t => html`<tr>
+        <td class="font-medium">${t.name || '-'}</td><td class="text-gray-500">${t.slug || '-'}</td>
+        <td>${t.user_count == null ? '-' : t.user_count}</td><td class="text-gray-500">${t.plan_name || '—'}</td>
+        <td><button class="btn btn-sm btn-blue" disabled=${st.busy === t.id} onClick=${() => go(t)}>${st.busy === t.id ? '...' : '🔑 Impersonate'}</button></td>
+      </tr>`)}</tbody></table></div>`
+      : (st.err ? '' : html`<div class="text-xs text-gray-400">loading tenants...</div>`)}
+  </div>`;
+};
+
 const OpsConsole = () => {
   return html`<div class="ops-console space-y-1" data-ops="console">
     <h1 class="text-xl font-bold text-gray-800">Operator Console</h1>
     <p class="text-xs text-gray-500 mb-2">Direct operator controls for admin endpoints that had no UI. Every control calls the existing API with your session token.</p>
+    <${ImpersonateTenants} />
     ${OPS_PANELS.map(p => html`<${OpsPanel} panel=${p} />`)}
   </div>`;
 };

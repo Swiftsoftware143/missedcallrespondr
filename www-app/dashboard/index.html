@@ -3,9 +3,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- IMPERSONATION HAND-OFF (kanban t_25b8c662). The operator console on admin.missedcallrespondr.com
+     mints a 15-minute `impersonated` token and opens THIS url with the token in the FRAGMENT.
+     A fragment is never sent to the server, so it cannot land in an access log or a Referer; we
+     adopt it once, then strip it from the address bar (skill: session-credential-out-of-url-and-logs).
+     Inline and in <head> on purpose: it must run BEFORE the module below reads sessionStorage, and
+     before any subresource request could carry the fragment in a Referer. -->
+<script>
+!function () {
+  try {
+    var h = window.location.hash || '';
+    if (h.indexOf('impersonation_token=') < 0) return;
+    var q = {};
+    h.replace(/^#/, '').split('&').forEach(function (kv) {
+      var i = kv.indexOf('=');
+      if (i > 0) q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    });
+    if (!q.impersonation_token) return;
+    var who = q.impersonation_tenant || 'a tenant';
+    sessionStorage.setItem('mc_token', q.impersonation_token);
+    // NOT the operator's identity: the impersonated token keeps the operator's `sub`, so
+    // GET /auth/me would hand this shell the ADMIN's own user row. A marker instead.
+    sessionStorage.setItem('mc_user', JSON.stringify({
+      email: 'impersonated@' + who, name: 'Impersonating ' + who, impersonated: true, tenant: who
+    }));
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  } catch (e) { /* never let the hand-off break the shell; the guard below still applies */ }
+}();
+</script>
 <title>MissedCall Respondr — Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}</style>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}</style>
 </head>
 <body>
 <div id="app"></div>
@@ -589,6 +617,11 @@ const Integrations = () => {
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
+  // kanban t_25b8c662 — an impersonated session belongs to the CUSTOMER's tenant, but the token
+  // keeps the OPERATOR's `sub` (admin_handler::impersonate switches `aid` only). So PUT
+  // /auth/profile and PUT /auth/password would write to the OPERATOR's own user row: the Profile
+  // view is removed from an impersonated session, and a banner names the impersonated tenant.
+  const impTenant = (API.user && API.user.impersonated) ? (API.user.tenant || 'a tenant') : null;
   const nav = [
     { id: 'overview', label: 'Overview', icon: '📊' },
     { id: 'calls', label: 'Calls', icon: '📞' },
@@ -601,7 +634,7 @@ const App = () => {
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'profile', label: 'Profile', icon: '👤' }
-  ];
+  ].filter(n => !(impTenant && n.id === 'profile'));
   const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
@@ -617,7 +650,13 @@ const App = () => {
       <div class="text-xs text-gray-400 px-3 py-2 truncate">${c.email || ''}</div>
       <div class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span>🚪</span><span class="nav-txt">Logout</span></div>
     </div>
-    <div class="main"><${CurrentView} /></div>
+    <div class="main">
+      ${impTenant && html`<div class="imp-banner" data-impersonating=${impTenant}>
+        <span>🔑 Impersonating <b>${impTenant}</b> — this tab is the customer's session, not yours. Your operator session stays open on the admin panel.</span>
+        <button onClick=${() => { API.logout(); window.location.href = 'https://admin.missedcallrespondr.com/'; }}>Exit impersonation</button>
+      </div>`}
+      <${CurrentView} />
+    </div>
   </div>`;
 };
 
