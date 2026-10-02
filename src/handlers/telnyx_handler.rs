@@ -41,39 +41,12 @@ pub struct TelnyxConfig {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct TelnyxWebhookPayload {
-    pub data: Option<TelnyxWebhookData>,
-    pub meta: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct TelnyxWebhookData {
-    pub event_type: Option<String>,
-    pub id: Option<String>,
-    pub occurred_at: Option<String>,
-    pub payload: Option<TelnyxWebhookEventPayload>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct TelnyxWebhookEventPayload {
-    pub call_control_id: Option<String>,
-    pub connection_id: Option<String>,
-    pub call_leg_id: Option<String>,
-    pub call_session_id: Option<String>,
-    pub client_state: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub direction: Option<String>,
-    pub state: Option<String>,
-    pub start_time: Option<String>,
-    pub sip_source_ip: Option<String>,
-    #[serde(default)]
-    pub digits: Option<String>,
-}
+// The typed Telnyx webhook payload structs (`TelnyxWebhookPayload`, `TelnyxWebhookData`,
+// `TelnyxWebhookEventPayload`) were removed with the gather arm (kanban t_6e679d39). Nothing ever
+// read them — the receiver below parses the raw `Value` it is handed, which is what every
+// `#[allow(dead_code)]` on those structs was hiding — and their one distinctive field, `digits`,
+// existed only to feed a `call.gather.ended` consumer that was never written. A struct referenced
+// only by its own definition is a promise; this app no longer makes it.
 
 #[derive(Debug, Deserialize)]
 pub struct TelnyxConfigUpdate {
@@ -294,29 +267,38 @@ fn hangup_response() -> Json<Value> {
     }))
 }
 
-/// Build a Telnyx call-control "answer + gather" response.
+/// Build the Telnyx call-control reply for a handled inbound call: **answer only**.
 ///
-/// The `record_start` command this used to carry was retired with the voicemail surface (kanban
-/// t_1d4fc956): nothing in the app ever handled the recording event it produced (`call.recording.saved`
-/// is acked with `{"commands":[]}` at the top of `webhook`), so the command bought a recording that
-/// was never fetched or stored — and there is no STT integration, so nothing could have transcribed
-/// it either. Asking Telnyx for it again would keep paying for what cannot be used.
-fn answer_and_gather_response() -> Json<Value> {
+/// The `gather_using_audio` command this used to carry is retired (kanban t_6e679d39), on
+/// measurement rather than taste — four independent facts, each one checkable:
+///
+/// * **Nothing consumed the digits.** The receiver's `match event_type` handles only
+///   `call_received` / `call_initiated`, so the `call.gather.ended` event Telnyx sends when a digit
+///   is pressed was acked with `{"commands":[]}`. The Telnyx OpenAPI spec is explicit that this is
+///   the event that carries them (`payload.digits`, `payload.status` ∈ valid|invalid|call_hangup|
+///   cancelled|cancelled_amd|timeout), i.e. the digit reached no route, no task and no row.
+/// * **There was nothing to press it for.** A gather with neither `audio_url` nor `media_name` plays
+///   no prompt, so the caller hears silence and is never told to press anything; and no surface ever
+///   promised DTMF. A census over the served roots (`www/`, `www-app/`, `www-admin/` in the repo and
+///   under `/opt/swift/nginx/`) for gather|DTMF|IVR|keypad|press-a-digit returned 0 hits.
+/// * **The command was not the provider's shape.** The spec has no `options` key at all (0
+///   occurrences in the OpenAPI document), and the option names used here — `max_digits` (0
+///   occurrences) and `inter_digit_timeout_ms` (0 occurrences) — are not the documented
+///   `maximum_digits` / `inter_digit_timeout_millis`; `invalid_audio_url` was set to the literal
+///   `"default"`, which is not a URL of a WAV or MP3 file.
+/// * **The app has never taken a call.** `phone_numbers` = 0, `telnyx_config` = 0,
+///   `inbound_calls` = 0 on live.
+///
+/// Wiring instead would have meant inventing a product surface — a prompt asset and a digit→action
+/// contract — for a behaviour nothing advertises, and there is no `POST /api/v1/calls/:id/respond`
+/// counterpart a caller could already reach. The `answer` command is KEPT, so the handled call flow
+/// (the call is answered, one credit is deducted, `inbound_calls` / `call_logs` are written, and the
+/// CoreSwift lead push and the response-rule evaluation are spawned) is exactly as before.
+fn answer_response() -> Json<Value> {
     Json(json!({
-        "commands": [
-            {
-                "type": "answer"
-            },
-            {
-                "type": "gather_using_audio",
-                "options": {
-                    "invalid_audio_url": "default",
-                    "inter_digit_timeout_ms": 2000,
-                    "max_digits": 1,
-                    "timeout_millis": 10000
-                }
-            }
-        ]
+        "commands": [{
+            "type": "answer"
+        }]
     }))
 }
 
@@ -514,13 +496,14 @@ pub async fn webhook(
         });
     }
 
-    // -- 8. Return Telnyx call-control commands (answer + gather)
+    // -- 8. Return the Telnyx call-control reply: ANSWER ONLY (kanban t_6e679d39 — the gather arm
+    //        is retired; see `answer_response` for the four measurements behind it).
     tracing::info!(
-        "Processed Telnyx call for tenant {}: call_id={}",
+        "Processed Telnyx call for tenant {}: call_id={} (call-control reply: answer only; the gather arm is retired)",
         tenant_id,
         call_id
     );
-    Ok(answer_and_gather_response())
+    Ok(answer_response())
 }
 
 // ---------------------------------------------------------------------------

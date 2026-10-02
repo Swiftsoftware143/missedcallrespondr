@@ -711,7 +711,9 @@
     from your provider's dashboard to point to
     <code>https://app.missedcallrespondr.com/api/v1/telnyx/webhook</code>. That one public URL carries
     both the call events (which raise the Call Log entry and run your Response Rules) and the message
-    delivery events (which set a text's Sent/Delivered times).
+    delivery events (which set a text's Sent/Delivered times). The platform answers the call and plays
+    no prompt — it collects no keypad input — so the only thing a caller ever receives is what your
+    Response Rules arrange: a text back, or a callback for you on the Follow-ups screen.
   </p>
 
   <h3>Can I have multiple response rules active at the same time?</h3>

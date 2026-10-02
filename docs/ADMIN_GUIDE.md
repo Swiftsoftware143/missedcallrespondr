@@ -304,13 +304,31 @@ inbound call", while no inbound-call path read the table — no rule had ever fi
   `call_received`/`call_initiated`, after the tenant is resolved by the CALLED number, the credit is
   taken and `inbound_calls` / `call_logs` are written. The evaluation is SPAWNED (like the CoreSwift
   lead push), so a slow provider call can never delay the call-control answer Telnyx is waiting for.
+- **The call-control reply is `{"commands":[{"type":"answer"}]}`** (kanban t_6e679d39). The handled
+  arm answers the call and asks Telnyx for nothing else; the `gather_using_audio` command it used to
+  carry is retired, judged by measurement: (a) nothing consumed the digits — the receiver matches
+  only `call_received`/`call_initiated`, so the `call.gather.ended` event Telnyx sends when a key is
+  pressed (the Telnyx OpenAPI spec: its payload carries `digits` and a `status` of
+  valid|invalid|call_hangup|cancelled|cancelled_amd|timeout) was acked with `{"commands":[]}` and the
+  digit reached no route, task or row; (b) there was nothing to press it for — a gather with neither
+  `audio_url` nor `media_name` plays no prompt, so the caller hears silence and is never told to
+  press anything, and a census of every served root plus the `www*` assets for
+  gather/DTMF/IVR/keypad/press-a-digit found no promise anywhere; (c) the command was not the
+  provider's shape — the spec defines no `options` key (0 occurrences in the OpenAPI document) and
+  the option names sent (`max_digits`, `inter_digit_timeout_ms`) do not exist in it (the documented
+  keys are `maximum_digits` / `inter_digit_timeout_millis`), while `invalid_audio_url` held the
+  literal `"default"`, not a URL of a WAV/MP3 file; (d) this app has never taken a call
+  (`phone_numbers` = 0, `telnyx_config` = 0, `inbound_calls` = 0). Answering is unchanged, so the
+  credit, the `inbound_calls`/`call_logs` rows and the spawned CoreSwift push / rule evaluation are
+  exactly as before, and every other event — `call.gather.ended` included — is still acked with
+  empty commands.
 - **Order.** `SELECT … WHERE tenant_id = $1 AND is_active = true ORDER BY priority ASC, created_at
   ASC`. The FIRST rule whose trigger matches fires and the rest are skipped for that call; no match
   means no action. `priority` was added by migration 000025 (`INTEGER NOT NULL DEFAULT 100`); the
   console's list is ordered the same way, so the screen shows the evaluation order.
 - **Triggers** (`trigger_condition`): `all_missed_calls` (every inbound call — this service records
-  every ring as missed, then answers the call and gathers a digit; no recording is requested any more
-  and none is ever stored, see the Voicemail row of Module Handlers, kanban t_1d4fc956),
+  every ring as missed, then answers the call and asks nothing more of it; see the call-control reply
+  above and the Voicemail row of Module Handlers, kanban t_1d4fc956),
   `specific_numbers`
   (`schedule.numbers`, matched on digits with a >= 7-digit floor so a 10-digit local form matches the
   E.164 caller), `time_of_day` (`schedule.window.start/end`, "HH:MM", a window may cross midnight),
