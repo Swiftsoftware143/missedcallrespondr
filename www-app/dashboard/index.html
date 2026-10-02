@@ -307,25 +307,33 @@ const Templates = () => {
 
 // ===== MESSAGES =====
 const Messages = () => {
-  const st = viewState('messages', { list: [], showModal: false });
+  const st = viewState('messages', { list: [], numbers: [], showModal: false });
   const load = async () => { try { const d = await API.get('/messages'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
-  if (!st._loaded) { st._loaded = true; load(); }
+  // kanban t_50239b29 — the Send form must POST the route's OWN shape (CreateMessageRequest:
+  // direction/from_number/to_number/body). from_number is the tenant's own sending number, read from
+  // the scoped endpoint GET /api/v1/telnyx/numbers (there is no /api/v1/phone-numbers route); it is
+  // the empty string for a tenant that owns none — the client never invents a number.
+  const loadNumbers = async () => { try { const d = await API.get('/telnyx/numbers'); st.numbers = Array.isArray(d) ? d : (d && Array.isArray(d.numbers) ? d.numbers : []); renderApp(); } catch (e) { st.numbers = []; } };
+  if (!st._loaded) { st._loaded = true; load(); loadNumbers(); }
   const hide = () => { st.showModal = false; renderApp(); };
   const send = async (data) => { try { await API.post('/messages', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Messages</h2><button class="btn btn-sm btn-green" onClick=${() => { st.formSeeded = false; st.showModal = true; renderApp(); }}>+ Send Message</button></div>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Sent</th></tr></thead>
-        <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${m.status==='sent'||m.status==='delivered'?'badge-green':'badge-yellow'}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${m.created_at?new Date(m.created_at).toLocaleDateString():'-'}</td></tr>`)}
+        <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to_number||m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${m.status==='sent'||m.status==='delivered'?'badge-green':'badge-yellow'}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${m.created_at?new Date(m.created_at).toLocaleDateString():'-'}</td></tr>`)}
         ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No messages yet.</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">Send Message</h3>
-      ${(() => { const f = viewState('messages_form', { to: '', body: '' });
+      ${(() => { const f = viewState('messages_form', { from: '', to: '', body: '' });
         // kanban t_02ef49ca — CREATE-only draft, no row to re-seed from; shared so a renderApp()
         // while the modal is open cannot reset it to the literals.
-        if (!st.formSeeded) { f.to = ''; f.body = ''; st.formSeeded = true; }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">To (phone)</label><input class="input" value=${f.to} onInput=${e => f.to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="4" value=${f.body} onInput=${e => f.body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => send({ to: f.to, body: f.body })}>Send</button></div></div>`; })()}
+        // kanban t_50239b29 — the From number is seeded from the tenant's OWN numbers
+        // (GET /api/v1/telnyx/numbers) so a provisioned tenant just hits Send; the operator can
+        // correct it, and the client never invents a number the tenant does not own.
+        if (!st.formSeeded) { const n0 = (st.numbers || [])[0] || {}; f.from = n0.number || n0.phone_number || ''; f.to = ''; f.body = ''; st.formSeeded = true; }
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">From (your number)</label><input class="input" value=${f.from} onInput=${e => f.from=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">To (phone)</label><input class="input" value=${f.to} onInput=${e => f.to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="4" value=${f.body} onInput=${e => f.body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => { const from = (f.from || '').trim(), to = (f.to || '').trim(); if (!from || !to) { alert('Enter your sending number (From) and the recipient number (To) before sending.'); return; } send({ direction: 'outbound', from_number: from, to_number: to, body: f.body }); }}>Send</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
