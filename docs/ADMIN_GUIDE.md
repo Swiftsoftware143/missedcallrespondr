@@ -155,7 +155,6 @@ setting, not a control.
 
 | Module | Handler | Description |
 |---|---|---|
-| Affiliates | `affiliates_handler` | Affiliate/commission tracking |
 | API Keys | `api_key_handler` | API key management |
 | Call Logs | `call_log_handler` | Inbound/outbound call records |
 | Contacts | `contact_handler` | Contact management |
@@ -173,6 +172,14 @@ setting, not a control.
 | Telnyx | `telnyx_handler` | Telnyx API bridge |
 | Triggers | `triggers_handler` | Trigger automation rules |
 | Voicemail | `voicemail_handler` | Voicemail detection + handling |
+
+**Affiliates are not a module of this app (kanban t_5deebeb1).** The affiliate system lives in
+FunnelSwift; this app only *connects* to it, over two outbound `x-internal-key` wires, with no local
+affiliate store involved: `plans_handler::notify_funnelswift_upgrade` POSTs
+`{FUNNELSWIFT_URL}/api/v1/internal/affiliate/upgrade-event` when a tenant moves to a PAID plan, and
+`checkout_handler` POSTs `{FUNNELSWIFT_URL}/api/v1/webhooks/conversion` when a checkout completes
+with referral metadata. The former in-app `affiliates_handler` CRUD (and its `/api/v1/affiliates`
+routes and admin-console panel actions) is retired.
 
 ## Monitoring
 

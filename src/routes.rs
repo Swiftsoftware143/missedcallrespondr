@@ -276,18 +276,13 @@ pub fn create_router(state: AppState) -> Router {
             put(integration_target_handler::update_integration_target)
                 .delete(integration_target_handler::delete_integration_target),
         )
-        // Affiliates
-        .route(
-            "/api/v1/affiliates",
-            get(crate::handlers::affiliates_handler::list)
-                .post(crate::handlers::affiliates_handler::create),
-        )
-        .route(
-            "/api/v1/affiliates/:id",
-            get(crate::handlers::affiliates_handler::get)
-                .put(crate::handlers::affiliates_handler::update)
-                .delete(crate::handlers::affiliates_handler::delete),
-        )
+        // Affiliates: retired (kanban t_5deebeb1). The affiliate system lives ONLY in FunnelSwift
+        // and this app CONNECTS to it — the two outbound wires are what remains, and they never
+        // touched a local table: `notify_funnelswift_upgrade` (plans_handler.rs) POSTs
+        // `/api/v1/internal/affiliate/upgrade-event`, and the checkout completion handler
+        // (checkout_handler.rs) POSTs `/api/v1/webhooks/conversion`. The local `affiliates` CRUD
+        // (`list`/`create`/`get`/`update`/`delete` over this app's own empty `affiliates` table)
+        // is gone: routes, handler and module declaration.
         // Provider Keys
         .route(
             "/api/v1/provider-keys",
