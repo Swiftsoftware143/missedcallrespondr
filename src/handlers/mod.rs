@@ -30,7 +30,6 @@ pub mod provider_keys_handler;
 pub mod response_rule_handler;
 pub mod settings_handler;
 pub mod tag_groups_handler;
-pub mod tag_provision_handler;
 pub mod tags_handler;
 pub mod telnyx_handler;
 pub mod tickets_handler;
@@ -49,8 +48,3 @@ mod swallow_tests;
 // Test-only: the empty-`x-internal-key` guard legs (card t_eb7736b8). Excluded from release builds.
 #[cfg(test)]
 mod internal_key_guard_tests;
-
-// Test-only: the tag-provision owner-tenant legs (card t_c9669881) — the handler must never bind a
-// hardcoded tenant uuid again. Excluded from release builds.
-#[cfg(test)]
-mod tag_provision_tenant_tests;

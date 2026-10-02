@@ -29,9 +29,13 @@ async fn plan_slug(pool: &PgPool, tenant_id: Uuid) -> Result<Option<String>, App
 /// gates below returned `Ok(())`, and "no plan" therefore meant NO ALLOWANCE AT ALL on any of the
 /// 15 numeric dimensions `count_usage` knows and on every boolean flag — strictly more than the top tier gets. That
 /// was live, not theoretical: 4 of the 6 tenants in the live database carried no `tenant_plans`
-/// row (the `funnelswift` provision owner seeded by `migrations/000018_funnelswift_tenant.sql`,
-/// plus tenants created outside registration), and `POST /api/v1/internal/tag-provision` answered
-/// 201 for the 6th contact on a tenant the free tier caps at 5 — the finding that raised this card.
+/// row (the `funnelswift` provision owner seeded by what was then
+/// `migrations/000018_funnelswift_tenant.sql`, plus tenants created outside registration), and
+/// `POST /api/v1/internal/tag-provision` answered 201 for the 6th contact on a tenant the free
+/// tier caps at 5 — the finding that raised this card. That route, its owner-tenant migration and
+/// its `TAG_PROVISION_TENANT_SLUG` were themselves retired as uncalled by kanban t_c2353c90; the
+/// decision recorded here stands on its own, and the live `funnelswift` row — owned by no code now
+/// — is simply one of the plan-less tenants this floor applies to.
 ///
 /// DECISION (arm (a) of the three weighed): fall back at the READ, inside the one function both
 /// gates share, so every dimension, every route and every plan-less tenant move together.

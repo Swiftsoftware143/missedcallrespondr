@@ -7,7 +7,7 @@
 //! parked with no response inside a 45 s budget — the public receivers a stranger can reach
 //! (`POST /api/v1/telnyx/webhook`, `POST /api/v1/webhooks/stripe`, `POST /api/v1/webhooks/paypal`),
 //! the unauthenticated `POST /api/v1/internal/*` push routes (`/portfolio-companies`,
-//! `/portfolio-sync`, `/tag-provision`), the `/api/v1/auth/*` receivers, and the protected surface
+//! `/portfolio-sync`), the `/api/v1/auth/*` receivers, and the protected surface
 //! carrying a real session (`POST /api/v1/tags`, `POST /api/v1/contacts`, `PUT /api/v1/settings`).
 //! WorkflowSwift closed the same hole in t_e7cba83e (408 at t+30.0 s), ADASwift in t_b3d626ed,
 //! FunnelSwift in t_488a19d4 and CoreSwift-CRM in t_59745689; this is the missedcallrespondr arm of
@@ -28,7 +28,7 @@ use tracing::warn;
 /// `config.rs`, so neither a typo nor a fat finger can shed real traffic).
 ///
 /// 30 s is orders of magnitude above the time a real body on these routes takes — a Telnyx event, a
-/// Stripe delivery or a tag-provision push is kilobytes over a same-region link — and still generous
+/// Stripe delivery or a portfolio-sync push is kilobytes over a same-region link — and still generous
 /// to a slow sender: a full 2 MiB body (axum's default limit, which this app does not raise
 /// anywhere) may arrive as slowly as ~70 KiB/s and complete inside it.
 pub const DEFAULT_BODY_READ_DEADLINE_SECS: u64 = 30;

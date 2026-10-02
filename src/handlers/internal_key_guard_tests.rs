@@ -20,7 +20,6 @@ use serde_json::json;
 use super::portfolio_handler;
 use super::portfolio_sync_handler;
 use super::swallow_tests::{capture, test_state};
-use super::tag_provision_handler::{self, TagProvisionRequest};
 use crate::error::AppError;
 
 /// The swallow harness's state (dead pool, so nothing can be written) with the ONE difference
@@ -103,38 +102,6 @@ fn portfolio_sync_refuses_absent_and_empty_header_on_an_empty_configured_key() {
 }
 
 #[test]
-fn tag_provision_refuses_absent_and_empty_header_on_an_empty_configured_key_without_logging_it() {
-    for presented in UNAUTHENTICATED {
-        let (res, log) = capture(move || {
-            let state = empty_key_state();
-            let h = headers(presented);
-            let body: TagProvisionRequest = serde_json::from_value(json!({
-                "contact": {"email": "guard-probe@example.invalid"},
-                "tag": {"name": "guard-probe"},
-                "source": "test",
-                "timestamp": "test"
-            }))
-            .expect("probe body deserializes");
-            async move {
-                tag_provision_handler::handle_tag_provision(State(state), h, axum::Json(body)).await
-            }
-        });
-        assert!(
-            refused(&res),
-            "tag-provision must refuse {presented:?} when the configured key is empty"
-        );
-        assert!(
-            log.contains("presented_len="),
-            "the refusal must be logged by length, not by value: {log}"
-        );
-        assert!(
-            !log.contains("wrong-key"),
-            "an invalid key must never reach the log stream: {log}"
-        );
-    }
-}
-
-#[test]
 fn old_shape_authorised_an_absent_header_on_an_empty_configured_key() {
     // Control: the exact pre-fix expression, on the same inputs the legs above use. `key` came
     // from `.unwrap_or("")`, so an absent header compared EQUAL to an empty configured key and
@@ -167,21 +134,16 @@ fn a_real_key_still_passes_the_gate_and_a_wrong_one_does_not() {
         "the configured key must still pass the gate: {res:?}"
     );
 
+    // `POST /api/v1/internal/tag-provision` — the third route these legs used to arm — was deleted
+    // as uncalled (kanban t_c2353c90). `portfolio_companies`/`portfolio_sync` are the two
+    // internal-key routes that remain, so the wrong-key direction is pinned on the second of them.
     let (res, _log) = capture(|| {
         let state = keyed_state("guard-test-key");
         async move {
-            tag_provision_handler::handle_tag_provision(
+            portfolio_sync_handler::portfolio_sync_internal(
                 State(state),
                 headers(Some("not-the-key")),
-                axum::Json(
-                    serde_json::from_value::<TagProvisionRequest>(json!({
-                        "contact": {"email": "guard-probe@example.invalid"},
-                        "tag": {"name": "guard-probe"},
-                        "source": "test",
-                        "timestamp": "test"
-                    }))
-                    .expect("probe body deserializes"),
-                ),
+                axum::Json(json!({"action": "create"})),
             )
             .await
         }

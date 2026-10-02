@@ -99,16 +99,11 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000017_email_templates_schema",
             include_str!("../migrations/000017_email_templates_schema.sql"),
         ),
-        // 000018 owns the tenant that receives contacts auto-provisioned by the FunnelSwift
-        // tag-provision webhook. The handler used to bind a hardcoded tenant uuid that existed in
-        // NO database, so every provision of a new email died on contacts_tenant_id_fkey with a
-        // 500 (t_c9669881). The handler now resolves its owner by SLUG at runtime; this migration
-        // is what makes that slug exist on a fresh database. Idempotent (ON CONFLICT (slug) DO
-        // NOTHING), so it is a no-op on a database whose operator already owns that slug.
-        (
-            "000018_funnelswift_tenant",
-            include_str!("../migrations/000018_funnelswift_tenant.sql"),
-        ),
+        // 000018 (`funnelswift_tenant`) was RETIRED 2026-10-01 (kanban t_c2353c90) together with the
+        // route it existed for: `POST /api/v1/internal/tag-provision` had no caller (zero readers of
+        // `MISSEDCALL_WEBHOOK_URL` anywhere) and the sibling app's push family was removed
+        // 2026-09-25, so nothing resolves this slug any more and a fresh database must not seed a
+        // tenant no code owns. A database that already has the row keeps it — nothing reads it.
         // 000019 shipped 2026-09-26 (t_158bf73d, the Stripe receiver's two refusal arms) and was
         // NEVER registered here, so it reached NO database, fresh or live — the live
         // `payment_webhook_events` was missing the `error_message` column and the status CHECK's

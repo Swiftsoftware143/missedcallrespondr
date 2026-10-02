@@ -66,11 +66,17 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/checkout/session/:id",
             get(checkout_handler::get_checkout_session_public),
         )
-        // FunnelSwift tag provision webhook — auto-provision contacts (no JWT, internal key)
-        .route(
-            "/api/v1/internal/tag-provision",
-            post(crate::handlers::tag_provision_handler::handle_tag_provision),
-        )
+        // REMOVED 2026-10-01 (kanban t_c2353c90): `POST /api/v1/internal/tag-provision` is gone.
+        // It existed to receive FunnelSwift's per-app tag push, and that sender was retired
+        // 2026-09-25 with the whole `<APP>_WEBHOOK_URL ... /api/v1/internal/tag-provision` family
+        // (FunnelSwift cards t_8803c75e / t_ae84b186 / t_65084d8b / t_0a6a93f1); FunnelSwift's tag
+        // path posts only to CoreSwift's `/api/v1/webhooks/cross-app/tag-sync` (tag_logic.rs).
+        // Measured before deleting: zero readers of `MISSEDCALL_WEBHOOK_URL` in any tree, served
+        // root, script or workflow; every nginx hit was a local audit probe; and the owner tenant
+        // the handler provisioned into (`funnelswift`, migrations/000018) held 0 contacts. This app
+        // PRODUCES into the hub (coreswift_external::push_lead_to_coreswift) — it does not consume
+        // another app's leads. Do not re-add a receiver here without a caller: WorkflowSwift's
+        // router carries the same note (card t_79d7d1d2).
         // THE PUBLIC RECEIVERS FIRST (kanban t_7f688018). `/api/v1/telnyx/webhook`, the two payment
         // webhooks, the `X-Internal-Key` `/api/v1/internal/*` push routes and the
         // `/api/v1/auth/*` receivers are the routes a stranger with no credential can reach, and

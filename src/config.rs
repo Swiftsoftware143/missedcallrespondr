@@ -9,12 +9,6 @@ pub struct AppConfig {
     pub server_host: String,
     pub internal_sync_key: String,
     pub funnelswift_url: String,
-    /// Slug of the tenant that owns contacts auto-provisioned by the FunnelSwift tag-provision
-    /// webhook (t_c9669881). It used to be a hardcoded tenant UUID in the handler, and that UUID
-    /// exists in no database, so every provision 500'd on contacts_tenant_id_fkey. An owner that
-    /// is a NAME cannot drift out of existence: the handler looks the slug up at runtime and
-    /// creates the tenant on first use.
-    pub tag_provision_tenant_slug: String,
     /// PayPal's public webhook identifier (PayPal dashboard → app → Webhooks) used by the
     /// `POST /api/v1/webhooks/paypal` receiver to verify `paypal-transmission-sig` against
     /// PayPal's `verify-webhook-signature` API.
@@ -76,11 +70,8 @@ impl AppConfig {
             internal_sync_key: required_secret("INTERNAL_SYNC_KEY"),
             funnelswift_url: std::env::var("FUNNELSWIFT_URL")
                 .unwrap_or_else(|_| "http://localhost:8080".into()),
-            // Not a secret, and deliberately NOT a uuid: the tag-provision owner is resolved by
-            // slug at runtime. Same value as migrations/000018_funnelswift_tenant.sql so a fresh
-            // database and the handler agree; migration 000018 is what makes the row exist.
-            tag_provision_tenant_slug: std::env::var("TAG_PROVISION_TENANT_SLUG")
-                .unwrap_or_else(|_| "funnelswift".into()),
+            // `TAG_PROVISION_TENANT_SLUG` went with `POST /api/v1/internal/tag-provision` (kanban
+            // t_c2353c90): the route had no caller, so nothing reads the slug any more.
             // Optional, empty when unset: see the field's doc comment. Read once here so the
             // webhook receiver never has to touch the environment per request.
             paypal_webhook_id: std::env::var("PAYPAL_WEBHOOK_ID").unwrap_or_default(),
