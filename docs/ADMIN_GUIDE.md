@@ -95,6 +95,62 @@ without reading container logs. A deliberate *test* send reports its result inli
 overwrite that row. A failed credential mail is never fatal to account creation — the loud
 `account created but the WELCOME/CREDENTIALS EMAIL FAILED` line plus `email_last_send` are the signal.
 
+## Plans, tiers and the plan feature registry
+
+Four live tiers: **Enterprise** (the TOP tier), Pro, Pro Monthly and Free. "Top" is established from
+LIVE data, not from the name — the first ACTIVE row in the panel's own order (`sort_order`, then
+`price_monthly`, then `price`, then slug). The registry catalogue reports the winner as `top_plan`.
+
+**The standing rule (David, 2026-09-23): the top tier gets everything.** Every key the app's feature
+registry defines must be granted on the top tier. Two keys were granted by no plan at all before
+this was applied, which meant the gate REFUSED the top tier: `has_calendar` (the Calendar flag) and
+`bring_your_own_key` (Bring Your Own Telnyx Key).
+
+### Where the plan × feature controls are
+
+Operator console → **"3b. Plan Feature Registry (every gated feature × every plan)"**. It lists every
+registry key with its current value for EVERY plan in one table, plus the columns `what`, `kind`,
+`if_unset` (what a missing value means) and `enforced_by` (the route that enforces it).
+
+Three controls:
+
+| Control | What it does |
+|---|---|
+| **Set plan feature** | Writes one registry key on one plan. Fields: `plan` (slug, e.g. `enterprise`), `feature` (a key from the `feature` column), `value`. The response echoes the value the gate now resolves. |
+| **Grant the TOP tier every missing registry key** | Re-applies the standing rule, gap-filling only: a key the top tier already grants is left untouched (a cap you set is never raised to unlimited by pressing it). Safe to press again — a second press grants nothing. |
+| **Show the raw catalogue (JSON)** | The same data as JSON: `registry` (the keys), `plans` (values + `sources`), `grant_matrix`, `superset_ok`/`superset_violations`. |
+
+### The value vocabulary (identical in the panel, the API and the gate)
+
+* **`-1`** = unlimited / granted
+* **`0`** = NOT available on this plan — the gate refuses the action (402)
+* **`N` > 0** = a cap of N (the gate refuses once usage reaches N)
+* On/off features (`has_calendar`, `bring_your_own_key`): non-zero = on, `0` = off
+
+**`if_unset` matters.** A key with no value at all is NOT a denial: a *limit* with no row is allowed
+(the gate is inert), while an *on/off* feature with no row is REFUSED. That asymmetry is why
+`has_calendar` refused every tier: nobody had granted it anywhere.
+
+Plan keys are stored in two places and the panel writes the right one for you: `feature_limits`
+(one row per plan × key — the panel-managed grant) for most keys, and the plan's own column
+(`max_leads`) where the plan model has one. An explicit `features."<key>"` override written with
+"Set plan features (JSON)" resolves BEFORE a column, so if one exists the Set-plan-feature response
+returns a `warning` telling you so.
+
+### "Set plan features (JSON)" — object-shaped plans only
+
+That action merges raw JSON into `plans.features`. Enterprise and Pro carry `features` as a JSON
+**ARRAY** of marketing tags, and merging an object into an array appends an element no gate can read
+— so the action now answers **400** instead of pretending to save. Grant registry keys with
+**Set plan feature** in section 3b.
+
+### What the registry does NOT cover
+
+Three limits are declared in the plan data but are read by NO gate, so they cap nothing today:
+`max_users` and `max_phone_numbers` (values in `plans.features` on Free / Pro Monthly) and `max_tags`
+(the `plans.max_tags` column). They are reported, not enforced — a plan value nobody reads is a
+setting, not a control.
+
 ## Module Handlers
 
 | Module | Handler | Description |

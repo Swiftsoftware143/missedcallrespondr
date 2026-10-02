@@ -315,6 +315,30 @@ pub async fn admin_update_plan_features(
     let features = req
         .get("features")
         .ok_or_else(|| AppError::BadRequest("features object required".into()))?;
+
+    // Shape guard (kanban t_dd2f7e32). This action MERGES jsonb (`features || $1`), and Postgres
+    // concatenates array-with-array or object-with-object — so merging an object into a plan whose
+    // `features` is an ARRAY of marketing tags (enterprise, pro live that way) APPLIES the object as
+    // an extra array ELEMENT: the request answers 200, the panel shows a save, and `features->>'key'`
+    // still resolves NULL — i.e. a grant that grants nothing, with no error anywhere. Refuse the
+    // mixed write instead of storing a value no gate can read.
+    let current: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT features FROM plans WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten();
+    let current = current.ok_or_else(|| AppError::NotFound("Plan not found".into()))?;
+    if current.is_array() != features.is_array() {
+        return Err(AppError::BadRequest(format!(
+            "plans.features on this plan is a JSON {}; merging a JSON {} into it would append an \
+             element no gate can read (silently doing nothing). Grant a registry key with the panel's \
+             `Set plan feature` control (PUT /api/v1/admin/plans/entitlement) instead.",
+            if current.is_array() { "array" } else { "object" },
+            if features.is_array() { "array" } else { "object" }
+        )));
+    }
+
     let features_str = features.to_string();
     sqlx::query(
         "UPDATE plans SET features = COALESCE(features::text, '{}')::jsonb || $1::jsonb, updated_at=NOW() WHERE id=$2"
@@ -324,6 +348,490 @@ pub async fn admin_update_plan_features(
     .execute(&state.pool)
     .await?;
     Ok(Json(json!({"message": "Features updated"})))
+}
+
+/// GET /api/v1/admin/plans/registry — the plan × feature CATALOGUE (kanban t_dd2f7e32).
+///
+/// One row per registry key, one column per live plan, plus the resolved value and its SOURCE for
+/// every plan × key. Both halves come from `crate::features::{resolve_limit, resolve_flag}` — the
+/// very functions the gates call — so "what the panel shows" is, by construction, the trade the
+/// gate enforced (the card's requirement 4: gate == panel).
+///
+/// `top_plan` is established from LIVE data (first ACTIVE row in the panel's own order: `sort_order`,
+/// then `price_monthly`, then `price`, then slug) — not from the plan's name.
+pub async fn plan_registry(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    use sqlx::Row;
+    let rows = sqlx::query(
+        "SELECT id, name, slug, is_active, sort_order, price_monthly::float8 AS price_monthly, \
+         price::float8 AS price FROM plans \
+         ORDER BY is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut plan_rows: Vec<(Uuid, String, String, bool, i32, f64)> = Vec::new();
+    for r in &rows {
+        plan_rows.push((
+            r.try_get::<Uuid, _>("id").unwrap_or_default(),
+            r.try_get::<String, _>("slug").unwrap_or_default(),
+            r.try_get::<String, _>("name").unwrap_or_default(),
+            r.try_get::<bool, _>("is_active").unwrap_or(true),
+            r.try_get::<i32, _>("sort_order").unwrap_or(0),
+            money(r, "price_monthly"),
+        ));
+    }
+    let top_slug = plan_rows
+        .first()
+        .map(|p| p.1.clone())
+        .ok_or_else(|| AppError::NotFound("No plans are defined".into()))?;
+
+    // Resolve every registry key for every plan, remembering value + source per kind.
+    let mut limit_vals: std::collections::HashMap<(String, String), Option<i64>> =
+        Default::default();
+    let mut limit_src: std::collections::HashMap<(String, String), &'static str> =
+        Default::default();
+    let mut flag_vals: std::collections::HashMap<(String, String), Option<bool>> =
+        Default::default();
+    let mut flag_src: std::collections::HashMap<(String, String), &'static str> =
+        Default::default();
+    let mut matrix: Vec<serde_json::Value> = Vec::new();
+
+    for plan in &plan_rows {
+        for def in crate::feature_registry::REGISTRY {
+            match def.kind {
+                crate::feature_registry::FeatureKind::Limit => {
+                    let (v, src) =
+                        crate::features::resolve_limit(&state.pool, &plan.1, def.key).await?;
+                    limit_vals.insert((plan.1.clone(), def.key.to_string()), v);
+                    limit_src.insert((plan.1.clone(), def.key.to_string()), src.as_str());
+                }
+                crate::feature_registry::FeatureKind::Boolean => {
+                    let (v, src) =
+                        crate::features::resolve_flag(&state.pool, &plan.1, def.key).await?;
+                    flag_vals.insert((plan.1.clone(), def.key.to_string()), v);
+                    flag_src.insert((plan.1.clone(), def.key.to_string()), src.as_str());
+                }
+            }
+        }
+    }
+
+    // The superset claim: no OTHER plan may beat the top tier on any registry key. Asserting it is
+    // the whole point of the card — "it has rows now" is not the property.
+    let mut violations: Vec<String> = Vec::new();
+    for def in crate::feature_registry::REGISTRY {
+        for plan in &plan_rows {
+            if plan.1 == top_slug {
+                continue;
+            }
+            match def.kind {
+                crate::feature_registry::FeatureKind::Limit => {
+                    let top = limit_vals
+                        .get(&(top_slug.clone(), def.key.to_string()))
+                        .copied()
+                        .flatten();
+                    let other = limit_vals
+                        .get(&(plan.1.clone(), def.key.to_string()))
+                        .copied()
+                        .flatten();
+                    let top_unlimited = top.map(|v| v < 0).unwrap_or(true);
+                    if top_unlimited {
+                        continue;
+                    }
+                    let top_cap = top.unwrap_or(0);
+                    let beats = match other {
+                        // unset ⇒ the absence rule ALLOWS, i.e. effectively unlimited ⇒ beats a cap
+                        None => true,
+                        Some(v) if v < 0 => true,
+                        Some(v) => v > top_cap,
+                    };
+                    if beats {
+                        violations.push(format!(
+                            "{}: {} resolves {:?} while the top tier ({}) is capped at {}",
+                            def.key, plan.1, other, top_slug, top_cap
+                        ));
+                    }
+                }
+                crate::feature_registry::FeatureKind::Boolean => {
+                    let top = flag_vals
+                        .get(&(top_slug.clone(), def.key.to_string()))
+                        .copied()
+                        .flatten();
+                    let other = flag_vals
+                        .get(&(plan.1.clone(), def.key.to_string()))
+                        .copied()
+                        .flatten();
+                    if top != Some(true) && other == Some(true) {
+                        violations.push(format!(
+                            "{}: {} is granted while the top tier ({}) is not",
+                            def.key, plan.1, top_slug
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // The panel's table: one row per registry key, one column per live plan, flat strings.
+    for def in crate::feature_registry::REGISTRY {
+        let mut row = serde_json::Map::new();
+        row.insert("feature".into(), json!(def.key));
+        row.insert("what".into(), json!(def.label));
+        row.insert(
+            "kind".into(),
+            json!(match def.kind {
+                crate::feature_registry::FeatureKind::Limit => "limit",
+                crate::feature_registry::FeatureKind::Boolean => "boolean",
+            }),
+        );
+        row.insert("if_unset".into(), json!(def.unset_means()));
+        row.insert("enforced_by".into(), json!(def.enforced_by));
+        for plan in &plan_rows {
+            let cell = match def.kind {
+                crate::feature_registry::FeatureKind::Limit => {
+                    match limit_vals
+                        .get(&(plan.1.clone(), def.key.to_string()))
+                        .copied()
+                        .flatten()
+                    {
+                        Some(v) if v < 0 => format!("unlimited ({})", v),
+                        Some(0) => "NOT available (0)".to_string(),
+                        Some(v) => format!("cap {}", v),
+                        None => "unset -> allowed".to_string(),
+                    }
+                }
+                crate::feature_registry::FeatureKind::Boolean => {
+                    match flag_vals
+                        .get(&(plan.1.clone(), def.key.to_string()))
+                        .copied()
+                        .flatten()
+                    {
+                        Some(true) => "granted".to_string(),
+                        Some(false) => "NOT granted".to_string(),
+                        None => "unset -> refused".to_string(),
+                    }
+                }
+            };
+            row.insert(plan.1.clone(), json!(cell));
+        }
+        matrix.push(serde_json::Value::Object(row));
+    }
+
+    // Per-plan detail: the resolved value (typed) + the store it came from.
+    let plans_json: Vec<serde_json::Value> = plan_rows
+        .iter()
+        .map(|p| {
+            let mut values = serde_json::Map::new();
+            let mut sources = serde_json::Map::new();
+            for def in crate::feature_registry::REGISTRY {
+                let k = (p.1.clone(), def.key.to_string());
+                match def.kind {
+                    crate::feature_registry::FeatureKind::Limit => {
+                        values.insert(def.key.into(), json!(limit_vals.get(&k).copied().flatten()));
+                        sources.insert(
+                            def.key.into(),
+                            json!(limit_src.get(&k).copied().unwrap_or("unset")),
+                        );
+                    }
+                    crate::feature_registry::FeatureKind::Boolean => {
+                        values.insert(def.key.into(), json!(flag_vals.get(&k).copied().flatten()));
+                        sources.insert(
+                            def.key.into(),
+                            json!(flag_src.get(&k).copied().unwrap_or("unset")),
+                        );
+                    }
+                }
+            }
+            json!({
+                "id": p.0.to_string(),
+                "slug": p.1,
+                "name": p.2,
+                "is_active": p.3,
+                "sort_order": p.4,
+                "price_monthly": p.5,
+                "is_top": p.1 == top_slug,
+                "values": values,
+                "sources": sources,
+            })
+        })
+        .collect();
+
+    let registry_json: Vec<serde_json::Value> = crate::feature_registry::REGISTRY
+        .iter()
+        .map(|d| {
+            json!({
+                "key": d.key,
+                "label": d.label,
+                "kind": match d.kind {
+                    crate::feature_registry::FeatureKind::Limit => "limit",
+                    crate::feature_registry::FeatureKind::Boolean => "boolean",
+                },
+                "unit": d.unit,
+                "unset_means": d.unset_means(),
+                "enforced_by": d.enforced_by,
+                "storage": match d.storage {
+                    crate::feature_registry::Storage::Column(c) => format!("plans.{c}"),
+                    crate::feature_registry::Storage::FeatureLimits => "feature_limits".to_string(),
+                },
+                "read_by_gate": d.read_by_gate,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "grant_matrix": matrix,
+        "plans": plans_json,
+        "registry": registry_json,
+        "superset_ok": violations.is_empty(),
+        "superset_violations": violations,
+        "top_plan": top_slug,
+        "top_rule": "first ACTIVE plan in the panel's own order: is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC",
+        "value_legend": "-1 = unlimited/granted, 0 = NOT available on this plan, N>0 = a cap of N; booleans: non-zero = on, 0 = off",
+    })))
+}
+
+/// PUT /api/v1/admin/plans/entitlement — the panel's "Set plan feature" control (kanban
+/// t_dd2f7e32). Body: `{"plan": <slug or id>, "feature": <registry key>, "value": <int>}`.
+///
+/// The grant is only "manageable by David" if the panel can express it: this is the write path the
+/// operator console calls, it validates the key against the registry (a typo can never be stored as
+/// a dead plan key), and it answers with the RESOLVED value re-read through the gate's own resolver.
+pub async fn set_plan_entitlement(
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let plan_ref = req
+        .get("plan")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let feature = req
+        .get("feature")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let value = req.get("value").and_then(|v| v.as_i64()).ok_or_else(|| {
+        AppError::BadRequest(
+            "`value` must be an integer (-1 unlimited, 0 not available, N a cap).".into(),
+        )
+    })?;
+
+    let def = crate::feature_registry::find(&feature).ok_or_else(|| {
+        AppError::BadRequest(format!(
+            "Unknown feature key '{}'. Valid keys: {}",
+            feature,
+            crate::feature_registry::keys()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    })?;
+
+    match def.kind {
+        crate::feature_registry::FeatureKind::Boolean => {
+            if !(-1..=1).contains(&value) {
+                return Err(AppError::BadRequest(format!(
+                    "'{}' is an on/off feature: send 1 (granted), 0 (not available) or -1 (granted/unlimited).",
+                    feature
+                )));
+            }
+        }
+        crate::feature_registry::FeatureKind::Limit => {
+            if !(-1..=1_000_000_000).contains(&value) {
+                return Err(AppError::BadRequest(format!(
+                    "'{}' takes -1 (unlimited), 0 (not available) or a positive cap.",
+                    feature
+                )));
+            }
+        }
+    }
+
+    if plan_ref.is_empty() {
+        return Err(AppError::BadRequest(
+            "`plan` is required (plan slug, e.g. `enterprise`).".into(),
+        ));
+    }
+    // Slug first (what the panel's field takes), then an id, so both are usable.
+    let plan_id: Option<Uuid> = match Uuid::parse_str(&plan_ref) {
+        Ok(id) => sqlx::query_scalar("SELECT id FROM plans WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten(),
+        Err(_) => sqlx::query_scalar("SELECT id FROM plans WHERE slug = $1")
+            .bind(&plan_ref)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten(),
+    };
+    let plan_id =
+        plan_id.ok_or_else(|| AppError::NotFound(format!("No plan matches '{plan_ref}'")))?;
+
+    // An explicit `features->>key` override wins over a dedicated column (talisman of t_0e61628c):
+    // say so instead of silently writing a column the gate will not read.
+    let mut warning: Option<String> = None;
+    match def.storage {
+        crate::feature_registry::Storage::Column(col) => {
+            let overridden: Option<String> =
+                sqlx::query_scalar("SELECT features->>$1 FROM plans WHERE id = $2")
+                    .bind(feature.as_str())
+                    .bind(plan_id)
+                    .fetch_optional(&state.pool)
+                    .await?
+                    .flatten();
+            if overridden.is_some() {
+                warning = Some(format!(
+                    "this plan carries an explicit features.\"{feature}\" override, which resolves BEFORE plans.{col}; change it with the raw `Set plan features (JSON)` action"
+                ));
+            }
+            // Compile-time literal per key — a query text built from a run-time string is the gate
+            // 5d defect this fleet already fixed once (class 14).
+            let sql = match col {
+                "max_leads" => "UPDATE plans SET max_leads = $2, updated_at = NOW() WHERE id = $1",
+                _ => {
+                    return Err(AppError::Internal(format!(
+                        "registry key '{feature}' names column '{col}' with no registered UPDATE"
+                    )))
+                }
+            };
+            sqlx::query(sql)
+                .bind(plan_id)
+                .bind(value as i32)
+                .execute(&state.pool)
+                .await?;
+        }
+        crate::feature_registry::Storage::FeatureLimits => {
+            sqlx::query(
+                "INSERT INTO feature_limits (plan_id, feature_key, limit_value) VALUES ($1, $2, $3) \
+                 ON CONFLICT (plan_id, feature_key) DO UPDATE SET limit_value = EXCLUDED.limit_value",
+            )
+            .bind(plan_id)
+            .bind(feature.as_str())
+            .bind(value)
+            .execute(&state.pool)
+            .await?;
+        }
+    }
+
+    let slug: String = sqlx::query_scalar("SELECT slug FROM plans WHERE id = $1")
+        .bind(plan_id)
+        .fetch_one(&state.pool)
+        .await?;
+    // Re-read through the GATE's resolver, so the answer is the trade the app will enforce.
+    let (resolved, source) = match def.kind {
+        crate::feature_registry::FeatureKind::Limit => {
+            let (v, s) = crate::features::resolve_limit(&state.pool, &slug, &feature).await?;
+            (json!(v), s.as_str())
+        }
+        crate::feature_registry::FeatureKind::Boolean => {
+            let (v, s) = crate::features::resolve_flag(&state.pool, &slug, &feature).await?;
+            (json!(v), s.as_str())
+        }
+    };
+
+    Ok(Json(json!({
+        "success": true,
+        "plan": slug,
+        "plan_id": plan_id.to_string(),
+        "feature": feature,
+        "value": value,
+        "storage": match def.storage {
+            crate::feature_registry::Storage::Column(c) => format!("plans.{c}"),
+            crate::feature_registry::Storage::FeatureLimits => "feature_limits".to_string(),
+        },
+        "resolved": resolved,
+        "resolved_from": source,
+        "warning": warning,
+    })))
+}
+
+/// POST /api/v1/admin/plans/grant-top-tier — re-apply David's standing directive ("the top tier
+/// plan gets everything") from the panel, idempotently (kanban t_dd2f7e32).
+///
+/// GAP-FILLING ONLY: a key the top tier already grants is left EXACTLY as it is (a cap David set is
+/// never raised to unlimited by pressing this button); only keys that resolve as unset are seated —
+/// `-1` (unlimited) for a limit, `1` (granted) for an on/off feature. Running it twice changes
+/// nothing the second time, so it is safe to press after adding a key or a plan.
+pub async fn grant_top_tier(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let plan: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, slug FROM plans WHERE is_active \
+         ORDER BY is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC LIMIT 1",
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    let (plan_id, slug) =
+        plan.ok_or_else(|| AppError::NotFound("No active plan to grant".into()))?;
+
+    let mut granted: Vec<String> = Vec::new();
+    let mut already: Vec<String> = Vec::new();
+    for def in crate::feature_registry::REGISTRY {
+        let unresolved = match def.kind {
+            crate::feature_registry::FeatureKind::Limit => {
+                crate::features::resolve_limit(&state.pool, &slug, def.key)
+                    .await?
+                    .0
+                    .is_none()
+            }
+            crate::feature_registry::FeatureKind::Boolean => {
+                crate::features::resolve_flag(&state.pool, &slug, def.key)
+                    .await?
+                    .0
+                    .is_none()
+            }
+        };
+        if !unresolved {
+            already.push(def.key.to_string());
+            continue;
+        }
+        let value: i64 = match def.kind {
+            crate::feature_registry::FeatureKind::Limit => -1, // -1 = unlimited
+            crate::feature_registry::FeatureKind::Boolean => 1, // 1 = granted
+        };
+        match def.storage {
+            crate::feature_registry::Storage::Column(col) => {
+                let sql = match col {
+                    "max_leads" => {
+                        "UPDATE plans SET max_leads = $2, updated_at = NOW() WHERE id = $1"
+                    }
+                    _ => {
+                        return Err(AppError::Internal(format!(
+                            "registry key '{}' names column '{col}' with no registered UPDATE",
+                            def.key
+                        )))
+                    }
+                };
+                sqlx::query(sql)
+                    .bind(plan_id)
+                    .bind(value as i32)
+                    .execute(&state.pool)
+                    .await?;
+            }
+            crate::feature_registry::Storage::FeatureLimits => {
+                sqlx::query(
+                    "INSERT INTO feature_limits (plan_id, feature_key, limit_value) VALUES ($1, $2, $3) \
+                     ON CONFLICT (plan_id, feature_key) DO UPDATE SET limit_value = EXCLUDED.limit_value",
+                )
+                .bind(plan_id)
+                .bind(def.key)
+                .bind(value)
+                .execute(&state.pool)
+                .await?;
+            }
+        }
+        granted.push(def.key.to_string());
+    }
+
+    Ok(Json(json!({
+        "success": true,
+        "top_plan": slug,
+        "granted": granted,
+        "already_granted": already,
+        "note": "gap-filling only: a key the top tier already grants was left untouched",
+    })))
 }
 
 /// Fire-and-forget notification to FunnelSwift that a tenant upgraded to a paid plan,

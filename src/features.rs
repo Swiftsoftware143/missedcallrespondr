@@ -17,30 +17,88 @@ async fn plan_slug(pool: &PgPool, tenant_id: Uuid) -> Result<Option<String>, App
     Ok(slug)
 }
 
-/// Fetch a numeric limit for a feature_key.
-/// Order of resolution (kanban t_0e61628c — one allowance PER DIMENSION, each overridable per plan):
-///   1. `features->>key` — an explicit per-plan OVERRIDE, and it WINS over the plan's own column. The
-///      admin writes it from the panel's own "Set plan features (JSON)" action
-///      (PUT /api/v1/admin/plans/:id/features, src/handlers/plans_handler.rs), so a CONTACT allowance
-///      (or a leads / tags one) can differ from the plan default with no code change and no schema
-///      change. CoreSwift-CRM carries its contact allowance exactly this way: a per-tier
-///      `features.max_contacts` (100 / 500 / 1 000 / 5 000 / 10 000 / 50 000).
-///   2. the dedicated `plans` column for the keys that have one (`max_leads`, `max_tags`) — the
-///      plan's DEFAULT, and where every live plan resolves: no `plans` row in this database carries a
-///      `max_contacts` or `max_leads` features key (census in the t_0e61628c evidence), so adding the
-///      override arm moved no live number.
-///   3. `features->>key` for every other key (max_users, max_rules, max_phone_numbers, ...).
-///   4. None = no limit declared → allow.
-async fn numeric_limit(
+/// WHERE a resolved entitlement came from. The panel's catalogue reports this next to the value,
+/// so "what the panel shows" and "what the gate read" cannot diverge: both call `resolve_limit` /
+/// `resolve_flag` below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// A `feature_limits` row — the panel-managed grant (kanban t_dd2f7e32).
+    FeatureLimits,
+    /// `plans.features->>key` — a per-plan override written by the panel's raw JSON action.
+    FeaturesJson,
+    /// A dedicated `plans` column (`max_leads`, `has_white_label`, …).
+    Column,
+    /// The plan declares nothing — the absence rule decides.
+    Unset,
+}
+
+impl Source {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Source::FeatureLimits => "feature_limits",
+            Source::FeaturesJson => "features",
+            Source::Column => "column",
+            Source::Unset => "unset",
+        }
+    }
+}
+
+/// The panel-managed grant for one plan: `feature_limits.limit_value` (one row per plan × key).
+/// Vocabulary (shared with the panel and `feature_registry`): `-1` unlimited / granted,
+/// `0` NOT available on this plan, `N > 0` a cap of N. Absence is `None`.
+pub async fn entitlement_for_plan(
+    pool: &PgPool,
+    plan_id: Uuid,
+    feature_key: &str,
+) -> Result<Option<i64>, AppError> {
+    let v: Option<i64> = sqlx::query_scalar(
+        "SELECT limit_value FROM feature_limits WHERE plan_id = $1 AND feature_key = $2",
+    )
+    .bind(plan_id)
+    .bind(feature_key)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    Ok(v)
+}
+
+/// The same lookup by plan slug.
+pub async fn entitlement_by_slug(
     pool: &PgPool,
     slug: &str,
     feature_key: &str,
 ) -> Result<Option<i64>, AppError> {
-    // 1. Dedicated columns. Gate rule 5d (class 14) — a query must not be BUILT at run time, so the
-    // whole query is a COMPILE-TIME literal here. The previous
-    // `format!("SELECT {} FROM plans WHERE slug = $1", plan_col)` built the query text from a
-    // run-time string: the query a request ran was not visible anywhere in this source. Same shape
-    // as ADASwift src/features.rs in b2362eb (kanban t_472d6089).
+    let v: Option<i64> = sqlx::query_scalar(
+        "SELECT f.limit_value FROM feature_limits f JOIN plans p ON p.id = f.plan_id \
+         WHERE p.slug = $1 AND f.feature_key = $2",
+    )
+    .bind(slug)
+    .bind(feature_key)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    Ok(v)
+}
+
+/// Resolve a NUMERIC limit for a plan, with its source. Order of resolution:
+///   1. `feature_limits` (the panel-managed grant — kanban t_dd2f7e32),
+///   2. `features->>key` (an explicit per-plan OVERRIDE — see the t_0e61628c note below),
+///   3. the dedicated `plans` column for the keys that have one (`max_leads`, `max_tags`),
+///   4. `None` = the plan declares nothing → the absence rule (allow) decides.
+///
+/// The gate (`enforce_feature_limit`) and the admin catalogue both call THIS, which is what makes
+/// the panel's reading of a grant the same trade the gate enforced.
+pub async fn resolve_limit(
+    pool: &PgPool,
+    slug: &str,
+    feature_key: &str,
+) -> Result<(Option<i64>, Source), AppError> {
+    if let Some(v) = entitlement_by_slug(pool, slug, feature_key).await? {
+        return Ok((Some(v), Source::FeatureLimits));
+    }
+    if let Some(v) = jsonb_limit(pool, slug, feature_key).await? {
+        return Ok((Some(v), Source::FeaturesJson));
+    }
     let column_sql = match feature_key {
         "max_leads" | "leads" | "max_contacts" | "contacts" => {
             Some("SELECT max_leads FROM plans WHERE slug = $1")
@@ -48,13 +106,6 @@ async fn numeric_limit(
         "max_tags" | "tags" => Some("SELECT max_tags FROM plans WHERE slug = $1"),
         _ => None,
     };
-    // A key that has a column ALSO has that column as its default, so an explicit features key can
-    // only mean anything if it is read FIRST (t_0e61628c).
-    if column_sql.is_some() {
-        if let Some(v) = jsonb_limit(pool, slug, feature_key).await? {
-            return Ok(Some(v));
-        }
-    }
     if let Some(sql) = column_sql {
         // Dedicated plan columns (max_leads, max_tags) are INT4 (integer).
         if let Some(v) = sqlx::query_scalar::<_, i32>(sql)
@@ -62,15 +113,81 @@ async fn numeric_limit(
             .fetch_optional(pool)
             .await?
         {
-            return Ok(Some(v as i64));
+            return Ok((Some(v as i64), Source::Column));
         }
     }
+    Ok((None, Source::Unset))
+}
 
-    // 3. JSONB features column (covers max_phone_numbers, max_rules, max_users,
-    //    max_deals, max_workflows, max_campaigns, max_messages, max_integrations,
-    //    max_api_keys, max_follow_ups, max_calls, max_tickets, ...), and a column key whose column
-    //    is NULL.
-    jsonb_limit(pool, slug, feature_key).await
+/// Resolve a BOOLEAN flag for a plan, with its source. Order:
+///   1. `feature_limits` (non-zero = granted, `0` = refused — the panel-managed grant),
+///   2. `features->>key` (`"true"`/`"1"` = granted, any other PRESENT value = refused),
+///   3. the dedicated boolean column when the key has one (`has_dual_routing`, …),
+///   4. `None` = unset → the absence rule (REFUSED) decides — which is why a boolean key granted
+///      by no plan at all (has_calendar, before this card) refused every tier including the top.
+pub async fn resolve_flag(
+    pool: &PgPool,
+    slug: &str,
+    feature_key: &str,
+) -> Result<(Option<bool>, Source), AppError> {
+    if let Some(v) = entitlement_by_slug(pool, slug, feature_key).await? {
+        return Ok((Some(v != 0), Source::FeatureLimits));
+    }
+    let raw: Option<String> = sqlx::query_scalar("SELECT features->>$1 FROM plans WHERE slug = $2")
+        .bind(feature_key)
+        .bind(slug)
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+    match raw.as_deref() {
+        Some("true") | Some("1") => return Ok((Some(true), Source::FeaturesJson)),
+        Some(_) => return Ok((Some(false), Source::FeaturesJson)),
+        None => {}
+    }
+    // Fall back to a dedicated boolean column if it exists (dual-routing etc.). Whole query as a
+    // compile-time literal — gate 5d, same reason as the numeric arms above.
+    let sql = match feature_key {
+        "has_dual_routing" => Some("SELECT has_dual_routing FROM plans WHERE slug = $1"),
+        "has_multi_tenant" => Some("SELECT has_multi_tenant FROM plans WHERE slug = $1"),
+        "has_white_label" => Some("SELECT has_white_label FROM plans WHERE slug = $1"),
+        _ => None,
+    };
+    if let Some(sql) = sql {
+        let v: Option<bool> = sqlx::query_scalar(sql)
+            .bind(slug)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
+        if let Some(v) = v {
+            return Ok((Some(v), Source::Column));
+        }
+    }
+    Ok((None, Source::Unset))
+}
+
+/// Fetch a numeric limit for a feature_key.
+/// Order of resolution (kanban t_0e61628c — one allowance PER DIMENSION, each overridable per plan,
+/// then t_dd2f7e32 which put the panel-managed `feature_limits` grant FIRST):
+///   1. `feature_limits` — the panel's own grant, so a key the admin assigned is the key the gate
+///      reads even when the plan's JSONB says nothing.
+///   2. `features->>key` — an explicit per-plan OVERRIDE, and it WINS over the plan's own column. The
+///      admin writes it from the panel's own "Set plan features (JSON)" action
+///      (PUT /api/v1/admin/plans/:id/features, src/handlers/plans_handler.rs), so a CONTACT allowance
+///      (or a leads / tags one) can differ from the plan default with no code change and no schema
+///      change. CoreSwift-CRM carries its contact allowance exactly this way: a per-tier
+///      `features.max_contacts` (100 / 500 / 1 000 / 5 000 / 10 000 / 50 000).
+///   3. the dedicated `plans` column for the keys that have one (`max_leads`, `max_tags`) — the
+///      plan's DEFAULT, and where every live plan resolves: no `plans` row in this database carries a
+///      `max_contacts` or `max_leads` features key (census in the t_0e61628c evidence), so adding the
+///      override arm moved no live number.
+///   4. `features->>key` for every other key (max_users, max_rules, max_phone_numbers, ...).
+///   5. None = no limit declared → allow.
+async fn numeric_limit(
+    pool: &PgPool,
+    slug: &str,
+    feature_key: &str,
+) -> Result<Option<i64>, AppError> {
+    Ok(resolve_limit(pool, slug, feature_key).await?.0)
 }
 
 /// Apply a `features->>key` value as a bigint, or `None` when the plan declares no such key.
@@ -187,7 +304,9 @@ pub async fn enforce_feature_limit(
 }
 
 /// Enforce a boolean (has_*) feature flag. Unlockable features like calendar,
-/// automation, API access. Reads from features JSONB `has_calendar` etc.
+/// automation, API access. Resolved by `resolve_flag` (feature_limits → features JSONB
+/// `has_calendar`/… → dedicated column → refused), which the admin catalogue also calls, so the
+/// panel and this gate can never disagree about which tier has the feature.
 pub async fn check_feature_flag(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -198,39 +317,10 @@ pub async fn check_feature_flag(
         Some(s) => s,
         None => return Ok(()), // no plan → allow
     };
-    // Boolean from JSONB features: features->>'has_calendar' etc.
-    let raw: Option<String> = sqlx::query_scalar("SELECT features->>$1 FROM plans WHERE slug = $2")
-        .bind(flag_key)
-        .bind(&slug)
-        .fetch_optional(pool)
-        .await?
-        .flatten();
-    match raw.as_deref() {
-        Some("true") | Some("1") => Ok(()),
-        None => {
-            // Fall back to dedicated boolean column if it exists (dual-routing etc.). Whole query as
-            // a compile-time literal — gate 5d, same reason as numeric_limit above.
-            let sql = match flag_key {
-                "has_dual_routing" => Some("SELECT has_dual_routing FROM plans WHERE slug = $1"),
-                "has_multi_tenant" => Some("SELECT has_multi_tenant FROM plans WHERE slug = $1"),
-                "has_white_label" => Some("SELECT has_white_label FROM plans WHERE slug = $1"),
-                _ => None,
-            };
-            if let Some(sql) = sql {
-                let v: Option<bool> = sqlx::query_scalar(sql)
-                    .bind(&slug)
-                    .fetch_optional(pool)
-                    .await?
-                    .flatten();
-                if v == Some(true) {
-                    return Ok(());
-                }
-            }
-            Err(AppError::UpgradeRequired(format!(
-                "{} is not available on your current plan. Upgrade to access this feature.",
-                label
-            )))
-        }
+    match resolve_flag(pool, &slug, flag_key).await?.0 {
+        Some(true) => Ok(()),
+        // A grant that is present-but-false and a key no plan mentions deny alike: a boolean
+        // feature is fail-CLOSED (see feature_registry::FeatureDef::unset_means).
         _ => Err(AppError::UpgradeRequired(format!(
             "{} is not available on your current plan. Upgrade to access this feature.",
             label

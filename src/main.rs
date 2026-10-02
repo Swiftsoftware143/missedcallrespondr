@@ -5,6 +5,7 @@ mod db;
 mod email;
 mod email_provider;
 mod error;
+mod feature_registry;
 mod features;
 mod handlers;
 mod models;

@@ -145,18 +145,16 @@ pub async fn upsert_provider_key(
         .flatten();
 
         if let Some(pid) = plan_id {
-            let byok_allowed: Option<i32> = sqlx::query_scalar(
-                "SELECT limit_value FROM feature_limits WHERE plan_id = $1 AND feature_key = 'bring_your_own_key'"
-            )
-            .bind(pid)
-            .fetch_optional(&state.pool)
-            .await?
-            .flatten();
+            // The BYOK grant is read through the ONE feature module (kanban t_dd2f7e32): the same
+            // `feature_limits` row the admin panel's "Set plan feature" control writes, so a row the
+            // admin assigns is the row this gate reads. Non-zero = granted (`-1` unlimited / `1` on),
+            // `0` = not available, absent = refused — the same vocabulary the panel's catalogue
+            // reports and `features::resolve_flag` uses.
+            let byok_allowed =
+                crate::features::entitlement_for_plan(&state.pool, pid, "bring_your_own_key")
+                    .await?;
 
-            let allowed = match byok_allowed {
-                Some(v) => v == -1 || v == 1,
-                None => false,
-            };
+            let allowed = matches!(byok_allowed, Some(v) if v != 0);
 
             if !allowed {
                 return Err(AppError::BadRequest(

@@ -763,7 +763,10 @@ const OPS_PANELS = [
 "fields": [
 "id",
 "json"
-]
+],
+"hints": {
+"json": "merges into plans.features. Object-shaped plans only: Enterprise and Pro carry an ARRAY of marketing tags, and merging an object into an array is REFUSED (400) because the key would be unreadable. Grant a registry key with 'Set plan feature' in section 3b instead."
+}
 },
 {
 "label": "Assign plan to tenant",
@@ -782,6 +785,42 @@ const OPS_PANELS = [
 "fields": [
 "id"
 ]
+}
+]
+},
+{
+"title": "3b. Plan Feature Registry (every gated feature × every plan)",
+"list": "/admin/plans/registry",
+"actions": [
+{
+"label": "Set plan feature",
+"method": "PUT",
+"path": "/admin/plans/entitlement",
+"fields": [
+"plan",
+"feature",
+"value"
+],
+"numeric": [
+"value"
+],
+"hints": {
+"plan": "plan slug — see the plan columns in the table above (enterprise, pro, pro-monthly, free)",
+"feature": "a registry key exactly as listed in the `feature` column, e.g. has_calendar, max_leads, bring_your_own_key",
+"value": "-1 unlimited / granted · 0 = NOT available on this plan (the gate refuses it) · N = a cap of N. On/off features: 1 = granted, 0 = off. The response echoes the value the gate now resolves."
+}
+},
+{
+"label": "Grant the TOP tier every missing registry key",
+"method": "POST",
+"path": "/admin/plans/grant-top-tier",
+"fields": [],
+"hints": {}
+},
+{
+"label": "Show the raw catalogue (JSON)",
+"method": "GET",
+"path": "/admin/plans/registry"
 }
 ]
 },

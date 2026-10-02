@@ -563,6 +563,21 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/plans/assign",
             post(crate::handlers::plans_handler::admin_assign_plan),
         )
+        // The plan × feature registry (kanban t_dd2f7e32): the catalogue the admin console renders
+        // and the write path its "Set plan feature" control calls. Static segments, so they win
+        // over `/api/v1/admin/plans/:id` below (same as `assign`).
+        .route(
+            "/api/v1/admin/plans/registry",
+            get(crate::handlers::plans_handler::plan_registry),
+        )
+        .route(
+            "/api/v1/admin/plans/entitlement",
+            put(crate::handlers::plans_handler::set_plan_entitlement),
+        )
+        .route(
+            "/api/v1/admin/plans/grant-top-tier",
+            post(crate::handlers::plans_handler::grant_top_tier),
+        )
         .route(
             "/api/v1/admin/plans/:id",
             get(crate::handlers::plans_handler::get_plan)
