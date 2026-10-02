@@ -161,8 +161,9 @@ pub async fn handle_tag_provision(
     // The placement is deliberate:
     //   * AFTER the existing-email early return, so re-delivery of a lead this app already holds
     //     still answers 200 `already_exists` and is never refused (it creates no row);
-    //   * `enforce_feature_limit` answers Ok when the tenant has no active plan and when the plan
-    //     declares no limit, so a tenant without a plan is ALLOWED, never a 500 (card Q2);
+    //   * `enforce_feature_limit` answers Ok when the plan declares no such limit, and a tenant
+    //     with NO active plan is checked against the DEFAULT plan (`features::DEFAULT_PLAN_SLUG`,
+    //     kanban t_f6f94b8e — the same floor a brand-new signup gets), so this is never a 500;
     //   * the refusal is returned to the caller as the SAME 402 body
     //     `POST /api/v1/contacts` produces (`{"error":"<label> limit reached (n/limit)..."}`) and is
     //     logged here with the tag, the campaign id and the owner slug — FunnelSwift's delivery is
