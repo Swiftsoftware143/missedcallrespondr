@@ -64,11 +64,32 @@ API.del = async (p) => _del(p).catch(e => { if (e.message && e.message.indexOf("
 
 const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
 
+// ---- PLATFORM ADMIN SURFACE (kanban t_d11d4157) ----
+// ONE definition of platform admin, mirroring the API that actually enforces it
+// (src/auth/middleware.rs::is_platform_admin). Until now the panel had no role check at all,
+// so a tenant account_owner who logged in here was shown the panel chrome and got 403
+// 'Platform admin role required' from every action. The API remains the enforcement point;
+// this only stops the panel from pretending. The tenant app is a DIFFERENT ORIGIN, so its
+// host cannot be derived from window.location.
+const PLATFORM_ADMIN_ROLES = ['admin', 'super_admin', 'agency_admin'];
+const TENANT_APP = 'https://app.missedcallrespondr.com';
+
 // ---- LOGIN ----
 const LoginView = () => {
   let email = '', pw = '';
   const submit = async (e) => { e.preventDefault(); S.loading = true; S.error = null; renderApp();
-    try { const r = await API.login(email, pw); API.setAuth(r.token, r.team_member || r.user); S.view = 'dashboard'; } catch(err) { S.error = err.message; }
+    try {
+      const r = await API.login(email, pw);
+      const u = r.team_member || r.user || null;
+      if (!u || PLATFORM_ADMIN_ROLES.indexOf(u.role) < 0) {
+        API.logout();
+        S.error = 'This is the platform admin panel, and your account is not a platform administrator. Opening your own dashboard ...';
+        S.loading = false; renderApp();
+        setTimeout(() => { window.location.replace(TENANT_APP + '/dashboard'); }, 1500);
+        return;
+      }
+      API.setAuth(r.token, u); S.view = 'dashboard';
+    } catch(err) { S.error = err.message; }
     S.loading = false; renderApp();
   };
   return html`<div class="flex items-center justify-center min-h-screen w-full">
