@@ -193,8 +193,11 @@ pub const REGISTRY: &[FeatureDef] = &[
     // route group. The registry exists to stop silent drift in both directions, and its own test
     // (`every_registry_key_is_read_by_a_gate`) refused a `read_by_gate: true` entry whose only gate
     // call site no longer exists — which is exactly right: a catalogue row the admin panel shows for
-    // a capability with no route is the lie this file prevents. Residual, carded: `feature_limits`
-    // rows and `plans.features` on tenant-free plans still mention api_keys (plan DATA, not code).
+    // a capability with no route is the lie this file prevents. The residual plan DATA it carded is
+    // CLOSED (kanban t_ab963d11): `feature_limits`' `enterprise | max_api_keys` row and the
+    // `api_keys` table are retired by migrations/000027_retire_api_keys.sql, `plans.features` was
+    // measured to mention no api key on any plan, and `features::count_usage`'s api arm is gone. So
+    // the console cannot render, grant, count or re-seed the capability — no source, no plan DATA.
     FeatureDef {
         key: "max_message_templates",
         label: "Message templates",

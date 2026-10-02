@@ -311,7 +311,12 @@ async fn count_usage(pool: &PgPool, tenant_id: Uuid, key: &str) -> Result<i64, A
         "max_integrations" | "integrations" => {
             Some("SELECT COUNT(*) FROM integrations WHERE tenant_id = $1")
         }
-        "max_api_keys" | "api_keys" => Some("SELECT COUNT(*) FROM api_keys WHERE tenant_id = $1"),
+        // `api_keys` arm REMOVED (kanban t_ab963d11): the table is dropped by
+        // migrations/000027_retire_api_keys.sql and its only creator (000002) is deleted, because
+        // the route group that minted keys went with t_f06b1710 and NO auth path ever read the
+        // table — so this arm was unreachable AND, once the table is gone, it is a latent
+        // `42P01 undefined_table` -> 500 for any future caller that passes the key. The key left
+        // `feature_registry::REGISTRY` with the routes, so no gate can be called with it.
         "max_calls" | "calls" => Some("SELECT COUNT(*) FROM inbound_calls WHERE tenant_id = $1"),
         _ => None,
     };

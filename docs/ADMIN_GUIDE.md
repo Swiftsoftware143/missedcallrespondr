@@ -152,23 +152,27 @@ That action merges raw JSON into `plans.features`. Enterprise and Pro carry `fea
 
 ### What the registry does NOT cover
 
-Nothing advertised, as of t_b578b169. The three plan limits that no gate read are now resolved:
+Nothing advertised, as of t_b578b169 + t_ab963d11. Every plan limit that no gate read is resolved:
 
 | key | where its value lives | state |
 |---|---|---|
 | `max_tags` | `plans.max_tags` column (Free 10 / Pro 50 / Pro Monthly 50 / Enterprise -1) | **enforced** on `POST /api/v1/tags` — the 11th tag on Free is refused with 402 `Tags limit reached (10/10)…`. Releasing a tag (DELETE is a hard delete) frees the slot. Set it with **Set plan feature** (storage `plans.max_tags`). |
 | `max_phone_numbers` | `plans.features` (Free 1 / Pro Monthly 5; Pro and Enterprise declare nothing, so unset ⇒ allowed) | **enforced** on `POST /api/v1/telnyx/numbers`, before the provider is called. Counts ACTIVE numbers only, so a released number frees the slot. Set it with **Set plan feature** (storage `feature_limits`). |
 | `max_users` | `plans.features->>'max_users'` (Free 1 / Pro Monthly 5) | **retired** — the value was removed from the plan data (migration `000022`). This app has no surface that adds a user to an existing tenant (every signup/provisioning path creates a tenant's FIRST user, before a plan is attached), so a seat cap could never be reached. `GET /api/v1/me/usage` still reports the live user count; no plan pretends to cap it. If seat-selling is wanted later it needs a team-invite surface first, then a registry key. |
+| `max_api_keys` | `feature_limits` row `Enterprise = -1` (and the `api_keys` table the key counted) | **retired** — migration `000027` deletes the row and drops the table. The API-key ROUTES were deleted in t_f06b1710 (no auth path in this crate ever read `api_keys`, so a minted key authenticated nothing); this closed the DATA and the store behind them. Measured before the change: `api_keys` held **0 rows**, its only reader was `count_usage` (removed in the same pass) and it had no inbound FK; `plans.features` mentioned no api key on any plan. Panel-side, the key had already left `src/feature_registry.rs`, so the matrix never rendered it and **Set plan feature** answers 400 `Unknown feature key 'max_api_keys'` — and the **Grant the TOP tier every missing registry key** button cannot re-seed it (it fills REGISTRY keys only). The row was a limit for a capability with no route: plan DATA, not a control. |
 
 A plan value no gate reads is a setting, not a control — if you add a limit to the plan model, add it
 to `src/feature_registry.rs` and call the gate on the route that ADDS the counted row, or the two
-anti-drift tests in that file will fail the build (that is deliberate).
+anti-drift tests in that file will fail the build (that is deliberate). The registry is also the only
+thing the console can render or grant: a `feature_limits` row whose key is not in the registry is
+invisible in the plan matrix and refused by every write path, i.e. dead data — which is exactly how
+the `max_api_keys` row survived one card longer than the route it described.
 
 ## Module Handlers
 
 | Module | Handler | Description |
 |---|---|---|
-| API Keys | **DELETED (kanban t_f06b1710)** | The handler, its module and `POST|GET /api/v1/api-keys` + `PUT|DELETE /api/v1/api-keys/:id` are GONE. Measurement: NO auth path in this crate read `api_keys` (no `x-api-key` anywhere, no key-checking middleware; the only reader was `features::count_usage` for the plan quota), so a key minted by that route authenticated nothing anywhere — a credential no endpoint would accept. The table stays for history. |
+| API Keys | **DELETED (kanban t_f06b1710), retired to the data (kanban t_ab963d11)** | The handler, its module, `models/api_key.rs` and `POST|GET /api/v1/api-keys` + `PUT|DELETE /api/v1/api-keys/:id` are GONE. Measurement: NO auth path in this crate read `api_keys` (no `x-api-key` anywhere, no key-checking middleware; the only reader was `features::count_usage` for the plan quota), so a key minted by that route authenticated nothing anywhere — a credential no endpoint would accept. The residue t_f06b1710 carded is CLOSED: migration `000027_retire_api_keys.sql` deletes the last `feature_limits` row that sold `max_api_keys` (Enterprise -1) and DROPs the `api_keys` table (it held 0 rows, so "keep it for history" preserved nothing); `migrations/000002_api_keys.sql`, its only creator, is deleted and unregistered from the boot runner, so a fresh install never builds it either. `count_usage`'s api arm went with it. |
 | Call Logs | `call_log_handler` | `GET /api/v1/call-logs` still reads `call_logs` (the billing log with cost — its `recorded` column was dropped with the voicemail surface, kanban t_1d4fc956). `GET /api/v1/call-logs/export` now reads **`inbound_calls`** — the table the console's Calls screen lists — and emits that screen's own columns, so the CSV cannot disagree with the rows on screen (kanban t_f06b1710: it used to serve `call_logs` while the screen rendered `inbound_calls`; the webhook writes the two 1:1, but `POST /api/v1/calls` can add rows only the screen's table has) |
 | Contacts | `contact_handler` | Contact management. The console's Contacts screen now creates (`POST /api/v1/contacts` — the only caller of the `max_contacts` gate), edits (`PUT /api/v1/contacts/:id`) and deletes (`DELETE /api/v1/contacts/:id`) rows (kanban t_f06b1710) |
 | Custom Fields | `contact_custom_field_handler` | Custom contact fields |

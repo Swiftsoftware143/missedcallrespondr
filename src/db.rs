@@ -17,10 +17,13 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000_baseline_live_schema",
             include_str!("../migrations/000_baseline_live_schema.sql"),
         ),
-        (
-            "000002_api_keys",
-            include_str!("../migrations/000002_api_keys.sql"),
-        ),
+        // 000002 (`api_keys`, the table the deleted API-key route group wrote) is RETIRED
+        // 2026-10-02 (kanban t_ab963d11) together with its file and its last readers: the routes
+        // went with t_f06b1710 (no auth path in this crate ever read the table, so a minted key
+        // authenticated nothing), then `features::count_usage`'s api arm and the `max_api_keys`
+        // plan row in 000027. A FRESH install must not build a store nothing can name, so the file
+        // is gone from disk AND from this list — and 000027 below drops the table in any database
+        // that already has it. A database that already has the table loses it; nothing else moved.
         (
             "000003_portfolio_integrations",
             include_str!("../migrations/000003_portfolio_integrations.sql"),
@@ -178,6 +181,19 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         (
             "000026_retire_voicemails",
             include_str!("../migrations/000026_retire_voicemails.sql"),
+        ),
+        // 000027 retires the last plan/DB residue of the API-key surface (kanban t_ab963d11): the
+        // ONE `feature_limits` row that still sold `max_api_keys` on `enterprise`, and the
+        // `api_keys` table itself (0 rows, no writer since t_f06b1710 deleted the routes, no
+        // reader once `features::count_usage`'s api arm went, no inbound FK). Pure idempotent
+        // DELETE + `DROP TABLE IF EXISTS` — this runner re-executes every file on every boot, so
+        // the second pass is a no-op. On a FRESH install the DELETE matches nothing
+        // (`000_baseline_live_schema.sql` creates the `feature_limits` SHAPE and seeds no rows —
+        // operator data, see its "WHAT IS NOT HERE"), and the DROP is kept ONLY so a fresh build
+        // cannot leave behind a table that 000002 used to create on disk.
+        (
+            "000027_retire_api_keys",
+            include_str!("../migrations/000027_retire_api_keys.sql"),
         ),
     ];
 

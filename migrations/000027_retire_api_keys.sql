@@ -1,0 +1,56 @@
+-- kanban t_ab963d11 RETIRE-API-KEYS — the last plan/DB residue of the deleted API-key surface.
+--
+-- t_f06b1710 deleted the ROUTES and the code (no auth path in this crate ever read `api_keys`, so a
+-- key minted by POST /api/v1/api-keys authenticated nothing). What it carded, and what this file
+-- closes, is the DATA and the store that still sold or counted the capability.
+--
+-- MEASURED before this file existed (deployed binary 82addb6e1c0460c4, live DB `missedcallrespondr`):
+--   * `SELECT p.slug, fl.feature_key, fl.limit_value FROM feature_limits fl JOIN plans p ON
+--      p.id = fl.plan_id WHERE fl.feature_key LIKE '%api%'` -> exactly ONE row:
+--      `enterprise | max_api_keys | -1` (of the 16 `feature_limits` rows on enterprise; the other 15
+--      are keys with a live gate). No tenant is on `enterprise` (`tenant_plans` holds only `free`),
+--      so nothing enforced it either.
+--   * `plans.features`: NO api key on ANY plan — `free` / `pro-monthly` are objects carrying credits
+--      + `max_phone_numbers`, `pro` / `enterprise` are arrays of marketing tags. Measured: 0 plans
+--      whose `features::text` matches '%api%'. Nothing to remove there; recorded so the next pass
+--      does not re-open it.
+--   * `SELECT count(*) FROM api_keys` -> 0. No writer exists (the route group went with t_f06b1710),
+--      no inbound FK (`pg_constraint WHERE confrelid = 'public.api_keys'` -> 0 rows), and its ONLY
+--      reader was `features::count_usage`'s `"max_api_keys" | "api_keys"` arm, removed in the same
+--      pass (src/features.rs) — after which the table is named by nothing at all.
+--
+-- DECISION per item, every one REMOVE (the "keep" arm was measured, not assumed):
+--   1. the `feature_limits` row — REMOVED here. The panel matrix is registry-driven (`GET
+--      /api/v1/admin/plans/registry` iterates `feature_registry::REGISTRY` x plans, and the panel
+--      renders exactly that payload), and `max_api_keys` left the registry with the route group, so
+--      the row was ALREADY unreachable from the console: measured live,
+--      `PUT /api/v1/admin/plans/entitlement {"feature":"max_api_keys"}` answers 400
+--      "Unknown feature key 'max_api_keys'". A sold row no console can render, grant or count is
+--      residue — the same verdict 000022 reached for `max_users`, for the same reason.
+--   2. `plans.features` — nothing to remove (measured above).
+--   3. `count_usage`'s api arm — REMOVED in src/features.rs. Left alone it would keep the only
+--      surviving literal of the capability alive AND turn any future caller of that key into
+--      `42P01 undefined_table` -> HTTP 500 once this file has dropped the table.
+--   4. the TABLE — DROPPED here. 0 rows, no writer, no reader, no inbound FK: keeping it "for
+--      history" (what docs/ADMIN_GUIDE.md said at t_f06b1710) would preserve nothing while leaving a
+--      store a future lane can write by mistake. `000002_api_keys.sql` — its only creator — is
+--      DELETED and unregistered from the boot runner (src/db.rs), so a FRESH install never builds it
+--      either; this file is what removes it from a database that already has it.
+--
+-- REVERSAL (both halves, if an API-key surface is ever built):
+--   git revert of 000002_api_keys.sql's deletion restores the DDL verbatim; then
+--   INSERT INTO feature_limits (plan_id, feature_key, limit_value)
+--   SELECT id, 'max_api_keys', -1 FROM plans WHERE slug = 'enterprise'
+--   ON CONFLICT (plan_id, feature_key) DO NOTHING;
+--   ...and the registry entry in src/feature_registry.rs has to come back too, or the console still
+--   cannot render or grant it (see ADMIN_GUIDE "What the registry does NOT cover").
+--
+-- This runner (src/db.rs) re-executes EVERY registered file on EVERY boot and keeps no ledger
+-- (`to_regclass('public._sqlx_migrations')` and `('public._migrations')` both NULL), so every
+-- statement here is idempotent by construction: the second pass deletes 0 rows and drops nothing.
+
+-- 1. the plan DATA row (the last place the capability was still "sold").
+DELETE FROM feature_limits WHERE feature_key IN ('max_api_keys', 'api_keys');
+
+-- 2. the store itself (its two indexes go with it). No inbound FK — measured above.
+DROP TABLE IF EXISTS api_keys;
