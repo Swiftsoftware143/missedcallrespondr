@@ -1511,7 +1511,6 @@ const App = () => {
   if (S.__sc_error) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-red-500">Not available.</p></div>`;
   if (!data) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
   
-  const hp = data.homepage || {};
   const f = (n, v, t) => t==='textarea'
     ? html`<div class="mb-3"><label class="block text-xs font-medium text-gray-600 mb-1">${v}</label><textarea id="field_${n}" rows="3" class="input"></textarea></div>`
     : html`<div class="mb-3"><label class="block text-xs font-medium text-gray-600 mb-1">${v}</label><input id="field_${n}" class="input"></div>`;
@@ -1523,7 +1522,6 @@ const App = () => {
     sv('canonical_url',data.canonical_url);sv('og_title',data.og_title);sv('og_description',data.og_description);
     sv('og_image_url',data.og_image_url);sv('favicon_url',data.favicon_url);
     sv('ga_id',data.ga_id);sv('gtm_id',data.gtm_id);sv('head_scripts',data.head_scripts);sv('body_scripts',data.body_scripts);
-    sv('homepage_headline',hp.headline);sv('homepage_subheadline',hp.subheadline);
     sv('legal_tos',data.legal_tos);sv('legal_privacy',data.legal_privacy);sv('legal_refunds',data.legal_refunds);
     sv('schema_json',data.schema_json);
   }, 50);
@@ -1534,16 +1532,20 @@ const App = () => {
     b.canonical_url=gv('canonical_url');b.og_title=gv('og_title');b.og_description=gv('og_description');
     b.og_image_url=gv('og_image_url');b.favicon_url=gv('favicon_url');
     b.ga_id=gv('ga_id');b.gtm_id=gv('gtm_id');b.head_scripts=gv('head_scripts');b.body_scripts=gv('body_scripts');
-    b.homepage={headline:gv('homepage_headline'),subheadline:gv('homepage_subheadline')};
     b.legal_tos=gv('legal_tos');b.legal_privacy=gv('legal_privacy');b.legal_refunds=gv('legal_refunds');
     b.schema_json=gv('schema_json');
     const st = document.getElementById('sc_status');
     if(st){st.textContent='Saving...';st.className='text-sm ml-3 text-blue-600';}
-    const r = await API.put('/admin/site',b);
-    if(st){if(r){st.textContent='Saved!';st.className='text-sm ml-3 text-green-600'}else{st.textContent='Error.';st.className='text-sm ml-3 text-red-600'}}
+    try {
+      const r = await API.put('/admin/site',b);
+      const w = (r && r.static_pages && r.static_pages.writer) ? r.static_pages.within_minutes : 5;
+      if(st){st.textContent='Saved — materialized on the host within ' + w + ' minutes';st.className='text-sm ml-3 text-green-600';}
+    } catch(e) {
+      if(st){st.textContent='Not saved: ' + ((e && e.message) || 'request failed');st.className='text-sm ml-3 text-red-600';}
+    }
   };
   
-  return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-xs text-gray-500 mb-4">SEO, tracking, legal pages, and homepage content. Saved changes regenerate the live marketing site.</p>
+  return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-xs text-gray-500 mb-4">SEO, tracking, and the three legal pages. The fields below are saved immediately; the static pages at /terms.html, /privacy.html, /refunds.html and the marketing homepage are (re)generated from them on the host within 5 minutes (mcr-site-apply.sh).</p>
     <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">🔍 SEO & Meta</h3>
       ${f('title','Page Title')}${f('description','Meta Description','textarea')}${f('keywords','Keywords','textarea')}
       ${f('canonical_url','Canonical URL')}${f('og_title','OG Title')}${f('og_description','OG Description','textarea')}
@@ -1552,9 +1554,6 @@ const App = () => {
     <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">📊 Analytics & Tracking</h3>
       ${f('ga_id','Google Analytics ID')}${f('gtm_id','Google Tag Manager ID')}
       ${f('head_scripts','Head Scripts','textarea')}${f('body_scripts','Body Scripts','textarea')}
-    </div>
-    <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">🏠 Homepage</h3>
-      ${f('homepage_headline','Headline','textarea')}${f('homepage_subheadline','Subheadline','textarea')}
     </div>
     <div class="border rounded-lg p-4 mb-4"><h3 class="font-semibold mb-3">⚖️ Legal Pages</h3>
       <p class="text-xs text-gray-400 mb-2">Rendered at /terms.html, /privacy.html, /refunds.html</p>
