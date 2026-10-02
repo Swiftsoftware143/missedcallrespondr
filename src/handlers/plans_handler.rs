@@ -433,11 +433,19 @@ pub async fn admin_assign_plan(
         .and_then(|v| v.as_str())
         .unwrap_or("monthly");
 
+    // ONE row per tenant is the invariant this upsert relies on (kanban t_f5494ad5): the conflict
+    // target `(tenant_id)` resolves against `tenant_plans_tenant_id_key`, the unique constraint the
+    // live database was missing — without it this statement aborted with Postgres 42P10 and the
+    // panel's action answered 500 for every caller (migrations/000020_tenant_plans_one_row_per_tenant.sql
+    // restores it). The UPDATE arm deliberately touches neither `credit_balance` nor
+    // `lifetime_credits`: reassigning a plan must not reset a tenant's balance. `billing_cycle` IS
+    // updated, because the panel sends it and the old statement silently kept the previous cycle
+    // (a 2xx that did not change the field the caller asked for).
     let tpid = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, status, billing_cycle)
            VALUES ($1, $2, $3, 'active', $4)
-           ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', updated_at=NOW()"#,
+           ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', billing_cycle=$4, updated_at=NOW()"#,
     )
     .bind(tpid)
     .bind(tenant_id)

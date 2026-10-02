@@ -120,6 +120,18 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000019_payment_webhook_status_arms",
             include_str!("../migrations/000019_payment_webhook_status_arms.sql"),
         ),
+        // 000020 restores `tenant_plans_tenant_id_key UNIQUE (tenant_id)`, the constraint the
+        // admin panel's own "Assign plan to tenant" action depends on: `admin_assign_plan` upserts
+        // `ON CONFLICT (tenant_id)` and the live table had no such unique guard, so the route
+        // answered 500 (Postgres 42P10) for EVERY caller, admin included (t_f5494ad5). Registered
+        // here so a fresh install gets it too — an unregistered file reaches NO database (see the
+        // 000013/000019 notes above). Idempotent: the two data steps are no-ops when a tenant has a
+        // single row and the ADD CONSTRAINT is guarded by a pg_constraint check, so the boot-time
+        // runner can re-execute it on live safely.
+        (
+            "000020_tenant_plans_one_row_per_tenant",
+            include_str!("../migrations/000020_tenant_plans_one_row_per_tenant.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
