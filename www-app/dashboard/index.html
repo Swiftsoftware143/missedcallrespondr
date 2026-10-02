@@ -237,7 +237,7 @@ const ResponseRules = () => {
   const st = viewState('rules', { list: [], showModal: false, editItem: null });
   const load = async () => { try { const d = await API.get('/response-rules'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
-  const show = (i) => { st.editItem = i; st.showModal = true; renderApp(); };
+  const show = (i) => { st.editItem = i; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
   const save = async (data) => { try { if (st.editItem) await API.put('/response-rules/' + st.editItem.id, data); else await API.post('/response-rules', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   const remove = async (id) => { if (!confirm('Delete this rule?')) return; await API.del('/response-rules/' + id); load(); };
@@ -250,8 +250,19 @@ const ResponseRules = () => {
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'Add'} Rule</h3>
-      ${(() => { let name=st.editItem?.name||'', condition=st.editItem?.trigger_condition||st.editItem?.condition||'', type=st.editItem?.response_type||'sms';
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Condition</label><input class="input" value=${condition} onInput=${e => condition=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Response Type</label><select class="input" value=${type} onChange=${e => type=e.target.value}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name, trigger_condition:condition, response_type:type, response_content:{text:''}})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+      ${(() => {
+        // kanban t_13330c68 — the draft lives in the SHARED view object (S.views['rules_form']), seeded ON
+        // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
+        // per-render local re-initialised the field from the stored ROW and wiped what the operator
+        // typed (guard rule 4); a re-render can no longer do that.
+        const f = viewState('rules_form', { name: '', condition: '', type: 'sms' });
+        if (!st.formSeeded) {
+          f.name = st.editItem?.name||'';
+          f.condition = st.editItem?.trigger_condition||st.editItem?.condition||'';
+          f.type = st.editItem?.response_type||'sms';
+          st.formSeeded = true;
+        }
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Condition</label><input class="input" value=${f.condition} onInput=${e => { f.condition = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Response Type</label><select class="input" value=${f.type} onChange=${e => { f.type = e.target.value; }}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, trigger_condition: f.condition, response_type: f.type, response_content: {text: ''}})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
@@ -261,7 +272,7 @@ const Templates = () => {
   const st = viewState('templates', { list: [], showModal: false, editItem: null });
   const load = async () => { try { const d = await API.get('/message-templates'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
-  const show = (i) => { st.editItem = i; st.showModal = true; renderApp(); };
+  const show = (i) => { st.editItem = i; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
   const save = async (data) => { try { if (st.editItem) await API.put('/message-templates/' + st.editItem.id, data); else await API.post('/message-templates', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   const remove = async (id) => { if (!confirm('Delete this template?')) return; await API.del('/message-templates/' + id); load(); };
@@ -274,8 +285,19 @@ const Templates = () => {
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'Add'} Template</h3>
-      ${(() => { let name=st.editItem?.name||'', body=st.editItem?.body||st.editItem?.content||'', type=st.editItem?.type||'sms';
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${name} onInput=${e => name=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${type} onChange=${e => type=e.target.value}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${body} onInput=${e => body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name, body, type})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+      ${(() => {
+        // kanban t_13330c68 — the draft lives in the SHARED view object (S.views['templates_form']), seeded ON
+        // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
+        // per-render local re-initialised the field from the stored ROW and wiped what the operator
+        // typed (guard rule 4); a re-render can no longer do that.
+        const f = viewState('templates_form', { name: '', body: '', type: 'sms' });
+        if (!st.formSeeded) {
+          f.name = st.editItem?.name||'';
+          f.body = st.editItem?.body||st.editItem?.content||'';
+          f.type = st.editItem?.type||'sms';
+          st.formSeeded = true;
+        }
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${f.type} onChange=${e => { f.type = e.target.value; }}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, body: f.body, type: f.type})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
@@ -462,7 +484,7 @@ const Tickets = () => {
   const st = viewState('tickets', { list: [], showModal: false, editItem: null });
   const load = async () => { try { const d = await API.get('/tickets'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
-  const show = (i) => { st.editItem = i; st.showModal = true; renderApp(); };
+  const show = (i) => { st.editItem = i; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
   const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   return html`<div>
@@ -474,8 +496,19 @@ const Tickets = () => {
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'New'} Ticket</h3>
-      ${(() => { let subject=st.editItem?.subject||'', status=st.editItem?.status||'open', priority=st.editItem?.priority||'medium';
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${subject} onInput=${e => subject=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Status</label><select class="input" value=${status} onChange=${e => status=e.target.value}><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></div><div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${priority} onChange=${e => priority=e.target.value}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject, status, priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+      ${(() => {
+        // kanban t_13330c68 — the draft lives in the SHARED view object (S.views['tickets_form']), seeded ON
+        // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
+        // per-render local re-initialised the field from the stored ROW and wiped what the operator
+        // typed (guard rule 4); a re-render can no longer do that.
+        const f = viewState('tickets_form', { subject: '', status: 'open', priority: 'medium' });
+        if (!st.formSeeded) {
+          f.subject = st.editItem?.subject||'';
+          f.status = st.editItem?.status||'open';
+          f.priority = st.editItem?.priority||'medium';
+          st.formSeeded = true;
+        }
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Status</label><select class="input" value=${f.status} onChange=${e => { f.status = e.target.value; }}><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></div><div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${f.priority} onChange=${e => { f.priority = e.target.value; }}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject: f.subject, status: f.status, priority: f.priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
