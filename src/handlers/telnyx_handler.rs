@@ -380,6 +380,19 @@ pub async fn purchase_number(
 ) -> ApiResult<Json<Value>> {
     let tenant_id: Uuid = claims.aid;
 
+    // Plan gate FIRST, before the provider is called (kanban t_b578b169): `plans.features` sells
+    // max_phone_numbers 1 (Free) / 5 (Pro Monthly) and the key was read by nothing. Gating here
+    // means a tenant at its cap is refused BEFORE we ask Telnyx to buy a number they cannot hold.
+    // The count is ACTIVE numbers only (see features::count_usage), matching the "already assigned"
+    // check below — so releasing a number frees the slot.
+    crate::features::enforce_feature_limit(
+        &state.pool,
+        tenant_id,
+        "max_phone_numbers",
+        "Phone numbers",
+    )
+    .await?;
+
     // Normalize number
     let number = if req.number.starts_with('+') {
         req.number.clone()

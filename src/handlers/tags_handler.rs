@@ -139,6 +139,11 @@ pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // Plan gate on the route that ADDS the counted row (kanban t_b578b169): `plans.max_tags` sells
+    // 10 / 50 / 50 / -1 and was read by nothing. DELETE below is a HARD delete, so a cap here never
+    // wedges a tenant — releasing a tag frees the slot.
+    crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_tags", "Tags").await?;
+
     let name = body
         .get("name")
         .and_then(|v| v.as_str())

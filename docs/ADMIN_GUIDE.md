@@ -146,10 +146,17 @@ That action merges raw JSON into `plans.features`. Enterprise and Pro carry `fea
 
 ### What the registry does NOT cover
 
-Three limits are declared in the plan data but are read by NO gate, so they cap nothing today:
-`max_users` and `max_phone_numbers` (values in `plans.features` on Free / Pro Monthly) and `max_tags`
-(the `plans.max_tags` column). They are reported, not enforced — a plan value nobody reads is a
-setting, not a control.
+Nothing advertised, as of t_b578b169. The three plan limits that no gate read are now resolved:
+
+| key | where its value lives | state |
+|---|---|---|
+| `max_tags` | `plans.max_tags` column (Free 10 / Pro 50 / Pro Monthly 50 / Enterprise -1) | **enforced** on `POST /api/v1/tags` — the 11th tag on Free is refused with 402 `Tags limit reached (10/10)…`. Releasing a tag (DELETE is a hard delete) frees the slot. Set it with **Set plan feature** (storage `plans.max_tags`). |
+| `max_phone_numbers` | `plans.features` (Free 1 / Pro Monthly 5; Pro and Enterprise declare nothing, so unset ⇒ allowed) | **enforced** on `POST /api/v1/telnyx/numbers`, before the provider is called. Counts ACTIVE numbers only, so a released number frees the slot. Set it with **Set plan feature** (storage `feature_limits`). |
+| `max_users` | `plans.features->>'max_users'` (Free 1 / Pro Monthly 5) | **retired** — the value was removed from the plan data (migration `000022`). This app has no surface that adds a user to an existing tenant (every signup/provisioning path creates a tenant's FIRST user, before a plan is attached), so a seat cap could never be reached. `GET /api/v1/me/usage` still reports the live user count; no plan pretends to cap it. If seat-selling is wanted later it needs a team-invite surface first, then a registry key. |
+
+A plan value no gate reads is a setting, not a control — if you add a limit to the plan model, add it
+to `src/feature_registry.rs` and call the gate on the route that ADDS the counted row, or the two
+anti-drift tests in that file will fail the build (that is deliberate).
 
 ## Module Handlers
 

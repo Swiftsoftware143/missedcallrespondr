@@ -8,6 +8,16 @@
 //! `bring_your_own_key` (its `feature_limits` table was empty, so the BYOK arm refused everyone).
 //! Nothing in the source said so; only enumerating the registry against the live rows did.
 //!
+//! Three more keys arrived in kanban t_b578b169, where the plan data advertised limits no gate read:
+//! `max_tags` (the `plans.max_tags` column — free 10 / pro 50 / pro-monthly 50 / enterprise -1) and
+//! `max_phone_numbers` (`plans.features` — free 1 / pro-monthly 5) are now GATED, each on the one
+//! route that ADDS the counted row (`POST /api/v1/tags`, `POST /api/v1/telnyx/numbers`).
+//! `max_users` was RETIRED from the plan data instead: this app has no surface that adds a user to
+//! an existing tenant — all three `INSERT INTO users` sites create a tenant's FIRST user, before any
+//! plan is attached — so a cap of 1/5 advertised a seat control the product does not have. An
+//! allowance nothing can reach is a setting, not a control; the raw JSON values were removed by
+//! `000022_retire_max_users_plan_value.sql` rather than left advertised.
+//!
 //! Two vocabularies are deliberate and shared by the gate, the panel and this file:
 //!
 //! * **value**: `-1` = unlimited / granted · `0` = NOT available on this plan (refused) ·
@@ -204,6 +214,24 @@ pub const REGISTRY: &[FeatureDef] = &[
         unit: Some("companies"),
         storage: Storage::FeatureLimits,
         enforced_by: "POST /api/v1/portfolio-companies (portfolio_handler::create)",
+        read_by_gate: true,
+    },
+    FeatureDef {
+        key: "max_tags",
+        label: "Tags",
+        kind: FeatureKind::Limit,
+        unit: Some("tags"),
+        storage: Storage::Column("max_tags"),
+        enforced_by: "POST /api/v1/tags (tags_handler::create)",
+        read_by_gate: true,
+    },
+    FeatureDef {
+        key: "max_phone_numbers",
+        label: "Phone numbers",
+        kind: FeatureKind::Limit,
+        unit: Some("numbers"),
+        storage: Storage::FeatureLimits,
+        enforced_by: "POST /api/v1/telnyx/numbers (telnyx_handler::purchase_number)",
         read_by_gate: true,
     },
     FeatureDef {

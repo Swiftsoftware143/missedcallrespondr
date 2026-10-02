@@ -690,6 +690,11 @@ pub async fn set_plan_entitlement(
             // 5d defect this fleet already fixed once (class 14).
             let sql = match col {
                 "max_leads" => "UPDATE plans SET max_leads = $2, updated_at = NOW() WHERE id = $1",
+                // max_tags joined the registry in t_b578b169; its column is INT4 like max_leads.
+                // Without this arm the panel's own "Set plan feature" control answered 500 for the
+                // key it advertised — a registry entry the panel can SHOW but not SET is not
+                // manageable by the operator.
+                "max_tags" => "UPDATE plans SET max_tags = $2, updated_at = NOW() WHERE id = $1",
                 _ => {
                     return Err(AppError::Internal(format!(
                         "registry key '{feature}' names column '{col}' with no registered UPDATE"

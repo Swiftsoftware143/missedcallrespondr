@@ -135,6 +135,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000021_users_email_format_check",
             include_str!("../migrations/000021_users_email_format_check.sql"),
         ),
+        // 000022 retires the `max_users` seat cap from the plan data (kanban t_b578b169): the plan
+        // model advertised it on Free (1) and Pro Monthly (5) while NO surface can add a user to an
+        // existing tenant, so it capped nothing. Its siblings `max_phone_numbers` and `max_tags`
+        // were WIRED on their create routes instead and keep their values. Pure data, one
+        // idempotent `features - 'max_users'` guarded to object-shaped features, so the boot-time
+        // runner re-executing it on live is a no-op after the first pass.
+        (
+            "000022_retire_max_users_plan_value",
+            include_str!("../migrations/000022_retire_max_users_plan_value.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

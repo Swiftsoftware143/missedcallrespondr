@@ -281,7 +281,13 @@ async fn count_usage(pool: &PgPool, tenant_id: Uuid, key: &str) -> Result<i64, A
         "max_leads" | "leads" => Some("SELECT COUNT(*) FROM leads WHERE tenant_id = $1"),
         "max_tags" | "tags" => Some("SELECT COUNT(*) FROM tags WHERE tenant_id = $1"),
         "max_phone_numbers" | "phone_numbers" => {
-            Some("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1")
+            // Only ACTIVE numbers count (kanban t_b578b169): `DELETE /api/v1/telnyx/numbers/:id`
+            // releases by setting `is_active = false` — it never deletes the row — so counting every
+            // row would leave a tenant that released its number permanently at its cap with no way
+            // back (the wedge class). `is_active = true` is also the same predicate the purchase arm
+            // uses to decide whether a number is already taken, so the gate and the handler now
+            // agree on what "a phone number" is.
+            Some("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1 AND is_active = true")
         }
         "max_rules" | "rules" => Some("SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1"),
         // `users` has NO `is_active` column in this schema (measured: information_schema). The
@@ -421,12 +427,15 @@ pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value
         .fetch_one(pool)
         .await
         .unwrap_or(0);
-    let phone_numbers: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1")
-            .bind(tenant_id)
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0);
+    // Active only — the same predicate the max_phone_numbers gate counts (kanban t_b578b169), so
+    // the usage the tenant console shows is the usage the gate compares against the plan's cap.
+    let phone_numbers: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM phone_numbers WHERE tenant_id = $1 AND is_active = true",
+    )
+    .bind(tenant_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
     let rules: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1")
         .bind(tenant_id)
         .fetch_one(pool)
