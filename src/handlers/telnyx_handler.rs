@@ -354,6 +354,14 @@ pub async fn webhook(
 // ---------------------------------------------------------------------------
 // 2. GET /api/v1/telnyx/numbers — List phone numbers for current tenant
 // ---------------------------------------------------------------------------
+/// The tenant's HELD numbers — ACTIVE rows only (kanban t_4c15d597). A release is a soft delete
+/// (`is_active = false`), so a released number used to stay in this list with no marker and the
+/// console painted it green "active": the number was visible, offered as a sender, and unusable.
+/// "Held" now means the same thing everywhere — `max_phone_numbers` counts ACTIVE rows
+/// (t_b578b169), this list shows ACTIVE rows, and re-purchasing a released number revives it
+/// (`purchase_number`). The released row stays in the table for history; it is simply no longer
+/// part of the tenant's inventory. The admin console reads the same route, so a released number
+/// leaves the panel listing the same way it leaves the tenant console.
 pub async fn list_numbers(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -361,7 +369,7 @@ pub async fn list_numbers(
     let numbers = sqlx::query_as::<_, PhoneNumber>(
         "SELECT id, tenant_id, number, friendly_name, provider, is_active, telnyx_connection_id, created_at, updated_at
          FROM phone_numbers
-         WHERE tenant_id = $1 AND (provider = 'telnyx' OR telnyx_connection_id IS NOT NULL)
+         WHERE tenant_id = $1 AND is_active = true AND (provider = 'telnyx' OR telnyx_connection_id IS NOT NULL)
          ORDER BY number ASC"
     )
     .bind(claims.aid)
@@ -400,42 +408,55 @@ pub async fn purchase_number(
         format!("+{}", req.number)
     };
 
-    // Check if already assigned
-    let existing = sqlx::query_scalar::<_, Option<Uuid>>(
-        "SELECT id FROM phone_numbers WHERE number = $1 AND is_active = true",
-    )
-    .bind(&number)
-    .fetch_optional(&state.pool)
-    .await?;
+    // One number = one row, GLOBALLY: `phone_numbers.number` carries the UNIQUE constraint
+    // `phone_numbers_number_key` and a RELEASE is a soft delete (`is_active = false`, see
+    // `delete_number` below), so the released row still owns the number. Looking the number up
+    // WITHOUT an `is_active` filter is what makes "release then re-acquire the same number" a
+    // supported operation: the previous predicate (`... AND is_active = true`) could not see the
+    // released row, fell through to the INSERT, and the unique index answered 23505 — a 500 on a
+    // documented path (kanban t_4c15d597). The released slot is intentionally reusable: the plan
+    // gate above counts ACTIVE rows only (t_b578b169) and so does `list_numbers` below.
+    let existing: Option<(Uuid, Uuid, bool)> =
+        sqlx::query_as("SELECT id, tenant_id, is_active FROM phone_numbers WHERE number = $1")
+            .bind(&number)
+            .fetch_optional(&state.pool)
+            .await?;
 
-    if let Some(existing_id) = existing {
-        // Already exists — reassign to this tenant if different
-        let current_tenant: Option<Uuid> =
-            sqlx::query_scalar("SELECT tenant_id FROM phone_numbers WHERE id = $1")
-                .bind(existing_id)
-                .fetch_one(&state.pool)
-                .await?;
+    if let Some((existing_id, current_tenant, is_active)) = existing {
+        if is_active {
+            if current_tenant == tenant_id {
+                return Err(AppError::Conflict(
+                    "Number already assigned to your account".into(),
+                ));
+            }
 
-        if current_tenant == Some(tenant_id) {
-            return Err(AppError::Conflict(
-                "Number already assigned to your account".into(),
-            ));
-        }
-
-        // Reassign
-        sqlx::query("UPDATE phone_numbers SET tenant_id = $1, updated_at = NOW() WHERE id = $2")
+            // Reassign a number another tenant currently holds (unchanged behaviour).
+            sqlx::query(
+                "UPDATE phone_numbers SET tenant_id = $1, updated_at = NOW() WHERE id = $2",
+            )
             .bind(tenant_id)
             .bind(existing_id)
             .execute(&state.pool)
             .await?;
 
-        return Ok(Json(json!({
-            "id": existing_id,
-            "number": number,
-            "assigned": true,
-            "reassigned": true
-        })));
+            return Ok(Json(json!({
+                "id": existing_id,
+                "number": number,
+                "assigned": true,
+                "reassigned": true
+            })));
+        }
     }
+
+    // A RELEASED row (`is_active = false`) is revived below instead of re-inserted, so the freed
+    // slot is genuinely usable by the tenant that released it (and by any tenant an admin hands the
+    // number to). The provider leg still runs first for a non-BYOK tenant: `delete_number` released
+    // the number at Telnyx too, so re-acquiring it has to re-buy it there; BYOK tenants manage that
+    // side themselves.
+    let released_id: Option<Uuid> = existing
+        .as_ref()
+        .filter(|(_, _, is_active)| !*is_active)
+        .map(|(id, _, _)| *id);
 
     // Check if tenant has their own Telnyx key (BYOK) — if so, they manage
     // purchasing on their own Telnyx dashboard; we just register locally.
@@ -475,30 +496,60 @@ pub async fn purchase_number(
         }
     }
 
-    // Insert the number locally
-    let id = Uuid::new_v4();
-    let now = chrono::Utc::now();
+    // Persist: REVIVE the released row when there is one (same row, same id, history kept), else
+    // INSERT a fresh one. Neither arm can raise 23505 here: the lookup above is by the exact column
+    // the unique index enforces, so at most one path runs per number.
+    let id = match released_id {
+        Some(id) => {
+            sqlx::query(
+                "UPDATE phone_numbers
+                 SET tenant_id = $1, is_active = true, friendly_name = COALESCE($2, friendly_name), updated_at = NOW()
+                 WHERE id = $3",
+            )
+            .bind(tenant_id)
+            .bind(&req.friendly_name)
+            .bind(id)
+            .execute(&state.pool)
+            .await?;
 
-    sqlx::query(
-        "INSERT INTO phone_numbers (id, tenant_id, number, friendly_name, provider, is_active, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .bind(&number)
-    .bind(&req.friendly_name)
-    .bind("telnyx")
-    .bind(true)
-    .bind(now)
-    .bind(now)
-    .execute(&state.pool)
-    .await?;
+            tracing::info!(
+                "phone_numbers: tenant {} re-acquired released number {} (row {})",
+                tenant_id,
+                number,
+                id
+            );
+
+            id
+        }
+        None => {
+            let id = Uuid::new_v4();
+            let now = chrono::Utc::now();
+
+            sqlx::query(
+                "INSERT INTO phone_numbers (id, tenant_id, number, friendly_name, provider, is_active, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+            )
+            .bind(id)
+            .bind(tenant_id)
+            .bind(&number)
+            .bind(&req.friendly_name)
+            .bind("telnyx")
+            .bind(true)
+            .bind(now)
+            .bind(now)
+            .execute(&state.pool)
+            .await?;
+
+            id
+        }
+    };
 
     Ok(Json(json!({
         "id": id,
         "number": number,
         "assigned": true,
-        "reassigned": false
+        "reassigned": false,
+        "reactivated": released_id.is_some()
     })))
 }
 

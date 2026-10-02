@@ -81,9 +81,12 @@ impl From<CryptoError> for crate::error::AppError {
                 crate::error::AppError::Internal(format!("cannot store provider key: {}", e))
             }
             // AppError in this app has no Database variant, so database failures surface as the
-            // generic 500 (which is what From<sqlx::Error> does here as well).
+            // generic 500 (which is what From<sqlx::Error> does here as well) — and, like that
+            // mapping, the driver's own text is logged, never echoed (kanban t_4c15d597: a
+            // constraint name in a response body is a schema leak).
             CryptoError::Database(e) => {
-                crate::error::AppError::Internal(format!("Database error: {}", e))
+                tracing::error!("Database error: {}", e);
+                crate::error::AppError::Internal("Database error".to_string())
             }
         }
     }

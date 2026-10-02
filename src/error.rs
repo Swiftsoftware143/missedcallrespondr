@@ -42,8 +42,20 @@ impl IntoResponse for AppError {
 }
 
 impl From<sqlx::Error> for AppError {
+    /// A database failure is an OPERATOR problem, never the caller's — so the real error (with its
+    /// constraint name, column names, SQLSTATE) is logged and the client gets a sentence that names
+    /// nothing about the schema.
+    ///
+    /// This used to interpolate the sqlx error straight into the 500 body, which is how
+    /// `duplicate key value violates unique constraint "phone_numbers_number_key"` reached a tenant
+    /// on `POST /api/v1/telnyx/numbers` (kanban t_4c15d597, measured live). The fleet answers this
+    /// class generically everywhere else (FunnelSwift/ADASwift/multi-directory/WorkflowSwift all log
+    /// and return `"Database error"`); this app now does too. The specific path that produced the
+    /// leak is fixed at its source as well — see `telnyx_handler::purchase_number` (a released row is
+    /// revived, not re-inserted), so this mapping is the class-wide backstop, not the only fix.
     fn from(e: sqlx::Error) -> Self {
-        AppError::Internal(format!("Database error: {}", e))
+        tracing::error!("Database error: {}", e);
+        AppError::Internal("Database error".to_string())
     }
 }
 
@@ -185,6 +197,23 @@ mod tests {
             extractor_message(b"", StatusCode::BAD_REQUEST),
             "invalid request body"
         );
+    }
+
+    /// The re-acquire 500 (kanban t_4c15d597) put the driver's own text in the response body,
+    /// constraint name included. Whatever the database says, the client must get a sentence that
+    /// names nothing about the schema — measured live before this mapping changed, pinned here.
+    #[test]
+    fn a_database_error_names_no_constraint_in_the_body() {
+        let raw = "error returned from database: duplicate key value violates unique constraint \
+                   \"phone_numbers_number_key\"";
+        match AppError::from(sqlx::Error::Protocol(raw.to_string())) {
+            AppError::Internal(msg) => {
+                assert_eq!(msg, "Database error");
+                assert!(!msg.contains("constraint"), "{msg}");
+                assert!(!msg.contains("phone_numbers"), "{msg}");
+            }
+            other => panic!("a database failure must map to Internal, got {other:?}"),
+        }
     }
 
     #[test]
