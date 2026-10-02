@@ -27,6 +27,7 @@ pub mod plans_handler;
 pub mod portfolio_handler;
 pub mod portfolio_sync_handler;
 pub mod provider_keys_handler;
+pub mod response_rule_eval;
 pub mod response_rule_handler;
 pub mod settings_handler;
 pub mod tag_groups_handler;

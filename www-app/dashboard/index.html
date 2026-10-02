@@ -236,6 +236,21 @@ const Profile = () => {
 };
 
 // ===== RESPONSE RULES =====
+// kanban t_31f9cf38 — these rules used to be stored and never read: the screen was CRUD-only and no
+// inbound-call path touched `response_rules`. They now run (src/handlers/response_rule_eval.rs), so
+// the form carries exactly what the call path can act on: a trigger the evaluator reads, an action
+// that has a transport behind it, the message to send, and the priority the documented evaluation
+// order runs on. `email` and `voice` are gone — a call carries no email address to reply to and this
+// service has no outbound-call transport, so neither option could ever have done anything.
+const RULE_TRIGGERS = [['all_missed_calls', 'All missed calls'], ['specific_numbers', 'Specific numbers'], ['time_of_day', 'Time of day'], ['day_of_week', 'Day of week']];
+const RULE_ACTIONS = [['sms', 'SMS — text the caller back'], ['callback', 'Callback — queue a return call']];
+const RULE_DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
+const ruleLabel = (pairs, v) => { const hit = pairs.find(p => p[0] === v); return hit ? hit[1] : (v || '-'); };
+const ruleScheduleOf = (f) => f.trigger === 'specific_numbers'
+  ? { numbers: (f.numbers || '').split(/[\n,;]+/).map(s => s.trim()).filter(Boolean) }
+  : f.trigger === 'time_of_day'
+    ? { window: { start: f.start || '09:00', end: f.end || '17:00' } }
+    : f.trigger === 'day_of_week' ? { days: (f.days || []).slice() } : null;
 const ResponseRules = () => {
   const st = viewState('rules', { list: [], showModal: false, editItem: null });
   const load = async () => { try { const d = await API.get('/response-rules'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
@@ -246,10 +261,11 @@ const ResponseRules = () => {
   const remove = async (id) => { if (!confirm('Delete this rule?')) return; await API.del('/response-rules/' + id); load(); };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ Add Rule</button></div>
+    <p class="text-sm text-gray-500 mb-4">Rules run when a call comes in. They are checked in priority order (lowest first) and the first matching rule acts: a text back to the caller, or a callback queued for you in Follow Ups. A text leaves through Telnyx, so the Telnyx API key and messaging profile must be saved under Admin &rarr; Telnyx Config before one can go out.</p>
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Name</th><th>Condition</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(r => html`<tr><td class="font-medium">${r.name||'-'}</td><td class="text-gray-500">${r.condition||r.trigger_condition||'-'}</td><td><span class="badge ${r.active!==false?'badge-green':'badge-red'}">${r.active!==false?'Active':'Inactive'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(r)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td></tr>`)}
-        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No response rules yet.</td></tr>`}
+      <table class="table"><thead><tr><th>Name</th><th>Trigger</th><th>Action</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(r => html`<tr><td class="font-medium">${r.name||'-'}</td><td class="text-gray-500">${ruleLabel(RULE_TRIGGERS, r.trigger_condition)}</td><td class="text-gray-500">${ruleLabel(RULE_ACTIONS, r.response_type)}</td><td class="text-gray-500">${r.priority == null ? 100 : r.priority}</td><td><span class="badge ${r.is_active?'badge-green':'badge-red'}">${r.is_active?'Active':'Inactive'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(r)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8">No response rules yet.</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'Add'} Rule</h3>
@@ -258,14 +274,34 @@ const ResponseRules = () => {
         // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
         // per-render local re-initialised the field from the stored ROW and wiped what the operator
         // typed (guard rule 4); a re-render can no longer do that.
-        const f = viewState('rules_form', { name: '', condition: '', type: 'sms' });
+        const f = viewState('rules_form', { name: '', trigger: 'all_missed_calls', type: 'sms', text: '', numbers: '', start: '09:00', end: '17:00', days: [], priority: 100, active: true });
         if (!st.formSeeded) {
-          f.name = st.editItem?.name||'';
-          f.condition = st.editItem?.trigger_condition||st.editItem?.condition||'';
-          f.type = st.editItem?.response_type||'sms';
+          const row = st.editItem;
+          f.name = row?.name||'';
+          // A row written before this change could hold a free-text condition or a retired action;
+          // seed the picker with the stored value only when it is one the call path reads.
+          f.trigger = RULE_TRIGGERS.some(t => t[0] === row?.trigger_condition) ? row.trigger_condition : 'all_missed_calls';
+          f.type = RULE_ACTIONS.some(a => a[0] === row?.response_type) ? row.response_type : 'sms';
+          f.text = (row?.response_content||{}).text||'';
+          f.numbers = ((row?.schedule||{}).numbers||[]).join('\n');
+          f.start = ((row?.schedule||{}).window||{}).start||'09:00';
+          f.end = ((row?.schedule||{}).window||{}).end||'17:00';
+          f.days = ((row?.schedule||{}).days||[]).slice();
+          f.priority = row?.priority == null ? 100 : row.priority;
+          f.active = row ? row.is_active !== false : true;
           st.formSeeded = true;
         }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Condition</label><input class="input" value=${f.condition} onInput=${e => { f.condition = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Response Type</label><select class="input" value=${f.type} onChange=${e => { f.type = e.target.value; }}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, trigger_condition: f.condition, response_type: f.type, response_content: {text: ''}})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+        return html`<div class="space-y-3">
+          <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium block mb-1">Trigger</label><select class="input" value=${f.trigger} onChange=${e => { f.trigger = e.target.value; renderApp(); }}>${RULE_TRIGGERS.map(t => html`<option value=${t[0]}>${t[1]}</option>`)}</select></div>
+          ${f.trigger === 'specific_numbers' && html`<div><label class="text-sm font-medium block mb-1">Caller numbers (one per line)</label><textarea class="input" rows="3" value=${f.numbers} onInput=${e => { f.numbers = e.target.value; }} placeholder="+15550101234"></textarea></div>`}
+          ${f.trigger === 'time_of_day' && html`<div class="flex gap-2"><div class="flex-1"><label class="text-sm font-medium block mb-1">From</label><input class="input" type="time" value=${f.start} onInput=${e => { f.start = e.target.value; }} /></div><div class="flex-1"><label class="text-sm font-medium block mb-1">To</label><input class="input" type="time" value=${f.end} onInput=${e => { f.end = e.target.value; }} /></div></div>`}
+          ${f.trigger === 'day_of_week' && html`<div><label class="text-sm font-medium block mb-1">Days</label><div class="flex flex-wrap gap-3">${RULE_DAYS.map(d => html`<label class="text-sm flex items-center gap-1"><input type="checkbox" checked=${f.days.indexOf(d[0]) >= 0} onChange=${e => { const on = e.target.checked; f.days = on ? f.days.concat([d[0]]) : f.days.filter(x => x !== d[0]); renderApp(); }} />${d[1]}</label>`)}</div></div>`}
+          <div><label class="text-sm font-medium block mb-1">Action</label><select class="input" value=${f.type} onChange=${e => { f.type = e.target.value; renderApp(); }}>${RULE_ACTIONS.map(a => html`<option value=${a[0]}>${a[1]}</option>`)}</select></div>
+          ${f.type === 'sms' && html`<div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="3" value=${f.text} onInput=${e => { f.text = e.target.value; }} placeholder="Sorry we missed you! We will call you back shortly."></textarea></div>`}
+          <div class="flex gap-3 items-end"><div style="width:140px"><label class="text-sm font-medium block mb-1">Priority</label><input class="input" type="number" min="1" value=${f.priority} onInput=${e => { f.priority = parseInt(e.target.value, 10) || 100; }} /></div><label class="text-sm flex items-center gap-1 mb-2"><input type="checkbox" checked=${f.active} onChange=${e => { f.active = e.target.checked; renderApp(); }} />Enabled</label></div>
+          <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({ name: f.name, trigger_condition: f.trigger, response_type: f.type, response_content: { text: f.text }, schedule: ruleScheduleOf(f), priority: f.priority, is_active: f.active })}>${st.editItem?'Save':'Add'}</button></div>
+        </div>`; })()}
     </div></div>`}
   </div>`;
 };
@@ -282,9 +318,9 @@ const Templates = () => {
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Message Templates</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ Add Template</button></div>
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Name</th><th>Type</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.name||'-'}</td><td><span class="badge badge-blue">${t.type||'sms'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td></tr>`)}
-        ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No templates yet.</td></tr>`}
+      <table class="table"><thead><tr><th>Name</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.name||'-'}</td><td><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="2" class="text-center text-gray-400 py-8">No templates yet.</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'Add'} Template</h3>
@@ -293,14 +329,17 @@ const Templates = () => {
         // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
         // per-render local re-initialised the field from the stored ROW and wiped what the operator
         // typed (guard rule 4); a re-render can no longer do that.
-        const f = viewState('templates_form', { name: '', body: '', type: 'sms' });
+        // kanban t_31f9cf38 — a template is a saved text body and nothing else: `message_templates`
+        // has no `type` column, so the Type picker that used to sit here (SMS / Email / Voice) was
+        // answered by the API with a silently dropped field and every row painted "sms". Nothing
+        // reads a template type — the response rule's own Action chooses the transport.
+        const f = viewState('templates_form', { name: '', body: '' });
         if (!st.formSeeded) {
           f.name = st.editItem?.name||'';
           f.body = st.editItem?.body||st.editItem?.content||'';
-          f.type = st.editItem?.type||'sms';
           st.formSeeded = true;
         }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${f.type} onChange=${e => { f.type = e.target.value; }}><option value="sms">SMS</option><option value="email">Email</option><option value="voice">Voice</option></select></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, body: f.body, type: f.type})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, body: f.body})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };

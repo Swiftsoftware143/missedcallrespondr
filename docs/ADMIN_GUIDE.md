@@ -169,12 +169,12 @@ anti-drift tests in that file will fail the build (that is deliberate).
 | Dashboard | `dashboard_handler` | Stats and overview |
 | Follow-ups | `follow_up_handler` | Automated follow-up rules |
 | Integrations | `integration_handler` | Third-party integrations |
-| Messages | `message_handler` | SMS/MMS handling |
-| Message Templates | `message_template_handler` | SMS template CRUD |
+| Messages | `message_handler` | SMS sending (Telnyx transport) + the message log |
+| Message Templates | `message_template_handler` | Saved message texts (a library — nothing sends one; no `type` column exists) |
 | Plans | `plans_handler` | Plan tier management |
 | Portfolio | `portfolio_handler` | Multi-account management |
 | Provider Keys | `provider_keys_handler` | Telnyx/etc provider keys |
-| Response Rules | `response_rule_handler` | Auto-response logic |
+| Response Rules | `response_rule_handler` (store) + `response_rule_eval` (the evaluator) | What the service does automatically on an inbound call |
 | Settings | `settings_handler` | Account settings |
 | Telnyx | `telnyx_handler` | Telnyx API bridge |
 | Triggers | `triggers_handler` | Trigger automation rules |
@@ -220,6 +220,44 @@ writer of `messages` rows. It now transmits: an `outbound` message calls
   server; unset behaviour is byte-identical to the production host.
 - **Inbound** is a recording arm, not a transport: a hand-recorded `direction=inbound` row is stored
   `logged` with `sent_at` NULL and nothing is transmitted.
+
+## Response Rules (the call-path evaluator)
+
+`response_rules` (kanban t_31f9cf38) is **evaluated**, not just stored. Before this change it was
+CRUD-only: the consoles offered the screen and both guides promised "the rule is evaluated on every
+inbound call", while no inbound-call path read the table — no rule had ever fired.
+
+- **Where it runs.** `POST /api/v1/telnyx/webhook` (`telnyx_handler::webhook`), on
+  `call_received`/`call_initiated`, after the tenant is resolved by the CALLED number, the credit is
+  taken and `inbound_calls` / `call_logs` are written. The evaluation is SPAWNED (like the CoreSwift
+  lead push), so a slow provider call can never delay the call-control answer Telnyx is waiting for.
+- **Order.** `SELECT … WHERE tenant_id = $1 AND is_active = true ORDER BY priority ASC, created_at
+  ASC`. The FIRST rule whose trigger matches fires and the rest are skipped for that call; no match
+  means no action. `priority` was added by migration 000025 (`INTEGER NOT NULL DEFAULT 100`); the
+  console's list is ordered the same way, so the screen shows the evaluation order.
+- **Triggers** (`trigger_condition`): `all_missed_calls` (every inbound call — this service records
+  every ring as missed, then answers and records a voicemail on the tenant's behalf), `specific_numbers`
+  (`schedule.numbers`, matched on digits with a >= 7-digit floor so a 10-digit local form matches the
+  E.164 caller), `time_of_day` (`schedule.window.start/end`, "HH:MM", a window may cross midnight),
+  `day_of_week` (`schedule.days`, `mon`…`sun`, UTC — the clock the store uses).
+- **Actions** (`response_type`): `sms` texts the caller from the number they dialed, through the SAME
+  transport as the manual send (`message_handler::send_rule_sms` → `deliver_outbound`), so the row in
+  `messages` carries the provider's own status/timestamps. `callback` inserts a `follow_ups` row
+  (`follow_type='call_back'`, due in an hour, `pending`) — the same record `POST /api/v1/calls/:id/respond`
+  writes, listed on the console's Follow-ups screen. Nothing dials by itself.
+- **`email` and `voice` are refused** (`400`, naming the field): an inbound call carries no email
+  address to reply to, and this service has no outbound-call transport. The consoles no longer offer
+  them; `CREATE`/`UPDATE` validate the whole stored shape (`response_rule_eval::validate_rule`), so a
+  rule that could never fire cannot be stored (an empty SMS body included).
+- **What a text needs.** The same `telnyx_config` credential as the manual send. With it missing the
+  rule still fires and is logged, but no row is written — nothing was attempted. The console's
+  Response Rules screen and the user guide both say so.
+- **Plan limit.** `max_rules` is counted from this table and enforced on `POST /api/v1/response-rules`.
+  The automatic reply itself is NOT run through `max_messages`: dropping a missed-call reply mid-ring
+  would break the product's one promise with nothing to show for it, and the row still counts towards
+  the tenant's total.
+- **Templates are not involved.** `message_templates` is a library of saved text; a rule holds its own
+  `response_content.text` and no placeholder is substituted anywhere in the sent message.
 
 ## Monitoring
 

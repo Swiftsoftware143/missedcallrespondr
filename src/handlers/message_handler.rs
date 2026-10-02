@@ -381,6 +381,107 @@ pub async fn create_message(
     Ok(Json(item))
 }
 
+// ---------------------------------------------------------------------------
+// The automatic arm (kanban t_31f9cf38): a response rule's `sms` action
+// ---------------------------------------------------------------------------
+
+/// Text the caller back on behalf of a response rule — the same transport, the same row and the
+/// same provider-derived status as the console's Send Message form, with two differences:
+///
+/// 1. There is no request to validate. The sender is the number the caller dialed, which is the
+///    tenant's own ACTIVE number — it is what resolved the tenant in the inbound webhook in the
+///    first place — and the recipient is the caller.
+/// 2. There is no caller to hand a status code to: nobody is watching the ring. The outcome of the
+///    attempt therefore reaches the operator as the ROW in the Messages log (queued / sent /
+///    delivered / failed), exactly as it does for a manual send.
+///
+/// A missing credential keeps the manual arm's contract: nothing was attempted, so NO row is
+/// written — it is returned as an error for the caller to log, and the console's Response Rules
+/// screen and the guide both say a text needs the Telnyx configuration.
+///
+/// The plan's message limit is NOT enforced here. The manual form refuses over-limit sends with a
+/// prompt the operator can act on; silently dropping a missed-call reply mid-ring would break the
+/// product's one promise with nothing to show for it. The row still counts towards the tenant's
+/// total (the plan counter reads this table).
+pub(crate) async fn send_rule_sms(
+    state: &AppState,
+    tenant_id: Uuid,
+    call_id: Uuid,
+    from: &str,
+    to: &str,
+    body: &str,
+    rule_name: &str,
+) -> Result<Uuid, AppError> {
+    let conf = crate::handlers::telnyx_handler::get_telnyx_config(&state.pool)
+        .await?
+        .filter(|c| {
+            !c.api_key.trim().is_empty()
+                && c.messaging_profile_id
+                    .as_deref()
+                    .map(|m| !m.trim().is_empty())
+                    .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            AppError::ServiceUnavailable(
+                "Text delivery is not configured: an administrator must save the Telnyx API key \
+                 and the messaging profile id of a messaging-enabled number (Admin, Telnyx Config) \
+                 before a response rule can text a caller back."
+                    .to_string(),
+            )
+        })?;
+
+    let profile = conf
+        .messaging_profile_id
+        .as_deref()
+        .unwrap_or_default()
+        .trim();
+
+    let outcome = deliver_outbound(
+        &telnyx_api_base(),
+        conf.api_key.trim(),
+        profile,
+        from,
+        to,
+        body,
+    )
+    .await;
+
+    let id = Uuid::new_v4();
+    let now = chrono::Utc::now().naive_utc();
+
+    sqlx::query(
+        "INSERT INTO messages (id, call_id, direction, from_number, to_number, body, status, sent_at, delivered_at, provider_message_id, tenant_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    )
+    .bind(id)
+    .bind(Some(call_id))
+    .bind("outbound")
+    .bind(from)
+    .bind(to)
+    .bind(body)
+    .bind(outcome.status)
+    .bind(if outcome.mark_sent { Some(now) } else { None })
+    .bind(if outcome.mark_delivered { Some(now) } else { None })
+    .bind(outcome.provider_message_id.as_deref())
+    .bind(tenant_id)
+    .bind(now)
+    .execute(&state.pool)
+    .await?;
+
+    if outcome.status == "failed" {
+        tracing::warn!(
+            "response rule \"{}\": the automatic text to {} was refused: {}",
+            rule_name,
+            to,
+            outcome
+                .detail
+                .clone()
+                .unwrap_or_else(|| "the provider refused the message".to_string())
+        );
+    }
+
+    Ok(id)
+}
+
 pub async fn get_message(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,

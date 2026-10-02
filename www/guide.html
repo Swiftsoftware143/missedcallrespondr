@@ -326,13 +326,11 @@
       </tr>
     </thead>
     <tbody>
-      <tr><td>Caller Name</td><td>Display name from your Contacts or "Unknown".</td></tr>
-      <tr><td>Phone Number</td><td>Caller's phone number.</td></tr>
-      <tr><td>Date &amp; Time</td><td>When the call came in (your timezone).</td></tr>
-      <tr><td>Duration</td><td>Length of the call (if answered).</td></tr>
-      <tr><td>Status</td><td>Missed, Answered, Voicemail, or Blocked.</td></tr>
-      <tr><td>Response</td><td>Whether an auto-response was triggered.</td></tr>
-      <tr><td>Actions</td><td>View details, respond, or add a note.</td></tr>
+      <tr><td>Caller</td><td>The caller's name when the number matches a contact, otherwise the number.</td></tr>
+      <tr><td>Called</td><td>The number the caller dialed (yours).</td></tr>
+      <tr><td>When</td><td>When the call came in.</td></tr>
+      <tr><td>Disposition</td><td>What happened to the call (Missed, Answered, Voicemail, …).</td></tr>
+      <tr><td>Action</td><td><strong>Respond</strong> — queue a call-back follow-up for a missed call (it appears in Follow-ups).</td></tr>
     </tbody>
   </table>
 
@@ -349,7 +347,9 @@
     <li>Full caller info and linked contact profile</li>
     <li>Call timeline (ring, answer, hang-up)</li>
     <li>Voicemail playback &amp; transcription (if applicable)</li>
-    <li>Auto-response sent (if any) and its delivery status</li>
+    <li>What the rules did, if anything: an SMS a rule sent is a row on the <strong>Messages</strong>
+      screen (with the provider's own status), and a callback rule appears on
+      <strong>Follow-ups</strong>.</li>
     <li>Internal notes (add your own)</li>
   </ul>
 
@@ -357,15 +357,16 @@
   <h2 id="response-rules">Response Rules</h2>
   <p>
     <strong>Response Rules</strong> are the heart of MissedCall Respondr. They define
-    <em>when</em> and <em>how</em> the system automatically replies to incoming calls.
+    <em>when</em> and <em>how</em> the system automatically replies to an incoming call.
   </p>
 
   <h3>Creating a Rule</h3>
   <ol>
     <li>Navigate to <strong>Response Rules</strong> in the sidebar.</li>
-    <li>Click <strong>+ New Rule</strong>.</li>
+    <li>Click <strong>+ Add Rule</strong>.</li>
     <li>Fill in the rule fields (see table below).</li>
-    <li>Click <strong>Save</strong>. The rule is evaluated on every inbound call.</li>
+    <li>Click <strong>Add</strong> (or <strong>Save</strong> when editing). From that moment the rule
+      is evaluated on every inbound call.</li>
   </ol>
 
   <table>
@@ -376,35 +377,48 @@
       </tr>
     </thead>
     <tbody>
-      <tr><td>Rule Name</td><td>A label to identify the rule (e.g., "After-Hours Auto SMS").</td></tr>
-      <tr><td>Trigger Condition</td><td>When to fire: <em>All Missed Calls</em>, <em>Specific Numbers</em>, <em>Time-of-Day</em>, <em>Day-of-Week</em>, or a combination.</td></tr>
-      <tr><td>Response Type</td><td><strong>SMS</strong> (send a text) or <strong>Callback</strong> (queue a return call).</td></tr>
-      <tr><td>Message / Template</td><td>The text to send — type a custom message or select a saved template.</td></tr>
-      <tr><td>Schedule</td><td>Optionally restrict when the rule is active (business hours, 24/7, custom).</td></tr>
-      <tr><td>Priority</td><td>Rules are evaluated in priority order (1 = highest).</td></tr>
+      <tr><td>Name</td><td>A label to identify the rule (e.g. "After-Hours Auto SMS").</td></tr>
+      <tr><td>Trigger</td><td>When the rule fires: <em>All missed calls</em>, <em>Specific numbers</em>, <em>Time of day</em>, or <em>Day of week</em>. One trigger per rule.</td></tr>
+      <tr><td>Trigger details</td><td>Whatever the trigger needs — the caller numbers (Specific numbers, one per line), the From/To window (Time of day), or the days (Day of week).</td></tr>
+      <tr><td>Action</td><td><strong>SMS</strong> (text the caller back) or <strong>Callback</strong> (queue a return call for you in Follow-ups, due in an hour).</td></tr>
+      <tr><td>Message</td><td>For an SMS rule, the text to send. It goes out exactly as typed — no placeholders are substituted.</td></tr>
+      <tr><td>Priority</td><td>Rules are evaluated in priority order (lowest number first; the default is 100).</td></tr>
       <tr><td>Enabled</td><td>Toggle the rule on/off without deleting it.</td></tr>
     </tbody>
   </table>
 
   <h3>Rule Evaluation Order</h3>
   <p>
-    Rules are evaluated by <strong>priority</strong> (lowest number first). The first matching
-    rule fires and its action is executed. Lower-priority rules are skipped for that call.
+    Every inbound call walks your <strong>enabled</strong> rules in <strong>priority</strong> order
+    (lowest number first, oldest first where two rules share a priority). The first rule whose trigger
+    matches fires, its action runs, and the rest are skipped for that call. If no rule matches, the
+    call is logged and nothing is sent.
+  </p>
+
+  <h3>What an SMS Needs</h3>
+  <p>
+    A text leaves through Telnyx, from the number the caller dialed. Until an administrator has saved
+    the Telnyx <em>API key</em> and <em>messaging profile</em> under
+    <strong>Admin &rarr; Telnyx Config</strong>, no text can go out — a rule still fires and is
+    logged, but the Messages screen stays empty because nothing was attempted. Queued, sent,
+    delivered and failed on the Messages screen are always the provider's own answer.
   </p>
 
   <h3>Managing Rules</h3>
   <ul>
-    <li><strong>Edit</strong> — click the pencil icon on any rule row.</li>
-    <li><strong>Delete</strong> — click the trash icon (confirmation required).</li>
-    <li><strong>Reorder</strong> — drag-and-drop or adjust the priority field.</li>
+    <li><strong>Edit</strong> — click <strong>Edit</strong> on any rule row.</li>
+    <li><strong>Delete</strong> — click <strong>Delete</strong> (confirmation required).</li>
+    <li><strong>Re-order</strong> — change the <strong>Priority</strong> number; the list is shown in
+      evaluation order, so what you see is the order the calls are checked in.</li>
   </ul>
 
   <div class="callout example">
-    <strong>📌 Example Rule</strong>
+    <strong>&#128204; Example Rule</strong>
     <p>
-      <strong>Name:</strong> "Weekend Office Hours Follow-up"<br>
-      <strong>Trigger:</strong> Missed calls on Saturday &amp; Sunday<br>
-      <strong>Response:</strong> SMS — "Hi {{name}}, we missed your call. We'll reach out on Monday. — {{company}}"
+      <strong>Name:</strong> "Weekend Auto-Reply"<br>
+      <strong>Trigger:</strong> Day of week — Sat, Sun<br>
+      <strong>Action:</strong> SMS — "Thanks for calling. We're closed for the weekend and will call you back on Monday."<br>
+      <strong>Priority:</strong> 10
     </p>
   </div>
 
@@ -478,45 +492,40 @@
   <!-- Message Templates -->
   <h2 id="templates">Message Templates</h2>
   <p>
-    <strong>Message Templates</strong> are reusable text snippets with optional
-    <em>variable placeholders</em> that are replaced dynamically when a response is sent.
+    <strong>Message Templates</strong> are saved message texts you keep for reuse. A template is a
+    library entry and nothing more: nothing sends one automatically, and a response rule carries its
+    own <strong>Message</strong> text. Copy the wording from a template into the rule's Message field
+    when you want to reuse it.
   </p>
 
-  <h3>Available Variables</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Variable</th>
-        <th>Replaced With</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td><code>{{name}}</code></td><td>Caller's name from Contacts (or "there")</td></tr>
-      <tr><td><code>{{phone}}</code></td><td>Caller's phone number</td></tr>
-      <tr><td><code>{{company}}</code></td><td>Your company name (from Settings)</td></tr>
-      <tr><td><code>{{time}}</code></td><td>Current time when the response is sent</td></tr>
-      <tr><td><code>{{date}}</code></td><td>Current date when the response is sent</td></tr>
-      <tr><td><code>{{duration}}</code></td><td>Call duration (if answered)</td></tr>
-    </tbody>
-  </table>
+  <h3>No Variable Substitution</h3>
+  <p>
+    Whatever you type is what the caller receives. <code>{{name}}</code>,
+    <code>{{company}}</code> and the like are <em>not</em> replaced — a rule that sends
+    <code>Hi {{name}}</code> texts the caller the literal words. Write the message you want them to
+    read.
+  </p>
 
   <h3>Creating a Template</h3>
   <ol>
-    <li>Go to <strong>Message Templates</strong> → <strong>+ New Template</strong>.</li>
-    <li>Enter a <strong>name</strong> (e.g., "After-Hours SMS").</li>
-    <li>Write your message body, inserting variables with <code>{{}}</code> syntax.</li>
-    <li>Click <strong>Save</strong>. The template is now available in the Response Rules editor.</li>
+    <li>Go to <strong>Message Templates</strong> &rarr; <strong>+ Add Template</strong>.</li>
+    <li>Enter a <strong>name</strong> (e.g. "After-Hours SMS").</li>
+    <li>Write the message body.</li>
+    <li>Click <strong>Add</strong>. It is kept in this list for you to copy from.</li>
   </ol>
 
   <div class="callout example">
-    <strong>📌 Example</strong>
+    <strong>&#128204; Example</strong>
     <p>
-      <code>Hi {{name}}, thanks for calling {{company}}. We received your call at {{time}} and will follow up shortly. If this is urgent, please call us back directly.</code>
+      <code>Sorry we missed your call! We're on it and will ring you back shortly.</code>
     </p>
   </div>
 
   <h3>Editing &amp; Deleting</h3>
-  <p>Templates can be edited or deleted from the same list. Deleting a template does <em>not</em> affect rules that already used it — the text is copied at rule-save time.</p>
+  <p>
+    Templates can be edited or deleted from the same list. Deleting a template does not change any
+    rule — rules hold their own message text and never reference a template.
+  </p>
 
   <!-- Messages -->
   <h2 id="messages">Messages</h2>
@@ -658,15 +667,17 @@
 
   <h3>How does MissedCall Respondr receive call data?</h3>
   <p>
-    Your VoIP provider (Twilio, Telnyx, etc.) sends webhooks to MissedCall Respondr's API.
-    Configure the webhook URL from your provider's dashboard to point to
-    <code>https://missedcallrespondr.com/api/v1/calls/incoming</code>.
+    Your VoIP provider (Telnyx) sends webhooks to MissedCall Respondr's API. Configure the webhook URL
+    from your provider's dashboard to point to
+    <code>https://app.missedcallrespondr.com/api/v1/telnyx/webhook</code>. That one public URL carries
+    both the call events (which raise the Call Log entry and run your Response Rules) and the message
+    delivery events (which set a text's Sent/Delivered times).
   </p>
 
   <h3>Can I have multiple response rules active at the same time?</h3>
   <p>
     Yes. Rules are evaluated by priority. Only the <strong>first matching rule</strong> fires per call.
-    You can have dozens of rules with different conditions and priorities.
+    You can keep as many rules as your plan allows, each with its own trigger and priority.
   </p>
 
   <h3>What happens if no rule matches a call?</h3>
@@ -677,8 +688,9 @@
 
   <h3>Are message templates required for SMS responses?</h3>
   <p>
-    No. You can type a custom message directly in the rule editor. Templates are a convenience
-    when you use the same message across multiple rules.
+    No. Type your message straight into the rule's <strong>Message</strong> field. Message Templates
+    are a separate library you keep for reuse — a rule never references one, so copy the wording in if
+    you want to use it.
   </p>
 
   <h3>Can I export my call data?</h3>
@@ -689,9 +701,11 @@
 
   <h3>What variable syntax does the app support?</h3>
   <p>
-    Use double-curly-brace syntax: <code>{{name}}</code>, <code>{{phone}}</code>,
-    <code>{{company}}</code>, <code>{{time}}</code>, <code>{{date}}</code>, <code>{{duration}}</code>.
-    Variables are case-sensitive.
+    None for the text a rule sends. Messages and templates are sent exactly as typed —
+    <code>{{name}}</code>, <code>{{company}}</code> and the other double-curly-brace forms are not
+    replaced, so write the finished sentence you want the caller to read. (The app's own account
+    emails — welcome, password reset, purchase — do fill in their own fields; that does not apply to
+    the text a Response Rule sends.)
   </p>
 
   <h3>How do I reset my password?</h3>

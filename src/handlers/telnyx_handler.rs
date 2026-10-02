@@ -505,6 +505,30 @@ pub async fn webhook(
         });
     }
 
+    // -- 7c. RESPONSE RULES (kanban t_31f9cf38). The tenant's ACTIVE rules are evaluated for this
+    //        call: the first match by priority performs its action — a text back to the caller
+    //        through the same Telnyx transport the Send Message form uses, or a callback queued in
+    //        `follow_ups`. Spawned like 7b, so a slow provider call can never delay the call-control
+    //        answer Telnyx is waiting for; what happened lands as a row in the tenant's Messages /
+    //        Follow Ups log either way.
+    {
+        let st = state.clone();
+        let rule_tenant = tenant_id;
+        let rule_call = call_id;
+        let rule_caller = normalized_caller.clone();
+        let rule_called = normalized_called.clone();
+        tokio::spawn(async move {
+            crate::handlers::response_rule_eval::run_for_inbound_call(
+                &st,
+                rule_tenant,
+                rule_call,
+                &rule_caller,
+                &rule_called,
+            )
+            .await;
+        });
+    }
+
     // -- 8. Return Telnyx call-control commands (answer + gather)
     tracing::info!(
         "Processed Telnyx call for tenant {}: call_id={}",

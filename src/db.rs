@@ -163,6 +163,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000024_messages_provider_message_id",
             include_str!("../migrations/000024_messages_provider_message_id.sql"),
         ),
+        // 000025 adds `response_rules.priority` (kanban t_31f9cf38): the rule evaluator now runs on
+        // an inbound call, and the documented evaluation order ("priority, 1 = highest; the first
+        // matching rule fires") needed the column it was always described in terms of. Additive +
+        // idempotent; DEFAULT 100 is the documented "no preference" position.
+        (
+            "000025_response_rules_priority",
+            include_str!("../migrations/000025_response_rules_priority.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
