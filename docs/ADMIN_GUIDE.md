@@ -220,6 +220,40 @@ Edit / Delete, custom-field definitions), **Tickets** (+ New Ticket, Edit), **In
 Still read-only by design: **Overview** (counters + credits) and the **Calls** row detail — there is
 no search box, no status filter, no date range and no call detail panel on Calls.
 
+## The marketing homepage (`www/index.html`) — half a generated file
+
+`www/index.html` (served at missedcallrespondr.com) is the one served page on this app with TWO
+owners, and they do not overlap:
+
+| part | owner | how to change it |
+|---|---|---|
+| `<head>` — title, description, keywords, OG, canonical, favicon, schema, GA/GTM, head/body scripts | the `admin_settings.missedcallrespondr_site` row | `UPDATE` the row, then run `/opt/swift/bin/mcr-site-apply.sh` (cron `4-59/5`). An edit to the head **in the file** is reverted within one tick. |
+| the authored `<body>` — hero, feature cards, "How It Works", pricing | the file itself | edit the SERVED file and the repo mirror identically, then commit both and `--record` the frontends copy. The applier preserves the body and re-injects only the head, so `mcr-site-apply.sh --check` stays `unchanged`. |
+
+**The selling copy is a claim surface and is censused exactly like the guide is** (kanban
+t_a31e61d8). Every feature card, "How It Works" step and pricing tier must be checkable against the
+console nav above, a mounted route, or a live catalogue row:
+
+* pricing tiers are asserted **bidirectionally against `plans` + `feature_limits` + the plan's own
+  `features` JSON**, read over the app's `DATABASE_URL`. The live catalogue is `Free` (50 included
+  credits, `max_phone_numbers` 1), `Pro Monthly` ($49.00/mo, 5,000 included credits,
+  `max_phone_numbers` 5) and `Enterprise` (unlimited, `white_label` + `priority_support`). There is
+  no `Starter` plan and no $29 tier: a tier name or a number that is not in those rows is a defect.
+* a claim about the integration catalogue must exist in `available_providers` (10 rows: coreswift,
+  deepseek, mailgun, nexweave, openai, sam_gov, sendgrid, sendiio, telnyx, twilio). There is no
+  Webhook, Zapier or Slack entry, and there is no public API-key surface (`x-api-key` auth was
+  retired in t_f06b1710).
+* there is no scheduler and no drip: response rules act **once**, on the inbound call, so no page may
+  promise a follow-up "in 24 hours".
+
+Retired from the body in t_a31e61d8, each replaced by the real screen it was standing in front of:
+"Smart Lead Routing" (business hours / area-code / keyword routing) → **Call-Back Queue**; "Call
+Analytics Dashboard" (charts, conversion rate) → **Call Log & CSV Export**; "Auto-Replies &
+Follow-Ups" (reply sequences) → **Phone Numbers on Telnyx**; "Integrates With Your Tools"
+(Webhooks/Zapier/Slack) → **Connect Your Own Providers**. `www/index.html.marketing`, an
+unreferenced served duplicate of the same page, was deleted from both repos with a
+`location = /index.html.marketing { return 404; }` rule.
+
 ## Outbound SMS (the send path)
 
 `POST /api/v1/messages` (kanban t_2ed95642) is the tenant console's Send Message form and the only
