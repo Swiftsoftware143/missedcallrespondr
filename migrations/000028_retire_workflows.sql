@@ -1,0 +1,78 @@
+-- kanban t_66cfccff RETIRE-WORKFLOWS — the inert `workflows` module: the panel, the routes, the
+-- handler, the model, the sold plan row and the store, all in one pass.
+--
+-- WHY THIS IS A RETIREMENT AND NOT A WIRING (measured on the deployed binary 68a5c9f2a74a8e3f and the
+-- live DB `missedcallrespondr`, 2026-10-02):
+--
+--   * NOTHING EVALUATES A WORKFLOW. The only references to the store in the whole crate were
+--     `handlers/workflows_handler.rs` (its own CRUD), `features.rs` (`count_usage`'s
+--     `"max_workflows" | "workflows"` arm and one `COUNT(*)` in `get_usage_json`) and this runner's
+--     DDL. There is no engine, no cron, no webhook action and no `response_rule_eval` arm that reads
+--     one — so every trigger the console offered (`missed_call`, `voicemail`, `sms`) named an event
+--     nothing dispatched. Measured traffic: the whole app has taken ZERO calls (`inbound_calls` = 0,
+--     `call_logs` = 0).
+--   * THE ONLY CREATOR SURFACE COULD NOT DEFINE A STEP. `www-admin/index.html`'s modal posts
+--     `{name, trigger_event}` — the API accepts an optional `steps` array, but no served surface ever
+--     sends one. So every workflow the product can create through its own console has ZERO steps and
+--     would have nothing to run even with an engine behind it.
+--   * THE `voicemail` OPTION IS A PROMISE THIS APP CANNOT KEEP. t_1d4fc956 retired the table, the
+--     routes and the `record_start` command; there is no recording and no transcription anywhere.
+--   * THE PRODUCT'S REAL AUTOMATION IS `response_rules`, AND IT ALREADY WORKS. `response_rule_eval.rs`
+--     (kanban t_31f9cf38) walks a tenant's active rules on EVERY inbound call and fires the first
+--     match — `all_missed_calls` / `specific_numbers` / `time_of_day` / `day_of_week`, with the `sms`
+--     and `callback` actions. `max_rules` is a live registry key with a live gate. Wiring `workflows`
+--     would build a SECOND, competing trigger/action vocabulary for the same events.
+--   * IT WAS NEVER PART OF THE DOCUMENTED PRODUCT. `docs/ADMIN_GUIDE.md` (364 lines, a complete module
+--     table) contained no `workflow` mention at all, and neither did any served root (`www/`,
+--     `www-app/`): the only screen was the operator console's panel.
+--
+-- MEASURED before this file existed (live DB `missedcallrespondr`):
+--   * `SELECT count(*) FROM workflows` = 0, `SELECT count(*) FROM workflow_steps` = 0.
+--   * `feature_limits` held exactly ONE row for the capability: `enterprise | max_workflows | -1`
+--     (one of 15 rows on enterprise; the other 14 are keys with a live gate). No tenant is on
+--     enterprise (`tenant_plans` holds only `free`), so nothing enforced it either.
+--   * `plans.features`: no workflow mention on ANY plan (0 plans whose `features::text` matches
+--     '%workflow%'). Nothing to remove there; recorded so the next pass does not re-open it.
+--   * no inbound FK (`pg_constraint WHERE confrelid = 'public.workflows'` -> only
+--     workflow_steps.workflow_id), so `workflow_steps` goes first and nothing else moves.
+--
+-- DECISION per item, every one REMOVE:
+--   1. the `feature_limits` row — REMOVED here. The console's matrix is registry-driven (`GET
+--      /api/v1/admin/plans/registry` iterates `feature_registry::REGISTRY` x plans) and `max_workflows`
+--      left the registry in the same pass, so the row becomes a sold limit no console can render,
+--      grant or count — the verdict 000022 reached for `max_users` and 000027 for `max_api_keys`.
+--      Measured live BEFORE: the registry listed 18 keys including `max_workflows`, and
+--      `PUT /api/v1/admin/plans/entitlement {"feature":"max_workflows"}` ACCEPTED (200). After the
+--      registry entry went, the same PUT answers 400 "Unknown feature key" and the list is 17 keys.
+--   2. `plans.features` — nothing to remove (measured above).
+--   3. `count_usage` / `get_usage_json` — the arm and the `"workflows"` key are REMOVED in
+--      src/features.rs. Left alone they would be a latent `42P01 undefined_table` -> HTTP 500 once
+--      this file has dropped the tables (`get_usage_json` used `unwrap_or(0)`, which would also have
+--      HIDDEN the error — the exact blindness its `users` comment records).
+--   4. the TABLES — DROPPED here. 0 rows, no writer, no reader. `000011_schema_fix.sql`, their only
+--      creator, no longer creates them, so a FRESH install never builds them either; this file is
+--      what removes them from a database that already has them.
+--   5. the ROUTES, handler and model — deleted in the same pass (src/routes.rs,
+--      src/handlers/workflows_handler.rs, src/models/workflow.rs, their `mod` entries and the
+--      `WORKFLOWS_*` length consts in src/validation.rs). The `www-admin/index.html` panel goes with
+--      them, recorded in the `frontends` repo (it has no `publish-*` path — it is the ops console).
+--
+-- REVERSAL (all halves, if a workflow engine is ever built): git revert of this commit restores the
+-- DDL in 000011 (or adds a new CREATE TABLE file), the handler/model/routes/registry entry; then
+--   INSERT INTO feature_limits (plan_id, feature_key, limit_value)
+--   SELECT id, 'max_workflows', -1 FROM plans WHERE slug = 'enterprise'
+--   ON CONFLICT (plan_id, feature_key) DO NOTHING;
+-- ...and note that the console modal would ALSO have to grow a step editor, because `{name,
+-- trigger_event}` alone can never define an action.
+--
+-- This runner (src/db.rs) re-executes EVERY registered file on EVERY boot and keeps no ledger
+-- (`to_regclass('public._sqlx_migrations')` and `('public._migrations')` both NULL), so every
+-- statement here is idempotent by construction: the second pass deletes 0 rows and drops nothing.
+
+-- 1. the plan DATA row (the last place the capability was still "sold").
+DELETE FROM feature_limits WHERE feature_key IN ('max_workflows', 'workflows');
+
+-- 2. the store itself. `workflow_steps` references `workflows`, so it goes first; both indexes go
+--    with their tables. No inbound FK from anywhere else — measured above.
+DROP TABLE IF EXISTS workflow_steps;
+DROP TABLE IF EXISTS workflows;

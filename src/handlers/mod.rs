@@ -33,7 +33,9 @@ pub mod tags_handler;
 pub mod telnyx_handler;
 pub mod tickets_handler;
 pub mod triggers_handler;
-pub mod workflows_handler;
+// `pub mod workflows_handler;` removed (kanban t_66cfccff) — the module, its routes and both tables
+// are retired. `workflowswift_push` is a DIFFERENT thing and stays: it best-effort pushes a new
+// CONTACT to WorkflowSwift; it never reads the `workflows` table.
 pub mod workflowswift_push;
 
 pub mod site_handler;

@@ -88,26 +88,13 @@ CREATE TABLE IF NOT EXISTS deals (
 CREATE INDEX IF NOT EXISTS idx_deals_tenant ON deals(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(tenant_id, stage);
 
--- ── Workflows + steps ───────────────────────────────────
-CREATE TABLE IF NOT EXISTS workflows (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    name        VARCHAR(255) NOT NULL,
-    trigger_event VARCHAR(64) NOT NULL DEFAULT 'missed_call',
-    is_active   BOOLEAN NOT NULL DEFAULT true,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant_id);
-CREATE TABLE IF NOT EXISTS workflow_steps (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workflow_id  UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-    step_order   INTEGER NOT NULL DEFAULT 0,
-    action_type  VARCHAR(32) NOT NULL DEFAULT 'sms',
-    action_config JSONB NOT NULL DEFAULT '{}',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_workflow_steps_wf ON workflow_steps(workflow_id);
+-- ── Workflows + steps — REMOVED ─────────────────────────
+-- The `workflows` / `workflow_steps` DDL is GONE (kanban t_66cfccff): the store was CRUD-only with no
+-- evaluator anywhere in the crate, so every trigger the console offered named an event nothing
+-- dispatched, and the modal that created one could not even define a step. Migration
+-- `000028_retire_workflows.sql` drops both tables on a database that already has them; removing the
+-- DDL here is what stops a FRESH install from building a store nothing can name. The app's real
+-- automation surface is `response_rules` (`handlers/response_rule_eval.rs`).
 
 -- ── Campaigns ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS campaigns (

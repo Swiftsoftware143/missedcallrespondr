@@ -479,53 +479,11 @@ const Deals = () => {
   </div>`;
 };
 
-// ---- WORKFLOWS ----
-const Workflows = () => {
-  const st = viewState('workflows', { list: [], showModal: false, editItem: null });
-  const load = async () => { try { const data = await API.get('/workflows'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
-  if (!st._loaded) { st._loaded = true; load(); }
-  const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
-  const hide = () => { st.showModal = false; renderApp(); };
-  const save = async (data) => {
-    try { if(st.editItem) await API.put('/workflows/' + st.editItem.id, data); else await API.post('/workflows', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
-  };
-  const remove = async (id) => { if(!confirm('Delete this workflow?')) return; await API.del('/workflows/' + id); load(); };
-  const toggle = async (w) => { try { const ep = w.is_active ? '/workflows/' + w.id + '/deactivate' : '/workflows/' + w.id + '/activate'; await API.post(ep); load(); } catch(e){ alert(e.message); } };
-  return html`<div>
-    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Workflows</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Workflow</button></div>
-    <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Name</th><th>Trigger</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(w => html`<tr>
-          <td class="font-medium">${w.name || '-'}</td><td class="text-gray-500">${w.trigger_event || 'missed_call'}</td>
-          <td><span class="badge ${w.is_active ? 'badge-green' : 'badge-red'}">${w.is_active ? 'Active' : 'Inactive'}</span></td>
-          <td><button class="btn btn-sm ${w.is_active ? 'btn-outline' : 'btn-green'}" onClick=${() => toggle(w)}>${w.is_active ? 'Deactivate' : 'Activate'}</button><button class="btn btn-sm btn-outline" onClick=${() => { show(w); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(w.id)}>Delete</button></td>
-        </tr>`)}
-        ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No workflows yet.</td></tr>`}
-      </tbody></table>
-    </div>
-    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
-      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Workflow</h3>
-        ${(() => {
-          // kanban t_13330c68 — the draft lives in the SHARED view object (S.views['workflows_form']), seeded ON
-          // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
-          // per-render local re-initialised the field from the stored ROW and wiped what the operator
-          // typed (guard rule 4); a re-render can no longer do that.
-          const f = viewState('workflows_form', { name: '', trigger_event: 'missed_call' });
-          if (!st.formSeeded) {
-            f.name = st.editItem?.name||'';
-            f.trigger_event = st.editItem?.trigger_event||'missed_call';
-            st.formSeeded = true;
-          }
-          return html`<div class="space-y-3">
-            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
-            <div><label class="text-sm font-medium block mb-1">Trigger</label><select class="input" value=${f.trigger_event} onChange=${e => { f.trigger_event = e.target.value; }}><option value="missed_call">Missed Call</option><option value="voicemail">Voicemail</option><option value="sms">SMS</option></select></div>
-            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, trigger_event: f.trigger_event})}>${st.editItem ? 'Save' : 'Add'}</button></div>
-          </div>`; })()}
-      </div>
-    </div>`}
-  </div>`;
-};
-
+// kanban t_66cfccff — the Workflows panel is RETIRED with the module it drove. The
+// `workflows`/`workflow_steps` store was CRUD-only with NO evaluator anywhere, so every
+// trigger this select offered (`missed_call`, `voicemail`, `sms`) named an event nothing
+// dispatched, and the modal could not even define a step (`{name, trigger_event}` only).
+// The app's real automation is Response Rules, which IS evaluated on every inbound call.
 // ---- CAMPAIGNS ----
 const Campaigns = () => {
   const st = viewState('campaigns', { list: [], tags: [], showModal: false, editItem: null });
@@ -1608,7 +1566,7 @@ const App = () => {
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'leads', label: 'Leads', icon: '🎯' },
     { id: 'deals', label: 'Deals', icon: '💰' },
-    { id: 'workflows', label: 'Workflows', icon: '⚡' },
+    // kanban t_66cfccff — the `workflows` nav entry (and its view) is RETIRED with the module.
     { id: 'campaigns', label: 'Campaigns', icon: '📣' },
     { id: 'lists', label: 'Lists', icon: '📇' },
     { id: 'core', label: 'CoreSwift', icon: '🔗' },
@@ -1689,7 +1647,7 @@ const App = () => {
 };
 
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, workflows: Workflows, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole};
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">

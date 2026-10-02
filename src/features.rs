@@ -297,9 +297,13 @@ async fn count_usage(pool: &PgPool, tenant_id: Uuid, key: &str) -> Result<i64, A
         // declares `features.max_users`), and in `get_usage_json` below `unwrap_or(0)` hid it.
         "max_users" | "users" => Some("SELECT COUNT(*) FROM users WHERE tenant_id = $1"),
         "max_deals" | "deals" => Some("SELECT COUNT(*) FROM deals WHERE tenant_id = $1"),
-        "max_workflows" | "workflows" => {
-            Some("SELECT COUNT(*) FROM workflows WHERE tenant_id = $1")
-        }
+        // `workflows` arm REMOVED (kanban t_66cfccff): the `workflows`/`workflow_steps` store was
+        // CRUD-only with no evaluator anywhere in the crate, and `000028_retire_workflows.sql` drops
+        // both tables (their only creator, `000011_schema_fix.sql`, no longer creates them). Keeping
+        // this arm would keep the last code literal alive AND be a latent `42P01 undefined_table`
+        // -> 500 for any future caller that passes the key (the same shape t_ab963d11 removed for
+        // `api_keys`). The key also left `feature_registry::REGISTRY` with the routes, so no gate can
+        // be called with it.
         "max_campaigns" | "campaigns" => {
             Some("SELECT COUNT(*) FROM campaigns WHERE tenant_id = $1")
         }
@@ -463,16 +467,13 @@ pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value
         .fetch_one(pool)
         .await
         .unwrap_or(0);
-    let workflows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workflows WHERE tenant_id = $1")
-        .bind(tenant_id)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    // The `workflows` count is GONE with the module (kanban t_66cfccff): the table is dropped by
+    // `000028_retire_workflows.sql`, so this query would be a `42P01 undefined_table` that
+    // `unwrap_or(0)` would have hidden — the exact blindness the `users` comment above records.
     serde_json::json!({
         "contacts": contacts,
         "leads": leads,
         "deals": deals,
-        "workflows": workflows,
         "phone_numbers": phone_numbers,
         "rules": rules,
         "users": users

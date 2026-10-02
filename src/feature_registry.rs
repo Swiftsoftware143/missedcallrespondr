@@ -136,15 +136,6 @@ pub const REGISTRY: &[FeatureDef] = &[
         read_by_gate: true,
     },
     FeatureDef {
-        key: "max_workflows",
-        label: "Workflows",
-        kind: FeatureKind::Limit,
-        unit: Some("workflows"),
-        storage: Storage::FeatureLimits,
-        enforced_by: "POST /api/v1/workflows (workflows_handler::create)",
-        read_by_gate: true,
-    },
-    FeatureDef {
         key: "max_campaigns",
         label: "Campaigns",
         kind: FeatureKind::Limit,

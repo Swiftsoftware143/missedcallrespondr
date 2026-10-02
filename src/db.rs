@@ -195,6 +195,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000027_retire_api_keys",
             include_str!("../migrations/000027_retire_api_keys.sql"),
         ),
+        // 000028 retires the inert `workflows` module (kanban t_66cfccff): the ONE `feature_limits`
+        // row that still sold `max_workflows` on `enterprise`, and both tables of a store nothing
+        // evaluates. Pure idempotent DELETE + `DROP TABLE IF EXISTS` — this runner re-executes every
+        // file on every boot, so the second pass is a no-op. On a FRESH install the DELETE matches
+        // nothing (operator data) and there is nothing to drop, because `000011_schema_fix.sql` no
+        // longer creates the tables; the DROP is kept so a database that built them loses them.
+        (
+            "000028_retire_workflows",
+            include_str!("../migrations/000028_retire_workflows.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

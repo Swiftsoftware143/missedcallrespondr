@@ -86,9 +86,8 @@ pub mod max {
     pub const TICKET_MESSAGES_SENDER_TYPE: usize = 16;
 
     // workflows / workflow_steps
-    pub const WORKFLOWS_NAME: usize = 255;
-    pub const WORKFLOWS_TRIGGER_EVENT: usize = 64;
-    pub const WORKFLOW_STEPS_ACTION_TYPE: usize = 32;
+    // `workflows` / `workflow_steps` length consts RETIRED (kanban t_66cfccff) with the module they
+    // bounded — the routes, the handler and both tables are gone, so nothing can pass these strings.
 
     // calendar_events
     pub const CALENDAR_EVENTS_TITLE: usize = 255;

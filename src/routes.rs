@@ -494,26 +494,16 @@ pub fn create_router(state: AppState) -> Router {
                 .put(crate::handlers::clients_handler::update)
                 .delete(crate::handlers::clients_handler::delete),
         )
-        // Workflows
-        .route(
-            "/api/v1/workflows",
-            get(crate::handlers::workflows_handler::list)
-                .post(crate::handlers::workflows_handler::create),
-        )
-        .route(
-            "/api/v1/workflows/:id",
-            get(crate::handlers::workflows_handler::get)
-                .put(crate::handlers::workflows_handler::update)
-                .delete(crate::handlers::workflows_handler::delete),
-        )
-        .route(
-            "/api/v1/workflows/:id/activate",
-            post(crate::handlers::workflows_handler::activate),
-        )
-        .route(
-            "/api/v1/workflows/:id/deactivate",
-            post(crate::handlers::workflows_handler::deactivate),
-        )
+        // `GET|POST /api/v1/workflows`, `GET|PUT|DELETE /api/v1/workflows/:id` and
+        // `POST /api/v1/workflows/:id/{activate,deactivate}` are RETIRED (kanban t_66cfccff): the
+        // `workflows`/`workflow_steps` store was CRUD-only with NO evaluator anywhere (no engine, no
+        // cron, no webhook arm, no `response_rule_eval` arm), so every trigger the console offered
+        // named an event nothing dispatched — and one of them (`voicemail`) had already been retired
+        // by t_1d4fc956. The app's real automation surface is `response_rules` (see
+        // `handlers/response_rule_eval.rs`), which IS evaluated on every inbound call. Migration
+        // `000028_retire_workflows.sql` deletes the sold `max_workflows` plan row and drops both
+        // tables, and `000011_schema_fix.sql` no longer creates them, so a fresh install never
+        // builds a store nothing can name.
         // Admin endpoints (cross-app portfolio sync + impersonation)
         .route(
             "/api/v1/admin/portfolio-sync",
