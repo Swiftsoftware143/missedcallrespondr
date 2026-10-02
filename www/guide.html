@@ -147,6 +147,7 @@
     <li><a href="#followups">Follow-ups</a></li>
     <li><a href="#contacts">Contacts</a></li>
     <li><a href="#templates">Message Templates</a></li>
+    <li><a href="#messages">Messages</a></li>
     <li><a href="#voicemails">Voicemails</a></li>
     <li><a href="#integrations">Integrations</a></li>
     <li><a href="#settings">Settings</a></li>
@@ -516,6 +517,44 @@
 
   <h3>Editing &amp; Deleting</h3>
   <p>Templates can be edited or deleted from the same list. Deleting a template does <em>not</em> affect rules that already used it — the text is copied at rule-save time.</p>
+
+  <!-- Messages -->
+  <h2 id="messages">Messages</h2>
+  <p>
+    The <strong>Messages</strong> tab is the outbound text log and the place you send a text by hand.
+    <strong>+ Send Message</strong> opens a form pre-filled with a number this account holds as the
+    <strong>From</strong> number; enter the recipient and the text and press <strong>Send</strong>.
+    The message is transmitted from your own Telnyx number, and the row records what the provider
+    reports — nothing is marked sent or delivered that the provider did not confirm.
+  </p>
+
+  <h3>What each status means</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>What happened</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>queued</strong></td><td>Telnyx accepted the message. It has not been handed to the recipient's carrier yet.</td></tr>
+      <tr><td><strong>sent</strong></td><td>The carrier took the message. The <strong>Sent</strong> column shows when Telnyx reported this.</td></tr>
+      <tr><td><strong>delivered</strong></td><td>The recipient's network confirmed delivery. The <strong>Delivered</strong> column shows when Telnyx reported this.</td></tr>
+      <tr><td><strong>failed</strong></td><td>The provider refused the message or the carrier reported a failure. The reason Telnyx gave is shown in a dialog when you send; the attempt stays in the log as <strong>failed</strong>.</td></tr>
+      <tr><td><strong>logged</strong></td><td>A message recorded as received (inbound). Nothing is transmitted for these.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>ℹ️ Sending needs a connected number</strong>
+    <p>
+      The <strong>From</strong> number must be a number this account holds — see the
+      <strong>Phone Numbers</strong> tab in the app. If the platform has no Telnyx credential saved
+      yet, sending answers
+      <em>"Text delivery is not configured"</em> and nothing is recorded: an operator has to save the
+      Telnyx API key and the messaging profile of a messaging-enabled number first.
+    </p>
+  </div>
 
   <!-- Voicemails -->
   <h2 id="voicemails">Voicemails</h2>

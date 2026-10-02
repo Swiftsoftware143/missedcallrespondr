@@ -188,6 +188,39 @@ affiliate store involved: `plans_handler::notify_funnelswift_upgrade` POSTs
 with referral metadata. The former in-app `affiliates_handler` CRUD (and its `/api/v1/affiliates`
 routes and admin-console panel actions) is retired.
 
+## Outbound SMS (the send path)
+
+`POST /api/v1/messages` (kanban t_2ed95642) is the tenant console's Send Message form and the only
+writer of `messages` rows. It now transmits: an `outbound` message calls
+`POST https://api.telnyx.com/v2/messages` with the stored `telnyx_config.api_key` +
+`messaging_profile_id` and the caller's own ACTIVE `phone_numbers` number as `from`.
+
+- **Configuration.** Admin console -> *Telnyx Config & Numbers* -> *Save Telnyx config*
+  (`PUT /api/v1/admin/telnyx-config`, fields `api_key`, `profile_id`, `messaging_profile_id`). With
+  no `api_key` or no `messaging_profile_id` the route answers `503`
+  (`Text delivery is not configured: …`) and writes **no** row — nothing was attempted, so there is
+  nothing to record.
+- **The stored status is the provider's answer, never the request.** `queued` on an accepted send;
+  `sent` / `delivered` only when Telnyx's own `to[].status` says so; `failed` on a refusal.
+  `sent_at` is NULL until the provider reports a hand-off and `delivered_at` stays NULL until a
+  delivery event says otherwise. A word this app has not seen is stored as `queued` (accepted,
+  nothing claimed).
+- **A refusal is stored before the caller is told.** A non-2xx answer (or a failure status inside a
+  2xx) becomes a `failed` row carrying Telnyx's own words, and the caller gets **424** with that
+  reason; the console shows it and reloads the log. `provider_message_id` holds Telnyx's message id.
+  (424 Failed Dependency, not 502: Cloudflare replaces an origin **502/504** with its own error page
+  — measured on this host 2026-10-02 — so a 502 would hand the operator a JavaScript parse error
+  instead of Telnyx's sentence. 4xx bodies pass through the edge verbatim.)
+- **Delivery events.** `POST /api/v1/telnyx/webhook` (public) applies the MESSAGE events —
+  `message.sent` moves a row to `sent`, `message.finalized` to `delivered` (setting `delivered_at`)
+  or `failed` — matched by `provider_message_id`. A `delivered` row is terminal; an event whose id
+  matches no row changes nothing (including every `message.received`, which this app does not store).
+- **`TELNYX_API_BASE`** overrides the API host (default `https://api.telnyx.com`), exactly as
+  `PAYPAL_API_BASE` does for the PayPal verify call. It exists for acceptance runs against a stub
+  server; unset behaviour is byte-identical to the production host.
+- **Inbound** is a recording arm, not a transport: a hand-recorded `direction=inbound` row is stored
+  `logged` with `sent_at` NULL and nothing is transmitted.
+
 ## Monitoring
 
 - Logs: `journalctl -u missedcallrespondr -n 100 --no-pager`

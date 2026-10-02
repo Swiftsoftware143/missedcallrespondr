@@ -178,11 +178,127 @@ async fn tenant_has_own_telnyx(pool: &sqlx::PgPool, tenant_id: Uuid) -> Result<b
 }
 
 /// Fetch our global Telnyx config (single row).
-async fn get_telnyx_config(pool: &sqlx::PgPool) -> Result<Option<TelnyxConfig>, AppError> {
+///
+/// `pub(crate)` because the outbound SMS transport reads the same credential from its own handler
+/// (kanban t_2ed95642): one reader, one row, one place to change if the storage moves.
+pub(crate) async fn get_telnyx_config(
+    pool: &sqlx::PgPool,
+) -> Result<Option<TelnyxConfig>, AppError> {
     let config = sqlx::query_as::<_, TelnyxConfig>("SELECT * FROM telnyx_config LIMIT 1")
         .fetch_optional(pool)
         .await?;
     Ok(config)
+}
+
+/// Apply one Telnyx MESSAGE event to the row the send path stored (kanban t_2ed95642).
+///
+/// Telnyx reports an outbound message twice: `message.sent` when the carrier takes it and
+/// `message.finalized` when the recipient's network reports the outcome. Both carry the same MDR,
+/// keyed by the provider's own message id, which is why the send path persists
+/// `messages.provider_message_id`.
+///
+/// Rules, all of them the provider's own words:
+///
+/// * `to[0].status == "delivered"` (or an errors-free finalized event that says so) sets
+///   `delivered_at`, and `sent_at` too if it was still NULL — a delivery implies the hand-off.
+/// * `sent` moves the row to `sent` and fills `sent_at`.
+/// * a failure — a failure word or a non-empty `errors` array — moves the row to `failed`.
+/// * a `delivered` row is TERMINAL: no later event may un-confirm a delivery.
+/// * an event whose id matches no row (every `message.received`, which this app does not store, and
+///   any event for a row written before the transport existed) changes nothing and is acked.
+///
+/// The endpoint is public (Telnyx sends unauthenticated requests), so the answer says only whether a
+/// row matched — never the row's contents.
+async fn handle_message_event(
+    state: &AppState,
+    event_type: &str,
+    body: &Value,
+) -> ApiResult<Json<Value>> {
+    let provider_id = body
+        .pointer("/data/payload/id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let Some(provider_id) = provider_id else {
+        tracing::info!(
+            "Telnyx {} event carried no message id; nothing to match",
+            event_type
+        );
+        return Ok(Json(json!({ "received": true, "matched": false })));
+    };
+
+    let word = body
+        .pointer("/data/payload/to/0/status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let errors_present = body
+        .pointer("/data/payload/errors")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+
+    let mapped = match crate::handlers::message_handler::map_provider_status(word) {
+        Some(("queued", _, _)) | None => None,
+        Some((status, _, _)) => Some(status),
+    };
+    // A failed delivery is reported both ways; either one is the provider's verdict.
+    let mapped = if errors_present {
+        Some("failed")
+    } else {
+        mapped
+    };
+
+    let affected = match mapped {
+        Some("delivered") => {
+            let now = chrono::Utc::now().naive_utc();
+            sqlx::query(
+                "UPDATE messages
+                 SET status = 'delivered', sent_at = COALESCE(sent_at, $2), delivered_at = COALESCE(delivered_at, $2)
+                 WHERE provider_message_id = $1",
+            )
+            .bind(&provider_id)
+            .bind(now)
+            .execute(&state.pool)
+            .await?
+            .rows_affected()
+        }
+        Some("sent") => {
+            let now = chrono::Utc::now().naive_utc();
+            sqlx::query(
+                "UPDATE messages
+                 SET status = 'sent', sent_at = COALESCE(sent_at, $2)
+                 WHERE provider_message_id = $1 AND status <> 'delivered'",
+            )
+            .bind(&provider_id)
+            .bind(now)
+            .execute(&state.pool)
+            .await?
+            .rows_affected()
+        }
+        Some("failed") => sqlx::query(
+            "UPDATE messages SET status = 'failed'
+             WHERE provider_message_id = $1 AND status <> 'delivered'",
+        )
+        .bind(&provider_id)
+        .execute(&state.pool)
+        .await?
+        .rows_affected(),
+        _ => 0,
+    };
+
+    tracing::info!(
+        "Telnyx {} for message {} -> {} (rows affected: {})",
+        event_type,
+        provider_id,
+        mapped.unwrap_or("no change"),
+        affected
+    );
+
+    Ok(Json(json!({
+        "received": true,
+        "event": event_type,
+        "matched": affected > 0,
+    })))
 }
 
 /// Build a Telnyx call-control "hangup" response (JSON).
@@ -264,7 +380,17 @@ pub async fn webhook(
         call_control_id
     );
 
-    // -- 2. Only process inbound calls
+    // -- 2. MESSAGE events (kanban t_2ed95642). The outbound send path stores the PROVIDER'S OWN
+    //        message id (`messages.provider_message_id`), and the delivery events Telnyx sends
+    //        afterwards are matched by it, so a row moves queued -> sent -> delivered (or failed)
+    //        only when the provider says so. Handled before the call-control arm, which would
+    //        otherwise ack them with empty commands and leave every row frozen at its send-time
+    //        status — `delivered_at` NULL forever.
+    if event_type.starts_with("message.") {
+        return handle_message_event(&state, &event_type, &body).await;
+    }
+
+    // -- 3. Only process inbound calls
     match event_type.as_str() {
         "call_received" | "call_initiated" => { /* proceed */ }
         _ => {

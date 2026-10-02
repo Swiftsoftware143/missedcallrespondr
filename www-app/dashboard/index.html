@@ -305,6 +305,15 @@ const Templates = () => {
   </div>`;
 };
 
+// kanban t_2ed95642 — the badge paints the PROVIDER'S answer, never ours: green only for what
+// Telnyx confirmed (sent to the carrier / delivered to the handset), blue while it is still with
+// the provider, red for a message the provider refused.
+const messageBadge = (s) => (s === 'delivered' || s === 'sent') ? 'badge-green' : s === 'failed' ? 'badge-red' : s === 'queued' ? 'badge-blue' : 'badge-yellow';
+// The API stores naive UTC (the server writes Utc::now().naive_utc()). A naive ISO string is read
+// by the browser as LOCAL time, so the clock time would be wrong by the timezone offset; pin it to
+// UTC before formatting.
+const utcTime = (v) => { if (!v) return '-'; const s = String(v); const iso = /[zZ]|[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z'; const d = new Date(iso); return isNaN(d.getTime()) ? '-' : d.toLocaleString(); };
+
 // ===== MESSAGES =====
 const Messages = () => {
   const st = viewState('messages', { list: [], numbers: [], showModal: false });
@@ -316,13 +325,15 @@ const Messages = () => {
   const loadNumbers = async () => { try { const d = await API.get('/telnyx/numbers'); st.numbers = Array.isArray(d) ? d : (d && Array.isArray(d.numbers) ? d.numbers : []); renderApp(); } catch (e) { st.numbers = []; } };
   if (!st._loaded) { st._loaded = true; load(); loadNumbers(); }
   const hide = () => { st.showModal = false; renderApp(); };
-  const send = async (data) => { try { await API.post('/messages', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  const send = async (data) => { try { await API.post('/messages', data); st.showModal = false; load(); } catch (e) { /* kanban t_2ed95642 — a send can now fail at the provider: the route records the attempt as a "failed" row and answers 424 with Telnyx's own reason (424 rather than 502: the CDN replaces an origin 502 with its own page, so the provider's sentence would never reach this dialog), so the log is reloaded on the error path too (the failed row is part of it) and the modal stays open for a retry. */ alert(e.message); load(); } };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Messages</h2><button class="btn btn-sm btn-green" onClick=${() => { st.formSeeded = false; st.showModal = true; renderApp(); }}>+ Send Message</button></div>
+    ${'' /* kanban t_2ed95642 — the send path now really transmits through Telnyx, and this table paints the PROVIDER'S answer: queued/sent/delivered as Telnyx reports them, failed when it refuses. The Sent and Delivered columns show the provider's own timestamps and each stays "-" until the provider says so. */}
+    <p class="text-sm text-gray-500 mb-3">Messages are sent from your own number through the Telnyx number this account holds. A message shows <span class="font-medium">queued</span> when Telnyx accepts it, <span class="font-medium">sent</span> when the carrier takes it and <span class="font-medium">delivered</span> when the recipient's network confirms it. A message the provider refuses is recorded as <span class="font-medium">failed</span> and the reason is shown when you send it.</p>
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Sent</th></tr></thead>
-        <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to_number||m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${m.status==='sent'||m.status==='delivered'?'badge-green':'badge-yellow'}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${m.created_at?new Date(m.created_at).toLocaleDateString():'-'}</td></tr>`)}
-        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No messages yet.</td></tr>`}
+      <table class="table"><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Sent</th><th>Delivered</th></tr></thead>
+        <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to_number||m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${messageBadge(m.status)}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${utcTime(m.sent_at)}</td><td class="text-gray-500 text-sm">${utcTime(m.delivered_at)}</td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No messages yet.</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">Send Message</h3>

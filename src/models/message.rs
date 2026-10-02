@@ -14,6 +14,10 @@ pub struct Message {
     pub status: String,
     pub sent_at: Option<NaiveDateTime>,
     pub delivered_at: Option<NaiveDateTime>,
+    /// The PROVIDER'S OWN message id (kanban t_2ed95642) — the key the Telnyx message events
+    /// (`message.sent` / `message.finalized`) are matched by. NULL means "no provider reference":
+    /// a recorded inbound message, or a row written before the transport existed.
+    pub provider_message_id: Option<String>,
     pub tenant_id: Uuid,
     pub created_at: NaiveDateTime,
 }

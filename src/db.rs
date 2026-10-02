@@ -155,6 +155,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000023_messages_status_logged_default",
             include_str!("../migrations/000023_messages_status_logged_default.sql"),
         ),
+        // 000024 adds `messages.provider_message_id` (kanban t_2ed95642): the transport now calls
+        // Telnyx's `/v2/messages`, and the only key a later delivery event can be matched by is the
+        // provider's own message id. Additive + idempotent (ADD COLUMN IF NOT EXISTS + a PARTIAL
+        // unique index, so the many NULLs stay legal).
+        (
+            "000024_messages_provider_message_id",
+            include_str!("../migrations/000024_messages_provider_message_id.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

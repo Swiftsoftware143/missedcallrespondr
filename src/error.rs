@@ -24,6 +24,25 @@ pub enum AppError {
     /// field whose value is semantically impossible. Never return it with a `text/plain` body —
     /// every frontend does `await r.json()` before checking `r.ok`.
     Unprocessable(String),
+    /// 503 — the service is deployable but a piece of OPERATOR configuration this route depends on
+    /// is missing, so nothing was attempted. Added by kanban t_2ed95642 for the outbound SMS path:
+    /// with `telnyx_config` empty there is nothing to send with, and the honest answer is a refusal
+    /// that names the missing configuration — not a 500, and not a stored row implying an attempt.
+    /// Fleet precedent: the unconfigured payment receivers answer 503.
+    ServiceUnavailable(String),
+    /// 424 — the PROVIDER was reached and refused (or could not be reached). Added by kanban
+    /// t_2ed95642: the send path stores the failure from the provider's own answer first, then
+    /// answers the caller with the provider's words.
+    ///
+    /// WHY 424 AND NOT 502: this app sits behind Cloudflare, and CF REPLACES an origin 502 (and
+    /// 504) with its own error page — measured live 2026-10-02, `POST /api/v1/messages` through
+    /// `app.missedcallrespondr.com` came back `content-type: text/plain` (16 bytes) while the origin
+    /// answered the same request `application/json` with Telnyx's reason. A 502 would therefore
+    /// deliver the operator a JavaScript parse error instead of the provider's sentence, so the
+    /// failure uses 424 Failed Dependency — the exact HTTP meaning (the action depended on another
+    /// action and that action failed), and a 4xx, which the edge passes through verbatim. Verified
+    /// through the edge after deploy: the browser sees this JSON body.
+    UpstreamRefused(String),
 }
 
 impl IntoResponse for AppError {
@@ -36,6 +55,8 @@ impl IntoResponse for AppError {
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::UpgradeRequired(msg) => (StatusCode::PAYMENT_REQUIRED, msg),
             AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
+            AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
+            AppError::UpstreamRefused(msg) => (StatusCode::FAILED_DEPENDENCY, msg),
         };
         (status, Json(json!({"error": message}))).into_response()
     }
