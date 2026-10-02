@@ -416,13 +416,16 @@ pub async fn purchase_number(
     // released row, fell through to the INSERT, and the unique index answered 23505 — a 500 on a
     // documented path (kanban t_4c15d597). The released slot is intentionally reusable: the plan
     // gate above counts ACTIVE rows only (t_b578b169) and so does `list_numbers` below.
+    // The lookup is GLOBAL by `number` on purpose (one number = one row), but an ACTIVE row owned by
+    // another tenant is now REFUSED with 409 rather than reassigned (kanban t_e05013d4) — see the
+    // arm below.
     let existing: Option<(Uuid, Uuid, bool)> =
         sqlx::query_as("SELECT id, tenant_id, is_active FROM phone_numbers WHERE number = $1")
             .bind(&number)
             .fetch_optional(&state.pool)
             .await?;
 
-    if let Some((existing_id, current_tenant, is_active)) = existing {
+    if let Some((_existing_id, current_tenant, is_active)) = existing {
         if is_active {
             if current_tenant == tenant_id {
                 return Err(AppError::Conflict(
@@ -430,21 +433,20 @@ pub async fn purchase_number(
                 ));
             }
 
-            // Reassign a number another tenant currently holds (unchanged behaviour).
-            sqlx::query(
-                "UPDATE phone_numbers SET tenant_id = $1, updated_at = NOW() WHERE id = $2",
-            )
-            .bind(tenant_id)
-            .bind(existing_id)
-            .execute(&state.pool)
-            .await?;
-
-            return Ok(Json(json!({
-                "id": existing_id,
-                "number": number,
-                "assigned": true,
-                "reassigned": true
-            })));
+            // ARM (a) — kanban t_e05013d4, decided by measurement: an ACTIVE number is NOT
+            // transferable through this route. This route IS the tenant route (routes.rs puts
+            // `POST /api/v1/telnyx/numbers` in the authenticated group with no role check) and
+            // `PurchaseNumberRequest` carries no target tenant, so no caller can hand a number to
+            // someone else — the old arm could only TAKE one. Measured live on 251193a4: tenant B
+            // POSTing tenant A's active number answered `200 {"reassigned":true}`, flipped
+            // `phone_numbers.tenant_id` to B and dropped the number out of A's own list. The
+            // request's `reassigned` flag is read by no client (grepped: not in www-app, www-admin
+            // or www), so nothing depends on the takeover.
+            // A number another account holds is refused with 409 instead. The RELEASED arm below is
+            // untouched: a released row is unowned inventory and stays claimable (t_4c15d597).
+            return Err(AppError::Conflict(
+                "This number is in use by another account".into(),
+            ));
         }
     }
 
