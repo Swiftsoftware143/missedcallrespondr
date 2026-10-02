@@ -4,15 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MissedCall Respondr — Never Miss a Business Call Again</title>
-<meta name="description" content="MissedCall Respondr automatically captures, responds to, and converts missed business calls into leads. 24/7 automated text-back, voicemail transcription, and lead routing.">
-<meta name="keywords" content="missed call, auto-responder, business calls, lead capture, text-back, voicemail, SMS auto-reply, call handling, small business">
+<meta name="description" content="MissedCall Respondr automatically captures, responds to, and converts missed business calls into leads. 24/7 automated text-back and a call-back queue for your team.">
+<meta name="keywords" content="missed call, auto-responder, business calls, lead capture, text-back, SMS auto-reply, call handling, small business">
 <meta name="author" content="MissedCall Respondr">
 <link rel="canonical" href="https://missedcallrespondr.com">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://missedcallrespondr.com">
 <meta property="og:title" content="MissedCall Respondr — Never Miss a Business Call Again">
-<meta property="og:description" content="Automatically capture, respond to, and convert missed business calls into leads. 24/7 automated text-back, voicemail transcription, and lead routing.">
+<meta property="og:description" content="Automatically capture, respond to, and convert missed business calls into leads. 24/7 automated text-back and a call-back queue for your team.">
 <meta property="og:image" content="https://missedcallrespondr.com/og-image.png">
 <meta property="og:site_name" content="MissedCall Respondr">
 <meta name="twitter:card" content="summary_large_image">
@@ -31,7 +31,7 @@
  "applicationCategory": "BusinessApplication",
  "operatingSystem": "Web-based",
  "isAccessibleForFree": false,
- "description": "Automated missed call response platform. Captures missed business calls and auto-responds via SMS, routes leads to your team, transcribes voicemails, and never lets a customer fall through the cracks.",
+ "description": "Automated missed call response platform. Captures missed business calls and auto-responds via SMS, routes leads to your team, queues a call-back for your team, and never lets a customer fall through the cracks.",
  "offers": { "@type": "Offer", "price": "0.00", "priceCurrency": "USD" }
 }
 </script>
@@ -80,7 +80,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       <span class="gradient-text">Business Call</span> Again
     </h1>
     <p class="text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-10">
-      MissedCall Respondr automatically captures every missed call, sends an instant SMS text-back, transcribes voicemails, and routes the lead to your team — all before you even pick up your phone.
+      MissedCall Respondr automatically captures every missed call, sends an instant SMS text-back and queues a call-back for your team — all before you even pick up your phone.
     </p>
     <div class="flex flex-col sm:flex-row gap-4 justify-center">
       <a href="https://app.missedcallrespondr.com/login" class="cta-gradient text-white px-8 py-4 rounded-xl text-lg font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-blue-600/25">
@@ -112,9 +112,9 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <p class="text-gray-400 text-sm leading-relaxed">The moment a customer's call goes unanswered, MissedCall Respondr fires off a personalized SMS text-back. "Hey, we saw you called — how can we help?" — automatically.</p>
       </div>
       <div class="card-hover bg-[#1a1f2e] border border-gray-800 rounded-2xl p-8">
-        <div class="w-12 h-12 bg-purple-600/20 rounded-xl flex items-center justify-center mb-5 text-2xl">🎙️</div>
-        <h3 class="text-lg font-semibold text-white mb-3">Voicemail Transcription</h3>
-        <p class="text-gray-400 text-sm leading-relaxed">Every voicemail is transcribed and delivered to your dashboard as searchable text. No more listening through long messages — read them instantly and respond faster.</p>
+        <div class="w-12 h-12 bg-purple-600/20 rounded-xl flex items-center justify-center mb-5 text-2xl">⚙️</div>
+        <h3 class="text-lg font-semibold text-white mb-3">Automated Response Rules</h3>
+        <p class="text-gray-400 text-sm leading-relaxed">Decide what happens on a missed call: text the caller back automatically, or queue a call-back for your team. Rules are checked in priority order and the first match acts.</p>
       </div>
       <div class="card-hover bg-[#1a1f2e] border border-gray-800 rounded-2xl p-8">
         <div class="w-12 h-12 bg-green-600/20 rounded-xl flex items-center justify-center mb-5 text-2xl">🔄</div>
@@ -198,7 +198,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <p class="text-gray-500 text-sm mb-8">Up to 500 missed calls/month</p>
         <ul class="space-y-3 mb-8">
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Everything in Starter</li>
-          <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Voicemail transcription</li>
+          <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Automated text-back on every missed call</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Lead routing</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> 5 phone numbers</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Follow-up sequences</li>

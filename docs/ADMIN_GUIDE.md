@@ -2,14 +2,20 @@
 
 ## System Overview
 
-MissedCallRespondr (MCR) handles call tracking, SMS/MMS messaging, voicemail automation, and follow-up sequences triggered by missed calls. All transactional emails use the database-backed template system.
+MissedCallRespondr (MCR) handles call tracking, SMS messaging, the response rules that answer a
+missed call, and the call-back follow-ups those rules queue. All transactional emails use the
+database-backed template system.
+
+There is NO voicemail capability: see the Voicemail row of [Module Handlers](#module-handlers) and
+kanban t_b4cbe8bc. Nothing in the product records, stores, transcribes or plays a voicemail, and no
+console screen and no guide may claim one.
 
 ## Quick Reference
 
 - **Backend:** Rust (Axum) @ port 8088, systemd unit `missedcallrespondr`
 - **Database:** PostgreSQL (docker: swift-postgres-1) — `missedcallrespondr`
 - **Admin Web App:** Served via app backend on port 8088
-- **Repo:** `/opt/swift/MissedCallRespondr/`
+- **Repo:** `/opt/swift/apps/missedcallrespondr/`
 
 ## Email Templates
 
@@ -167,7 +173,7 @@ anti-drift tests in that file will fail the build (that is deliberate).
 | Contacts | `contact_handler` | Contact management |
 | Custom Fields | `contact_custom_field_handler` | Custom contact fields |
 | Dashboard | `dashboard_handler` | Stats and overview |
-| Follow-ups | `follow_up_handler` | Automated follow-up rules |
+| Follow-ups | `follow_up_handler` | The call-back queue (`follow_ups`). Rows are written by `POST /api/v1/calls/:id/respond` and by a `callback` response rule; the tenant console lists it READ-ONLY (no create/edit form) |
 | Integrations | `integration_handler` | Third-party integrations |
 | Messages | `message_handler` | SMS sending (Telnyx transport) + the message log |
 | Message Templates | `message_template_handler` | Saved message texts (a library — nothing sends one; no `type` column exists) |
@@ -175,10 +181,10 @@ anti-drift tests in that file will fail the build (that is deliberate).
 | Portfolio | `portfolio_handler` | Multi-account management |
 | Provider Keys | `provider_keys_handler` | Telnyx/etc provider keys |
 | Response Rules | `response_rule_handler` (store) + `response_rule_eval` (the evaluator) | What the service does automatically on an inbound call |
-| Settings | `settings_handler` | Account settings |
+| Settings | `settings_handler` | Account settings (`GET`/`PUT /api/v1/settings`). No console screen: the console's Profile screen writes `/api/v1/auth/profile` and `/api/v1/auth/password` |
 | Telnyx | `telnyx_handler` | Telnyx API bridge |
 | Triggers | `triggers_handler` | Trigger automation rules |
-| Voicemail | `voicemail_handler` | Voicemail detection + handling |
+| Voicemail | `voicemail_handler` | **DEAD SURFACE — no writer (kanban t_b4cbe8bc).** `voicemails` is written by NOTHING: the webhook answers the call and issues Telnyx `record_start`, but no `call.recording.saved` arm exists, so the recording is never captured and no row is ever inserted (`SELECT count(*) FROM voicemails` = 0). `GET /api/v1/voicemails`, `GET/PUT /api/v1/voicemails/:id` and `GET /api/v1/calls/:id/voicemail` therefore read a table that can only ever be empty, and no console screen exists. `transcription` is a free-text column written only by `PUT /api/v1/voicemails/:id` — there is no transcription engine and no Pending/Completed/Failed vocabulary |
 
 **Affiliates are not a module of this app (kanban t_5deebeb1).** The affiliate system lives in
 FunnelSwift; this app only *connects* to it, over two outbound `x-internal-key` wires, with no local
@@ -187,6 +193,26 @@ affiliate store involved: `plans_handler::notify_funnelswift_upgrade` POSTs
 `checkout_handler` POSTs `{FUNNELSWIFT_URL}/api/v1/webhooks/conversion` when a checkout completes
 with referral metadata. The former in-app `affiliates_handler` CRUD (and its `/api/v1/affiliates`
 routes and admin-console panel actions) is retired.
+
+## The served user guide (and the console it must match)
+
+`www/guide.html` is a SERVED artifact, not just documentation: `bin/publish-missedcallrespondr-frontend.sh`
+installs the repo copy byte-for-byte into the served roots, and the app's own marketing footer links it:
+
+| repo source | served destination(s) |
+|---|---|
+| `www/guide.html` | `/opt/swift/nginx/www/missedcall/guide.html` (missedcallrespondr.com/guide) **and** `/opt/swift/nginx/www-app/missedcall/guide.html` (app.missedcallrespondr.com/guide) |
+
+**The console is the spec.** Every screen claim in the guide must be checkable against the served
+tenant shell `www-app/dashboard/index.html`, whose nav is exactly
+`Overview / Calls / Phone Numbers / Response Rules / Templates / Messages / Follow-ups / Contacts /
+Tickets / Integrations / Profile`. A guide step that names a control that shell does not render is a
+defect in the guide (kanban t_b4cbe8bc: the whole Call Log filter/detail section and the whole
+Voicemails section did exactly that, and were retired).
+
+Notable read-only screens, so no guide promises a button that is not there: **Calls** (table +
+Refresh + per-row Respond), **Phone Numbers**, **Follow-ups**, **Contacts** (search + custom fields
+only), **Profile**.
 
 ## Outbound SMS (the send path)
 
@@ -236,7 +262,9 @@ inbound call", while no inbound-call path read the table — no rule had ever fi
   means no action. `priority` was added by migration 000025 (`INTEGER NOT NULL DEFAULT 100`); the
   console's list is ordered the same way, so the screen shows the evaluation order.
 - **Triggers** (`trigger_condition`): `all_missed_calls` (every inbound call — this service records
-  every ring as missed, then answers and records a voicemail on the tenant's behalf), `specific_numbers`
+  every ring as missed, then answers the call and issues a Telnyx `record_start` — the recording is
+  never captured (see the Voicemail row of Module Handlers), so there is no voicemail on the
+  tenant's behalf either), `specific_numbers`
   (`schedule.numbers`, matched on digits with a >= 7-digit floor so a 10-digit local form matches the
   E.164 caller), `time_of_day` (`schedule.window.start/end`, "HH:MM", a window may cross midnight),
   `day_of_week` (`schedule.days`, `mon`…`sun`, UTC — the clock the store uses).
