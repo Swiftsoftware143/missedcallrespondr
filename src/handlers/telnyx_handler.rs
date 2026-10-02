@@ -89,6 +89,43 @@ pub struct PurchaseNumberRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Client-string bounds (kanban t_c30d5d52)
+// ---------------------------------------------------------------------------
+
+/// Longest value the client may send for each client-supplied string that reaches a BOUNDED
+/// column, taken from that column's own declaration:
+/// `phone_numbers.number VARCHAR(32)`, `phone_numbers.friendly_name VARCHAR(255)`,
+/// `telnyx_config.profile_id` / `telnyx_config.messaging_profile_id VARCHAR(255)`.
+///
+/// PostgreSQL counts CHARACTERS for `VARCHAR(n)` (`pg_column_size` is bytes, the constraint is
+/// not), so the checks below count chars — a multi-byte `friendly_name` must not be refused early.
+const NUMBER_MAX_CHARS: usize = 32;
+const FRIENDLY_NAME_MAX_CHARS: usize = 255;
+const TELNYX_PROFILE_ID_MAX_CHARS: usize = 255;
+
+/// Refuse a client-supplied string longer than the column it is bound to with a 400 naming the
+/// field and the limit.
+///
+/// Measured live on 2c96e12e before this existed: `POST /api/v1/telnyx/numbers` with a 400-char
+/// `friendly_name` (and, separately, a 42-char `number`) reached the INSERT unvalidated and the
+/// driver answered, so the caller got `500 {"error":"Database error"}` for a client-side typo
+/// (the pre-t_4c15d597 build echoed `value too long for type character varying(255)` too). A
+/// bounded column is a limit on the FIELD, and a request that breaks it is the caller's error:
+/// 400, naming the field, before any provider call, plan gate or statement is paid for. Truncating
+/// silently is the third option and is deliberately not taken — the client would never learn that
+/// the name it typed is not the name stored.
+fn check_len(field: &str, value: &str, max_chars: usize) -> Result<(), AppError> {
+    let len = value.chars().count();
+    if len > max_chars {
+        return Err(AppError::BadRequest(format!(
+            "{} is too long: {} characters, the maximum is {}",
+            field, len, max_chars
+        )));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -388,6 +425,25 @@ pub async fn purchase_number(
 ) -> ApiResult<Json<Value>> {
     let tenant_id: Uuid = claims.aid;
 
+    // Normalize number
+    let number = if req.number.starts_with('+') {
+        req.number.clone()
+    } else {
+        format!("+{}", req.number)
+    };
+
+    // INPUT VALIDATION FIRST (kanban t_c30d5d52): both client-supplied strings on this request are
+    // bound to bounded columns and neither was checked, so a client-side mistake used to be answered
+    // with a 500 from the driver. Measured live on 2c96e12e: `friendly_name` 400 chars ->
+    // `500 {"error":"Database error"}` (the column is VARCHAR(255)) and `number` 42 chars -> 500
+    // (VARCHAR(32)), while 255/32 stayed 200. Validation runs before the plan gate and before any
+    // provider call — a malformed request is the caller's error whatever the tenant's plan says, and
+    // nothing should be paid for first. `check_len` counts CHARACTERS, matching VARCHAR(n).
+    check_len("number", &number, NUMBER_MAX_CHARS)?;
+    if let Some(name) = req.friendly_name.as_deref() {
+        check_len("friendly_name", name, FRIENDLY_NAME_MAX_CHARS)?;
+    }
+
     // Plan gate FIRST, before the provider is called (kanban t_b578b169): `plans.features` sells
     // max_phone_numbers 1 (Free) / 5 (Pro Monthly) and the key was read by nothing. Gating here
     // means a tenant at its cap is refused BEFORE we ask Telnyx to buy a number they cannot hold.
@@ -400,13 +456,6 @@ pub async fn purchase_number(
         "Phone numbers",
     )
     .await?;
-
-    // Normalize number
-    let number = if req.number.starts_with('+') {
-        req.number.clone()
-    } else {
-        format!("+{}", req.number)
-    };
 
     // One number = one row, GLOBALLY: `phone_numbers.number` carries the UNIQUE constraint
     // `phone_numbers_number_key` and a RELEASE is a soft delete (`is_active = false`, see
@@ -635,6 +684,18 @@ pub async fn put_admin_config(
 ) -> ApiResult<Json<Value>> {
     let api_key = req.api_key;
 
+    // Same class as the purchase route (kanban t_c30d5d52): `profile_id` and `messaging_profile_id`
+    // are client-supplied strings bound to `telnyx_config` columns that are VARCHAR(255), and an
+    // over-long one reached the UPDATE/INSERT unvalidated — measured live on 2c96e12e, a 300-char
+    // `profile_id` answered `500 {"error":"Database error"}`. `api_key` is TEXT and deliberately
+    // has no length check. Verified against information_schema before writing this.
+    if let Some(pid) = req.profile_id.as_deref() {
+        check_len("profile_id", pid, TELNYX_PROFILE_ID_MAX_CHARS)?;
+    }
+    if let Some(mpid) = req.messaging_profile_id.as_deref() {
+        check_len("messaging_profile_id", mpid, TELNYX_PROFILE_ID_MAX_CHARS)?;
+    }
+
     // Allow saving empty config — user will set keys later from Super Admin panel
     // if api_key.is_empty() {
     //     return Err(AppError::BadRequest("api_key is required".into()));
@@ -676,4 +737,55 @@ pub async fn put_admin_config(
         "profile_id": req.profile_id,
         "messaging_profile_id": req.messaging_profile_id,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refusal(field: &str, value: &str, max: usize) -> Option<String> {
+        match check_len(field, value, max) {
+            Err(AppError::BadRequest(msg)) => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// The boundary the live probe measures (kanban t_c30d5d52): the limit itself is accepted, one
+    /// character more is a 400 naming the field and the limit — never a silent truncation, never a
+    /// 500 from the driver.
+    #[test]
+    fn the_limit_is_accepted_and_one_over_is_a_400_that_names_the_field() {
+        assert!(check_len("friendly_name", &"y".repeat(255), 255).is_ok());
+        let msg = refusal("friendly_name", &"z".repeat(256), 255).expect("256 must be refused");
+        assert_eq!(
+            msg,
+            "friendly_name is too long: 256 characters, the maximum is 255"
+        );
+        assert!(
+            msg.contains("friendly_name") && msg.contains("255"),
+            "{msg}"
+        );
+    }
+
+    /// `VARCHAR(n)` counts CHARACTERS, not bytes — a multi-byte name of legal length must pass, and
+    /// the count in the message is a character count.
+    #[test]
+    fn the_check_counts_characters_not_bytes() {
+        assert!(check_len("friendly_name", &"é".repeat(255), 255).is_ok());
+        // 300 chars, 600 bytes: refused for the character count, not the byte count.
+        let msg =
+            refusal("friendly_name", &"é".repeat(300), 255).expect("300 chars must be refused");
+        assert_eq!(
+            msg,
+            "friendly_name is too long: 300 characters, the maximum is 255"
+        );
+    }
+
+    #[test]
+    fn the_number_column_bound_is_32() {
+        assert!(check_len("number", &format!("+{}", "5".repeat(31)), NUMBER_MAX_CHARS).is_ok());
+        let msg = refusal("number", &format!("+{}", "5".repeat(32)), NUMBER_MAX_CHARS)
+            .expect("33 chars must be refused");
+        assert_eq!(msg, "number is too long: 33 characters, the maximum is 32");
+    }
 }
