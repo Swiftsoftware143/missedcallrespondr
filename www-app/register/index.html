@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MissedCall Respondr — Sign Up</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0}
+.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:32px;width:100%;max-width:420px}
+.btn{background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;cursor:pointer;border:none;font-weight:500;width:100%;font-size:15px;transition:background .2s}
+.btn:hover{background:#1d4ed8}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.input{border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px;width:100%;font-size:14px;outline:0;box-sizing:border-box;transition:border-color .2s}
+.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.error{background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;font-size:13px;display:none}
+.success{background:#dcfce7;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <div style="text-align:center;margin-bottom:28px">
+    <h1 style="font-size:24px;font-weight:700;color:#1e293b;margin:0">📞 MissedCall Respondr</h1>
+    <p style="color:#64748b;font-size:14px;margin:6px 0 0">Create your free account</p>
+  </div>
+  <div class="error" id="error"></div>
+  <div class="success" id="success"></div>
+  <form id="regForm" style="display:flex;flex-direction:column;gap:16px">
+    <div>
+      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Full Name</label>
+      <input type="text" class="input" id="name" placeholder="John Smith" required autocomplete="name">
+    </div>
+    <div>
+      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Company / Account Name</label>
+      <input type="text" class="input" id="account_name" placeholder="Acme Inc." required>
+    </div>
+    <div>
+      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Email</label>
+      <input type="email" class="input" id="email" placeholder="you@company.com" required autocomplete="email">
+    </div>
+    <div>
+      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Password</label>
+      <input type="password" class="input" id="password" placeholder="Min 8 characters" required minlength="8" autocomplete="new-password">
+    </div>
+    <button type="submit" class="btn" id="submitBtn">Create Free Account</button>
+  </form>
+  <p style="text-align:center;color:#64748b;font-size:13px;margin-top:16px">
+    Already have an account? <a href="/login" style="color:#2563eb;text-decoration:none;font-weight:500">Sign in</a>
+  </p>
+</div>
+
+<script>
+document.getElementById('regForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const err = document.getElementById('error');
+  const ok = document.getElementById('success');
+  err.style.display = 'none';
+  ok.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Creating account...';
+
+  try {
+    const res = await fetch('/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('name').value,
+        account_name: document.getElementById('account_name').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      ok.textContent = 'Account created! Redirecting to login...';
+      ok.style.display = 'block';
+      localStorage.setItem('mc_token', data.token); setTimeout(() => { window.location.href = '/dashboard'; }, 500);
+    } else {
+      err.textContent = data.error || data.message || 'Registration failed. Please try again.';
+      err.style.display = 'block';
+    }
+  } catch (ex) {
+    err.textContent = 'Network error. Please try again.';
+    err.style.display = 'block';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Create Free Account';
+});
+</script>
+</body>
+</html>
