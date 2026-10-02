@@ -12,6 +12,7 @@ mod models;
 mod routes;
 mod security;
 mod state;
+mod validation;
 
 use std::net::SocketAddr;
 #[tokio::main]

@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     models::campaign::{Campaign, CreateCampaignRequest, UpdateCampaignRequest},
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -54,6 +55,9 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateCampaignRequest>,
 ) -> Result<Json<Campaign>, AppError> {
+    check_len("name", &req.name, max::CAMPAIGNS_NAME)?;
+    check_opt_len("kind", req.kind.as_deref(), max::CAMPAIGNS_KIND)?;
+    check_opt_len("status", req.status.as_deref(), max::CAMPAIGNS_STATUS)?;
     crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_campaigns", "Campaigns")
         .await?;
     let id = Uuid::new_v4();
@@ -107,6 +111,9 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateCampaignRequest>,
 ) -> Result<Json<Campaign>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::CAMPAIGNS_NAME)?;
+    check_opt_len("kind", req.kind.as_deref(), max::CAMPAIGNS_KIND)?;
+    check_opt_len("status", req.status.as_deref(), max::CAMPAIGNS_STATUS)?;
     let existing =
         sqlx::query_as::<_, Campaign>("SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2")
             .bind(id)

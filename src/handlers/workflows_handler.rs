@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     models::workflow::{CreateWorkflowRequest, UpdateWorkflowRequest, Workflow, WorkflowStep},
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -41,6 +42,25 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateWorkflowRequest>,
 ) -> Result<Json<Workflow>, AppError> {
+    check_len("name", &req.name, max::WORKFLOWS_NAME)?;
+    check_opt_len(
+        "trigger_event",
+        req.trigger_event.as_deref(),
+        max::WORKFLOWS_TRIGGER_EVENT,
+    )?;
+    // EVERY step is checked HERE, before the workflow row is written: a step is a SECOND statement,
+    // so checking inside the insert loop refused the request AFTER the parent row had committed —
+    // measured live by the t_dd7be032 probe (a 400 whose table count moved 1 -> 2). A refused
+    // request must leave nothing behind.
+    if let Some(steps) = &req.steps {
+        for s in steps {
+            check_len(
+                "action_type",
+                &s.action_type,
+                max::WORKFLOW_STEPS_ACTION_TYPE,
+            )?;
+        }
+    }
     crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_workflows", "Workflows")
         .await?;
     let id = Uuid::new_v4();
@@ -112,6 +132,12 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateWorkflowRequest>,
 ) -> Result<Json<Workflow>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::WORKFLOWS_NAME)?;
+    check_opt_len(
+        "trigger_event",
+        req.trigger_event.as_deref(),
+        max::WORKFLOWS_TRIGGER_EVENT,
+    )?;
     let existing =
         sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1 AND tenant_id = $2")
             .bind(id)

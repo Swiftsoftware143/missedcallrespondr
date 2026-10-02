@@ -8,6 +8,7 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::validation::{check_len, check_opt_len, max};
 use crate::{config::Claims, error::AppError, state::AppState};
 
 /// GET /api/v1/tag-groups — returns groups with tag count
@@ -70,6 +71,9 @@ pub async fn create(
         .unwrap_or("#6366f1");
 
     let sort_order = body.get("sort_order").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    check_len("name", name, max::TAG_GROUPS_NAME)?;
+    check_len("color", color, max::TAG_GROUPS_COLOR)?;
 
     let id = Uuid::new_v4();
 
@@ -153,6 +157,8 @@ pub async fn update(
     let name = body.get("name").and_then(|v| v.as_str());
     let color = body.get("color").and_then(|v| v.as_str());
     let sort_order = body.get("sort_order").and_then(|v| v.as_i64());
+    check_opt_len("name", name, max::TAG_GROUPS_NAME)?;
+    check_opt_len("color", color, max::TAG_GROUPS_COLOR)?;
 
     sqlx::query(
         r#"

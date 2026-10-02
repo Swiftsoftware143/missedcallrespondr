@@ -12,6 +12,7 @@ use crate::{
         CalendarEvent, CreateCalendarEventRequest, UpdateCalendarEventRequest,
     },
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -47,6 +48,12 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateCalendarEventRequest>,
 ) -> Result<Json<CalendarEvent>, AppError> {
+    check_len("title", &req.title, max::CALENDAR_EVENTS_TITLE)?;
+    check_opt_len(
+        "event_type",
+        req.event_type.as_deref(),
+        max::CALENDAR_EVENTS_EVENT_TYPE,
+    )?;
     crate::features::check_feature_flag(&state.pool, claims.aid, "has_calendar", "Calendar")
         .await?;
     let id = Uuid::new_v4();
@@ -96,6 +103,12 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateCalendarEventRequest>,
 ) -> Result<Json<CalendarEvent>, AppError> {
+    check_opt_len("title", req.title.as_deref(), max::CALENDAR_EVENTS_TITLE)?;
+    check_opt_len(
+        "event_type",
+        req.event_type.as_deref(),
+        max::CALENDAR_EVENTS_EVENT_TYPE,
+    )?;
     let existing = sqlx::query_as::<_, CalendarEvent>(
         "SELECT * FROM calendar_events WHERE id = $1 AND tenant_id = $2",
     )

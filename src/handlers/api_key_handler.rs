@@ -16,6 +16,7 @@ use crate::config::Claims;
 use crate::error::AppError;
 use crate::features;
 use crate::state::AppState;
+use crate::validation::{check_len, check_opt_len, max};
 
 /// Gate rule 5d (class 14): a statement must be a COMPLETE compile-time literal, never assembled at
 /// run time. `update_api_key` has three optional fields, so the UPDATE has exactly 2^3 = 8 texts;
@@ -49,13 +50,45 @@ fn update_api_key_sql(has_name: bool, has_url: bool, has_active: bool) -> &'stat
     }
 }
 
+/// The stored key prefix, bound to `api_keys.prefix VARCHAR(8)`.
+///
+/// THE SAME CLASS, SERVER-SIDE. This constant used to be `"missedca_"` — NINE characters into a
+/// `VARCHAR(8)` column — so EVERY `POST /api/v1/api-keys` answered `500 {"error":"Database error"}`
+/// and stored nothing (measured live 2026-10-02 by the t_dd7be032 census: `value too long for type
+/// character varying(8)` twice, one per attempt; `api_keys` held 0 rows before and after). The
+/// census found it because the bounded-column sweep reaches server-written columns too; the client
+/// `name` bound could not be proven either way while the route could not store a row at all.
+/// `api_keys` is EMPTY live and the prefix is only stored and echoed (never used for lookup), so
+/// making it fit breaks no existing key.
+const API_KEY_PREFIX: &str = "missedca";
+
+/// Compile-time proof that the constant fits `api_keys.prefix VARCHAR(8)` / `max::API_KEYS_PREFIX`:
+/// a longer literal fails the BUILD, not a live request. (This is also what keeps
+/// `max::API_KEYS_PREFIX` load-bearing in the non-test build.)
+const _: () = assert!(API_KEY_PREFIX.len() <= crate::validation::max::API_KEYS_PREFIX);
+
 fn generate_api_key() -> (String, String) {
-    let prefix = "missedca_".to_string();
+    let prefix = API_KEY_PREFIX.to_string();
     let random_part: String = (0..16)
         .map(|_| format!("{:x}", rand::thread_rng().gen_range(0..16)))
         .collect();
     let raw_key = format!("missedcallrespondr_{}", random_part);
     (raw_key, prefix)
+}
+
+/// The prefix must fit `api_keys.prefix` — the 500 this pins was invisible until a probe asked for
+/// the row back (kanban t_dd7be032).
+#[cfg(test)]
+mod prefix_bound_tests {
+    use super::API_KEY_PREFIX;
+    use crate::validation::max;
+
+    #[test]
+    fn the_stored_prefix_fits_its_column() {
+        assert_eq!(API_KEY_PREFIX, "missedca");
+        assert_eq!(API_KEY_PREFIX.chars().count(), max::API_KEYS_PREFIX);
+        assert!(API_KEY_PREFIX.chars().count() <= max::API_KEYS_PREFIX);
+    }
 }
 
 fn hash_api_key(raw_key: &str) -> Result<String, AppError> {
@@ -73,11 +106,14 @@ pub async fn create_api_key(
     Json(req): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let tenant_id: Uuid = claims.aid;
-    features::enforce_feature_limit(&state.pool, tenant_id, "max_api_keys", "Api Keys").await?;
     let name = req
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
+    check_len("name", name, max::API_KEYS_NAME)?;
+    // The plan gate runs AFTER the request is well-formed (kanban t_dd7be032): a name that breaks
+    // `api_keys.name` is the caller's error and must not pay for a statement first.
+    features::enforce_feature_limit(&state.pool, tenant_id, "max_api_keys", "Api Keys").await?;
     let target_url = req.get("target_url").and_then(|v| v.as_str()).unwrap_or("");
 
     let (raw_key, prefix) = generate_api_key();
@@ -142,6 +178,11 @@ pub async fn update_api_key(
     Path(id): Path<Uuid>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    let name = req.get("name").and_then(|v| v.as_str());
+    let url = req.get("target_url").and_then(|v| v.as_str());
+    let active = req.get("is_active").and_then(|v| v.as_bool());
+    check_opt_len("name", name, max::API_KEYS_NAME)?;
+
     let existing = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM api_keys WHERE id = $1 AND tenant_id = $2",
     )
@@ -153,10 +194,6 @@ pub async fn update_api_key(
     if existing == 0 {
         return Err(AppError::NotFound("API key not found".into()));
     }
-
-    let name = req.get("name").and_then(|v| v.as_str());
-    let url = req.get("target_url").and_then(|v| v.as_str());
-    let active = req.get("is_active").and_then(|v| v.as_bool());
 
     let sql = update_api_key_sql(name.is_some(), url.is_some(), active.is_some());
 

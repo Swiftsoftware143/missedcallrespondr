@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     models::lead::{CreateLeadRequest, Lead, UpdateLeadRequest},
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -78,6 +79,11 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateLeadRequest>,
 ) -> Result<Json<Lead>, AppError> {
+    check_len("name", &req.name, max::LEADS_NAME)?;
+    check_opt_len("phone", req.phone.as_deref(), max::LEADS_PHONE)?;
+    check_opt_len("email", req.email.as_deref(), max::LEADS_EMAIL)?;
+    check_opt_len("source", req.source.as_deref(), max::LEADS_SOURCE)?;
+    check_opt_len("status", req.status.as_deref(), max::LEADS_STATUS)?;
     crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_leads", "Leads").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
@@ -210,6 +216,11 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateLeadRequest>,
 ) -> Result<Json<Lead>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::LEADS_NAME)?;
+    check_opt_len("phone", req.phone.as_deref(), max::LEADS_PHONE)?;
+    check_opt_len("email", req.email.as_deref(), max::LEADS_EMAIL)?;
+    check_opt_len("source", req.source.as_deref(), max::LEADS_SOURCE)?;
+    check_opt_len("status", req.status.as_deref(), max::LEADS_STATUS)?;
     let existing =
         sqlx::query_as::<_, Lead>("SELECT * FROM leads WHERE id = $1 AND tenant_id = $2")
             .bind(id)

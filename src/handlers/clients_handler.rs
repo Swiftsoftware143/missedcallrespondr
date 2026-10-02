@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     models::client::{Client, CreateClientRequest, UpdateClientRequest},
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -55,6 +56,10 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateClientRequest>,
 ) -> Result<Json<Client>, AppError> {
+    check_len("name", &req.name, max::CLIENTS_NAME)?;
+    check_opt_len("email", req.email.as_deref(), max::CLIENTS_EMAIL)?;
+    check_opt_len("phone", req.phone.as_deref(), max::CLIENTS_PHONE)?;
+    check_opt_len("source", req.source.as_deref(), max::CLIENTS_SOURCE)?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
     sqlx::query(
@@ -100,6 +105,10 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateClientRequest>,
 ) -> Result<Json<Client>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::CLIENTS_NAME)?;
+    check_opt_len("email", req.email.as_deref(), max::CLIENTS_EMAIL)?;
+    check_opt_len("phone", req.phone.as_deref(), max::CLIENTS_PHONE)?;
+    check_opt_len("source", req.source.as_deref(), max::CLIENTS_SOURCE)?;
     let existing =
         sqlx::query_as::<_, Client>("SELECT * FROM clients WHERE id = $1 AND tenant_id = $2")
             .bind(id)

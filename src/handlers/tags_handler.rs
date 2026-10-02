@@ -9,6 +9,7 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::validation::{check_len, check_opt_len, max};
 use crate::{config::Claims, error::AppError, state::AppState};
 
 #[derive(Deserialize)]
@@ -139,11 +140,6 @@ pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // Plan gate on the route that ADDS the counted row (kanban t_b578b169): `plans.max_tags` sells
-    // 10 / 50 / 50 / -1 and was read by nothing. DELETE below is a HARD delete, so a cap here never
-    // wedges a tenant — releasing a tag frees the slot.
-    crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_tags", "Tags").await?;
-
     let name = body
         .get("name")
         .and_then(|v| v.as_str())
@@ -153,6 +149,16 @@ pub async fn create(
         .get("color")
         .and_then(|v| v.as_str())
         .unwrap_or("#6366f1");
+
+    check_len("name", name, max::TAGS_NAME)?;
+    check_len("color", color, max::TAGS_COLOR)?;
+
+    // Plan gate on the route that ADDS the counted row (kanban t_b578b169): `plans.max_tags` sells
+    // 10 / 50 / 50 / -1 and was read by nothing. DELETE below is a HARD delete, so a cap here never
+    // wedges a tenant — releasing a tag frees the slot. It runs AFTER the length checks (kanban
+    // t_dd7be032): a request that breaks a bounded column is the caller's error, and it must not
+    // pay for a statement first.
+    crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_tags", "Tags").await?;
 
     let group_id: Option<Uuid> = body
         .get("group_id")
@@ -266,6 +272,8 @@ pub async fn update(
     let name = body.get("name").and_then(|v| v.as_str());
     let color = body.get("color").and_then(|v| v.as_str());
     let sync_to_core = body.get("sync_to_core").and_then(|v| v.as_bool());
+    check_opt_len("name", name, max::TAGS_NAME)?;
+    check_opt_len("color", color, max::TAGS_COLOR)?;
     let group_id: Option<Option<Uuid>> = match body.get("group_id") {
         Some(v) if v.is_null() => Some(None),
         Some(v) => v.as_str().and_then(|s| Uuid::parse_str(s).ok()).map(Some),

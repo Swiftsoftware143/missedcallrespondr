@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::validation::{check_len, check_opt_len, max};
 
 type ApiResult<T> = Result<T, AppError>;
 
@@ -119,6 +120,14 @@ pub async fn upsert_provider_key(
     Json(req): Json<UpsertProviderKeyRequest>,
 ) -> ApiResult<Json<Value>> {
     let tenant_id: Uuid = claims.aid;
+
+    check_len("provider", &req.provider, max::PROVIDER_KEYS_PROVIDER)?;
+    check_opt_len(
+        "base_url",
+        req.base_url.as_deref(),
+        max::PROVIDER_KEYS_BASE_URL,
+    )?;
+    check_opt_len("scope", req.scope.as_deref(), max::PROVIDER_KEYS_SCOPE)?;
 
     // Verify provider exists
     let exists =

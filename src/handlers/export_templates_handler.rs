@@ -12,6 +12,7 @@ use crate::{
         CreateExportTemplateRequest, ExportTemplate, UpdateExportTemplateRequest,
     },
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -47,6 +48,17 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateExportTemplateRequest>,
 ) -> Result<Json<ExportTemplate>, AppError> {
+    check_len("name", &req.name, max::EXPORT_TEMPLATES_NAME)?;
+    check_opt_len(
+        "entity",
+        req.entity.as_deref(),
+        max::EXPORT_TEMPLATES_ENTITY,
+    )?;
+    check_opt_len(
+        "format",
+        req.format.as_deref(),
+        max::EXPORT_TEMPLATES_FORMAT,
+    )?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
     sqlx::query(
@@ -92,6 +104,17 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateExportTemplateRequest>,
 ) -> Result<Json<ExportTemplate>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::EXPORT_TEMPLATES_NAME)?;
+    check_opt_len(
+        "entity",
+        req.entity.as_deref(),
+        max::EXPORT_TEMPLATES_ENTITY,
+    )?;
+    check_opt_len(
+        "format",
+        req.format.as_deref(),
+        max::EXPORT_TEMPLATES_FORMAT,
+    )?;
     let existing = sqlx::query_as::<_, ExportTemplate>(
         "SELECT * FROM export_templates WHERE id = $1 AND tenant_id = $2",
     )

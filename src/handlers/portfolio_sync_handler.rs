@@ -3,6 +3,7 @@
 
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::validation::{check_len, max};
 use axum::{extract::State, http::HeaderMap, Json};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -45,6 +46,9 @@ pub async fn portfolio_sync_internal(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+
+    check_len("name", &name, max::PORTFOLIO_COMPANIES_NAME)?;
+    check_len("slug", &slug, max::PORTFOLIO_COMPANIES_SLUG)?;
 
     match action {
         "create" => {

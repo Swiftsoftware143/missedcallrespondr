@@ -12,6 +12,7 @@ use crate::{
         CreateTicketMessageRequest, CreateTicketRequest, Ticket, TicketMessage, UpdateTicketRequest,
     },
     state::AppState,
+    validation::{check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -76,6 +77,8 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateTicketRequest>,
 ) -> Result<Json<Ticket>, AppError> {
+    check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
+    check_opt_len("source", req.source.as_deref(), max::TICKETS_SOURCE)?;
     crate::features::check_feature_limit(&state.pool, claims.aid, "max_tickets", "Tickets").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
@@ -142,6 +145,8 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateTicketRequest>,
 ) -> Result<Json<Ticket>, AppError> {
+    check_opt_len("status", req.status.as_deref(), max::TICKETS_STATUS)?;
+    check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
     let existing =
         sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
             .bind(id)
@@ -175,6 +180,11 @@ pub async fn add_message(
     Path(id): Path<Uuid>,
     Json(req): Json<CreateTicketMessageRequest>,
 ) -> Result<Json<TicketMessage>, AppError> {
+    check_opt_len(
+        "sender_type",
+        req.sender_type.as_deref(),
+        max::TICKET_MESSAGES_SENDER_TYPE,
+    )?;
     let _existing =
         sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
             .bind(id)

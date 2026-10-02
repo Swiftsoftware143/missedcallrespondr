@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::validation::{check_len, max};
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 #[allow(dead_code)]
@@ -950,6 +951,14 @@ pub async fn admin_assign_plan(
         .get("billing_cycle")
         .and_then(|v| v.as_str())
         .unwrap_or("monthly");
+    // The panel sends this string straight into `tenant_plans.billing_cycle VARCHAR(50)`; before
+    // kanban t_dd7be032 a 51-character cycle answered 500 after the plan had been re-assigned, i.e.
+    // a refused request that still changed data. Checked before any statement.
+    check_len(
+        "billing_cycle",
+        billing_cycle,
+        max::TENANT_PLANS_BILLING_CYCLE,
+    )?;
 
     // ONE row per tenant is the invariant this upsert relies on (kanban t_f5494ad5): the conflict
     // target `(tenant_id)` resolves against `tenant_plans_tenant_id_key`, the unique constraint the

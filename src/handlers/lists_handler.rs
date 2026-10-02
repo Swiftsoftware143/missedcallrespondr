@@ -14,6 +14,7 @@ use crate::{
     error::AppError,
     models::list::{CreateListRequest, List, ListLead, ListLeadRequest, UpdateListRequest},
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -144,6 +145,7 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateListRequest>,
 ) -> Result<Json<List>, AppError> {
+    check_len("name", &req.name, max::LISTS_NAME)?;
     let id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO lists (id, tenant_id, name, campaign_id, description, created_at, updated_at) \
@@ -170,6 +172,7 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateListRequest>,
 ) -> Result<Json<List>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::LISTS_NAME)?;
     let owned: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM lists WHERE id = $1 AND tenant_id = $2")
             .bind(id)

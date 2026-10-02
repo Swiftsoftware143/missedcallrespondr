@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::validation::check_len;
 
 type ApiResult<T> = Result<T, AppError>;
 
@@ -103,27 +104,10 @@ const NUMBER_MAX_CHARS: usize = 32;
 const FRIENDLY_NAME_MAX_CHARS: usize = 255;
 const TELNYX_PROFILE_ID_MAX_CHARS: usize = 255;
 
-/// Refuse a client-supplied string longer than the column it is bound to with a 400 naming the
-/// field and the limit.
-///
-/// Measured live on 2c96e12e before this existed: `POST /api/v1/telnyx/numbers` with a 400-char
-/// `friendly_name` (and, separately, a 42-char `number`) reached the INSERT unvalidated and the
-/// driver answered, so the caller got `500 {"error":"Database error"}` for a client-side typo
-/// (the pre-t_4c15d597 build echoed `value too long for type character varying(255)` too). A
-/// bounded column is a limit on the FIELD, and a request that breaks it is the caller's error:
-/// 400, naming the field, before any provider call, plan gate or statement is paid for. Truncating
-/// silently is the third option and is deliberately not taken — the client would never learn that
-/// the name it typed is not the name stored.
-fn check_len(field: &str, value: &str, max_chars: usize) -> Result<(), AppError> {
-    let len = value.chars().count();
-    if len > max_chars {
-        return Err(AppError::BadRequest(format!(
-            "{} is too long: {} characters, the maximum is {}",
-            field, len, max_chars
-        )));
-    }
-    Ok(())
-}
+// `check_len` — the shared client-string length guard — now lives in `crate::validation` (kanban
+// t_dd7be032 lifted it out of this module: the same class reaches far more than the telnyx route, so
+// one helper serves every handler). The doc comment explaining WHY a bounded column is a 400 and not
+// a truncated 200 moved with it, and this module's tests below still pin the boundary.
 
 // ---------------------------------------------------------------------------
 // Helpers

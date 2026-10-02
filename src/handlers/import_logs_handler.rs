@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     models::import_log::{CreateImportLogRequest, ImportLog},
     state::AppState,
+    validation::{check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -45,6 +46,13 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateImportLogRequest>,
 ) -> Result<Json<ImportLog>, AppError> {
+    check_opt_len("entity", req.entity.as_deref(), max::IMPORT_LOGS_ENTITY)?;
+    check_opt_len(
+        "filename",
+        req.filename.as_deref(),
+        max::IMPORT_LOGS_FILENAME,
+    )?;
+    check_opt_len("status", req.status.as_deref(), max::IMPORT_LOGS_STATUS)?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
     sqlx::query(
@@ -92,6 +100,13 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<CreateImportLogRequest>,
 ) -> Result<Json<ImportLog>, AppError> {
+    check_opt_len("entity", req.entity.as_deref(), max::IMPORT_LOGS_ENTITY)?;
+    check_opt_len(
+        "filename",
+        req.filename.as_deref(),
+        max::IMPORT_LOGS_FILENAME,
+    )?;
+    check_opt_len("status", req.status.as_deref(), max::IMPORT_LOGS_STATUS)?;
     let existing = sqlx::query_as::<_, ImportLog>(
         "SELECT * FROM import_logs WHERE id = $1 AND tenant_id = $2",
     )

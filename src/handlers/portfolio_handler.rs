@@ -9,6 +9,7 @@ use uuid::Uuid;
 use sqlx::Row;
 
 use crate::features;
+use crate::validation::{check_len, max};
 use crate::{config::Claims, error::AppError, state::AppState};
 
 pub async fn list_portfolio_companies(
@@ -44,13 +45,6 @@ pub async fn create_portfolio_company(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let tenant_id: Uuid = claims.aid;
-    features::enforce_feature_limit(
-        &state.pool,
-        tenant_id,
-        "max_portfolio_companys",
-        "Portfolio Companys",
-    )
-    .await?;
     let name = body
         .get("name")
         .and_then(|v| v.as_str())
@@ -59,6 +53,19 @@ pub async fn create_portfolio_company(
         .get("slug")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("slug is required".into()))?;
+
+    check_len("name", name, max::PORTFOLIO_COMPANIES_NAME)?;
+    check_len("slug", slug, max::PORTFOLIO_COMPANIES_SLUG)?;
+
+    // The plan gate runs AFTER the request is well-formed (kanban t_dd7be032): a bad request must not
+    // pay for a statement, and these two columns are what answered 500 before this check existed.
+    features::enforce_feature_limit(
+        &state.pool,
+        tenant_id,
+        "max_portfolio_companys",
+        "Portfolio Companys",
+    )
+    .await?;
     let settings = body
         .get("settings")
         .map(|v| v.to_string())
@@ -125,6 +132,8 @@ pub async fn update_portfolio_company(
 
     let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let slug = body.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+    check_len("name", name, max::PORTFOLIO_COMPANIES_NAME)?;
+    check_len("slug", slug, max::PORTFOLIO_COMPANIES_SLUG)?;
     let settings_str = body
         .get("settings")
         .map(|v| v.to_string())
@@ -208,6 +217,9 @@ pub async fn internal_create_portfolio_company(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    check_len("name", &name, max::PORTFOLIO_COMPANIES_NAME)?;
+    check_len("slug", &slug, max::PORTFOLIO_COMPANIES_SLUG)?;
+
     let id = Uuid::new_v4();
 
     // Ensure tenant exists (FK constraint)

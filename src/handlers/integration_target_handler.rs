@@ -8,6 +8,7 @@ use uuid::Uuid;
 use sqlx::Row;
 
 use crate::features;
+use crate::validation::{check_len, max};
 use crate::{config::Claims, error::AppError, state::AppState};
 
 /// Mask a stored target credential for read-back: decrypt it, then reduce it to the same
@@ -95,13 +96,6 @@ pub async fn create_integration_target(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let tenant_id: Uuid = claims.aid;
-    features::enforce_feature_limit(
-        &state.pool,
-        tenant_id,
-        "max_integration_targets",
-        "Integration Targets",
-    )
-    .await?;
     let name = body
         .get("name")
         .and_then(|v| v.as_str())
@@ -110,6 +104,19 @@ pub async fn create_integration_target(
         .get("provider")
         .and_then(|v| v.as_str())
         .unwrap_or("webhook");
+
+    check_len("name", name, max::INTEGRATION_TARGETS_NAME)?;
+    check_len("provider", provider, max::INTEGRATION_TARGETS_PROVIDER)?;
+
+    // The plan gate runs AFTER the request is known to be well-formed (kanban t_dd7be032): a bad
+    // request must not pay for a statement, and it was a 500 only because nothing checked the bound.
+    features::enforce_feature_limit(
+        &state.pool,
+        tenant_id,
+        "max_integration_targets",
+        "Integration Targets",
+    )
+    .await?;
     let webhook_url = body
         .get("webhook_url")
         .and_then(|v| v.as_str())
@@ -187,6 +194,8 @@ pub async fn update_integration_target(
 
     let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let provider = body.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+    check_len("name", name, max::INTEGRATION_TARGETS_NAME)?;
+    check_len("provider", provider, max::INTEGRATION_TARGETS_PROVIDER)?;
     let webhook_url = body
         .get("webhook_url")
         .and_then(|v| v.as_str())

@@ -12,6 +12,7 @@ use crate::auth::models::create_token;
 use crate::config::Claims;
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::validation::{check_len, max};
 use chrono::Utc;
 
 /// Admin sync endpoint called by CoreSwift
@@ -45,6 +46,11 @@ pub async fn portfolio_sync(
     // signup does — before the first SELECT, and the normalised value is what gets stored.
     let email = crate::security::email_addr::normalize(&email).map_err(AppError::Unprocessable)?;
 
+    // The tenant name (and the slug derived from it below) also lands in `portfolio_companies.name`
+    // / `.slug`, both VARCHAR(255) — checked before the first statement so a too-long company name is
+    // a 400 for the caller instead of a 500 from the driver (kanban t_dd7be032).
+    check_len("name", &name, max::PORTFOLIO_COMPANIES_NAME)?;
+
     // Check email uniqueness
     let existing =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE lower(email) = $1")
@@ -63,6 +69,7 @@ pub async fn portfolio_sync(
     // Create tenant
     let tenant_id = uuid::Uuid::new_v4();
     let tenant_slug = name.to_lowercase().replace(' ', "_");
+    check_len("slug", &tenant_slug, max::PORTFOLIO_COMPANIES_SLUG)?;
 
     sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
         .bind(tenant_id)

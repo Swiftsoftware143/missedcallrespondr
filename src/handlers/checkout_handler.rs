@@ -26,6 +26,7 @@ use crate::email;
 use crate::error::AppError;
 use crate::security::email_addr;
 use crate::state::AppState;
+use crate::validation::{check_len, max};
 use rand::Rng;
 
 type ApiResult<T> = Result<T, AppError>;
@@ -133,6 +134,17 @@ pub async fn upsert_payment_provider(
         .get("webhook_secret")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+
+    // `provider_type` is already refused unless it is one of four literals (all far shorter than
+    // the column), so only the two free-text bounded columns need a length guard: `label` and
+    // `publishable_key` are both VARCHAR(255) and answered 500 on a long value before kanban
+    // t_dd7be032. Checked before the provider SELECT below.
+    check_len("label", label, max::PAYMENT_PROVIDERS_LABEL)?;
+    check_len(
+        "publishable_key",
+        publishable_key,
+        max::PAYMENT_PROVIDERS_PUBLISHABLE_KEY,
+    )?;
 
     // Check if provider already exists
     let existing =

@@ -10,6 +10,7 @@ use crate::{
     error::AppError,
     models::deal::{CreateDealRequest, Deal, MoveDealRequest, UpdateDealRequest},
     state::AppState,
+    validation::{check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -62,6 +63,9 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateDealRequest>,
 ) -> Result<Json<Deal>, AppError> {
+    check_len("name", &req.name, max::DEALS_NAME)?;
+    check_opt_len("stage", req.stage.as_deref(), max::DEALS_STAGE)?;
+    check_opt_len("source", req.source.as_deref(), max::DEALS_SOURCE)?;
     crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_deals", "Deals").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
@@ -111,6 +115,9 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateDealRequest>,
 ) -> Result<Json<Deal>, AppError> {
+    check_opt_len("name", req.name.as_deref(), max::DEALS_NAME)?;
+    check_opt_len("stage", req.stage.as_deref(), max::DEALS_STAGE)?;
+    check_opt_len("source", req.source.as_deref(), max::DEALS_SOURCE)?;
     let existing =
         sqlx::query_as::<_, Deal>("SELECT * FROM deals WHERE id = $1 AND tenant_id = $2")
             .bind(id)
@@ -149,6 +156,7 @@ pub async fn move_stage(
     Path(id): Path<Uuid>,
     Json(req): Json<MoveDealRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    check_len("stage", &req.stage, max::DEALS_STAGE)?;
     let existing =
         sqlx::query_as::<_, Deal>("SELECT * FROM deals WHERE id = $1 AND tenant_id = $2")
             .bind(id)
