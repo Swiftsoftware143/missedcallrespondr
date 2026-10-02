@@ -209,9 +209,14 @@ pub async fn update_plan(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
+    // `payment_provider` MUST be selected: the arms below read it (line ~269) and the value is
+    // WRITTEN BACK by the UPDATE, so omitting it here turned every save that did not carry the key
+    // into `SET payment_provider = NULL` over live data (kanban t_8b053bb3). The `try_get().ok()`
+    // there never panics — it just hides the drift and hands the UPDATE a None.
     let existing = sqlx::query(
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
-         price_yearly::float8 AS price_yearly, features, is_active, sort_order FROM plans WHERE id = $1"
+         price_yearly::float8 AS price_yearly, features, is_active, payment_provider, sort_order \
+         FROM plans WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.pool)
