@@ -1,5 +1,4 @@
 pub mod admin_handler;
-pub mod api_key_handler;
 pub mod calendar_events_handler;
 pub mod call_handler;
 pub mod call_log_handler;
@@ -29,7 +28,6 @@ pub mod portfolio_sync_handler;
 pub mod provider_keys_handler;
 pub mod response_rule_eval;
 pub mod response_rule_handler;
-pub mod settings_handler;
 pub mod tag_groups_handler;
 pub mod tags_handler;
 pub mod telnyx_handler;

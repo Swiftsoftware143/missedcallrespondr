@@ -168,12 +168,12 @@ anti-drift tests in that file will fail the build (that is deliberate).
 
 | Module | Handler | Description |
 |---|---|---|
-| API Keys | `api_key_handler` | API key management |
-| Call Logs | `call_log_handler` | Inbound/outbound call records |
-| Contacts | `contact_handler` | Contact management |
+| API Keys | **DELETED (kanban t_f06b1710)** | The handler, its module and `POST|GET /api/v1/api-keys` + `PUT|DELETE /api/v1/api-keys/:id` are GONE. Measurement: NO auth path in this crate read `api_keys` (no `x-api-key` anywhere, no key-checking middleware; the only reader was `features::count_usage` for the plan quota), so a key minted by that route authenticated nothing anywhere — a credential no endpoint would accept. The table stays for history. |
+| Call Logs | `call_log_handler` | `GET /api/v1/call-logs` still reads `call_logs` (the billing log with cost/recorded). `GET /api/v1/call-logs/export` now reads **`inbound_calls`** — the table the console's Calls screen lists — and emits that screen's own columns, so the CSV cannot disagree with the rows on screen (kanban t_f06b1710: it used to serve `call_logs` while the screen rendered `inbound_calls`; the webhook writes the two 1:1, but `POST /api/v1/calls` can add rows only the screen's table has) |
+| Contacts | `contact_handler` | Contact management. The console's Contacts screen now creates (`POST /api/v1/contacts` — the only caller of the `max_contacts` gate), edits (`PUT /api/v1/contacts/:id`) and deletes (`DELETE /api/v1/contacts/:id`) rows (kanban t_f06b1710) |
 | Custom Fields | `contact_custom_field_handler` | Custom contact fields |
 | Dashboard | `dashboard_handler` | Stats and overview |
-| Follow-ups | `follow_up_handler` | The call-back queue (`follow_ups`). Rows are written by `POST /api/v1/calls/:id/respond` and by a `callback` response rule; the tenant console lists it READ-ONLY (no create/edit form) |
+| Follow-ups | `follow_up_handler` | The call-back queue (`follow_ups`). Rows are written by `POST /api/v1/calls/:id/respond` and by a `callback` response rule, and the console's Follow-ups screen now also creates (`POST /api/v1/follow-ups` — the only caller of the `max_follow_ups` gate), closes (`PUT /api/v1/follow-ups/:id`, status `completed` + `completed_at`) and deletes (`DELETE /api/v1/follow-ups/:id`) rows. Its first column resolves `f.call_id` against `GET /api/v1/calls`; it used to read `f.contact_name || f.contact_id`, NEITHER of which exists on `FollowUp`, so every row painted `-` (kanban t_f06b1710) |
 | Integrations | `integration_handler` | Third-party integrations |
 | Messages | `message_handler` | SMS sending (Telnyx transport) + the message log |
 | Message Templates | `message_template_handler` | Saved message texts (a library — nothing sends one; no `type` column exists) |
@@ -181,8 +181,8 @@ anti-drift tests in that file will fail the build (that is deliberate).
 | Portfolio | `portfolio_handler` | Multi-account management |
 | Provider Keys | `provider_keys_handler` | Telnyx/etc provider keys |
 | Response Rules | `response_rule_handler` (store) + `response_rule_eval` (the evaluator) | What the service does automatically on an inbound call |
-| Settings | `settings_handler` | Account settings (`GET`/`PUT /api/v1/settings`). No console screen: the console's Profile screen writes `/api/v1/auth/profile` and `/api/v1/auth/password` |
-| Telnyx | `telnyx_handler` | Telnyx API bridge |
+| Settings | **DELETED (kanban t_f06b1710)** | The handler, its module, `models/setting.rs` and the routes `GET`/`PUT /api/v1/settings` are GONE. Measurement: `tenant_settings` had exactly one reader (the handler's own GET) and no writer outside the handler, so a Settings panel could only have saved keys nothing reads — a decorative control. The console's Profile screen is unchanged and writes `/api/v1/auth/profile` + `/api/v1/auth/password` |
+| Telnyx | `telnyx_handler` | Telnyx API bridge + the number inventory: `GET /api/v1/telnyx/numbers` (ACTIVE rows only), `POST /api/v1/telnyx/numbers` (the `max_phone_numbers` gate; buys on the platform credential, or registers a number the tenant already owns when BYOK is on) and `DELETE /api/v1/telnyx/numbers/:id` (soft delete = release, frees the plan slot). The console's Phone Numbers screen now adds and releases (kanban t_f06b1710); BYOK itself is Pro/Enterprise-only, so on Free every add goes through the platform credential — with none saved the route answers 500 `Telnyx not configured by admin` and adds nothing |
 | Triggers | `triggers_handler` | Trigger automation rules |
 | Voicemail | `voicemail_handler` | **DEAD SURFACE — no writer (kanban t_b4cbe8bc).** `voicemails` is written by NOTHING: the webhook answers the call and issues Telnyx `record_start`, but no `call.recording.saved` arm exists, so the recording is never captured and no row is ever inserted (`SELECT count(*) FROM voicemails` = 0). `GET /api/v1/voicemails`, `GET/PUT /api/v1/voicemails/:id` and `GET /api/v1/calls/:id/voicemail` therefore read a table that can only ever be empty, and no console screen exists. `transcription` is a free-text column written only by `PUT /api/v1/voicemails/:id` — there is no transcription engine and no Pending/Completed/Failed vocabulary |
 
@@ -210,9 +210,15 @@ Tickets / Integrations / Profile`. A guide step that names a control that shell 
 defect in the guide (kanban t_b4cbe8bc: the whole Call Log filter/detail section and the whole
 Voicemails section did exactly that, and were retired).
 
-Notable read-only screens, so no guide promises a button that is not there: **Calls** (table +
-Refresh + per-row Respond), **Phone Numbers**, **Follow-ups**, **Contacts** (search + custom fields
-only), **Profile**.
+Screens with write controls, so the guide may promise them (kanban t_f06b1710): **Calls** (table +
+Refresh + **Export CSV** + per-row Respond), **Phone Numbers** (+ Add Number, per-row Release),
+**Response Rules** (add/edit/delete), **Templates** (add/edit/delete), **Messages** (Send),
+**Follow-ups** (+ New Follow-up, Mark done, Delete), **Contacts** (+ New Contact, per-row Fields /
+Edit / Delete, custom-field definitions), **Tickets** (+ New Ticket, Edit), **Integrations**
+(connect/disconnect/test), **Profile** (Save profile, Update password).
+
+Still read-only by design: **Overview** (counters + credits) and the **Calls** row detail — there is
+no search box, no status filter, no date range and no call detail panel on Calls.
 
 ## Outbound SMS (the send path)
 

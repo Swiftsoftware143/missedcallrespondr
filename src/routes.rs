@@ -8,12 +8,11 @@ use tower_http::cors::CorsLayer;
 use crate::{
     auth::{handlers as auth_handlers, middleware::auth_middleware},
     handlers::{
-        api_key_handler, call_handler, call_log_handler, checkout_handler,
-        contact_custom_field_handler, contact_handler, coreswift_integration_handler,
-        dashboard_handler, follow_up_handler, integration_handler, integration_target_handler,
-        lists_handler, message_handler, message_template_handler, portfolio_handler,
-        provider_keys_handler, response_rule_handler, settings_handler, telnyx_handler,
-        voicemail_handler,
+        call_handler, call_log_handler, checkout_handler, contact_custom_field_handler,
+        contact_handler, coreswift_integration_handler, dashboard_handler, follow_up_handler,
+        integration_handler, integration_target_handler, lists_handler, message_handler,
+        message_template_handler, portfolio_handler, provider_keys_handler, response_rule_handler,
+        telnyx_handler, voicemail_handler,
     },
     state::AppState,
 };
@@ -245,20 +244,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/dashboard/activity",
             get(dashboard_handler::get_dashboard_activity),
         )
-        // Settings
-        .route(
-            "/api/v1/settings",
-            get(settings_handler::get_settings).put(settings_handler::update_settings),
-        )
-        // API Key management
-        .route(
-            "/api/v1/api-keys",
-            post(api_key_handler::create_api_key).get(api_key_handler::list_api_keys),
-        )
-        .route(
-            "/api/v1/api-keys/:id",
-            put(api_key_handler::update_api_key).delete(api_key_handler::delete_api_key),
-        )
+        // kanban t_f06b1710 — the Settings and API-Key route GROUPS were DELETED here, by measurement:
+        // `tenant_settings` has exactly one reader (settings_handler's own GET) and no writer outside
+        // the handler, so a Settings panel could only save keys nothing reads — a decorative control;
+        // and `api_keys` is read by NO auth path in this crate (grep: no `x-api-key` anywhere, no
+        // key-checking middleware — the only reader is `features::count_usage` for the plan quota), so
+        // a key minted by POST /api/v1/api-keys authenticated nothing anywhere. Both were API-only
+        // capabilities with no honest panel to ship, so the routes went rather than the panels.
         // Portfolio Companies
         .route(
             "/api/v1/portfolio-companies",

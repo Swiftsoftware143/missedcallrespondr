@@ -820,6 +820,10 @@ const CoreIntegration = () => {
 
 /* ===== SwiftOps Operator Console — generic admin-parity engine (injected) ===== */
 const OPSAPI = API;
+// kanban t_f06b1710 — the "API Keys" section and the two tenant-settings actions are
+// GONE from this list: their routes were deleted from the app (an api key authenticated
+// nothing anywhere in the crate; nothing reads tenant_settings). A rendered control for a
+// deleted route is a 404 waiting for the operator.
 const OPS_PANELS = [
 {
 "title": "1. Provider Keys (BYOK)",
@@ -1036,41 +1040,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "5. API Keys",
-"list": "/api-keys",
-"actions": [
-{
-"label": "Create key",
-"method": "POST",
-"path": "/api-keys",
-"fields": [
-"name",
-"target_url"
-]
-},
-{
-"label": "Update key",
-"method": "PUT",
-"path": "/api-keys/:id",
-"fields": [
-"id",
-"name",
-"target_url",
-"is_active"
-]
-},
-{
-"label": "Delete key",
-"method": "DELETE",
-"path": "/api-keys/:id",
-"fields": [
-"id"
-]
-}
-]
-},
-{
-"title": "6. Telnyx Config & Numbers",
+"title": "5. Telnyx Config & Numbers",
 "list": "/admin/telnyx-config",
 "actions": [
 {
@@ -1108,7 +1078,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "7. Email Templates & Settings",
+"title": "6. Email Templates",
 "list": "/email-templates",
 "actions": [
 {
@@ -1169,24 +1139,10 @@ const OPS_PANELS = [
 "id"
 ]
 },
-{
-"label": "Get tenant settings",
-"method": "GET",
-"path": "/settings"
-},
-{
-"label": "Update settings (JSON)",
-"method": "PUT",
-"path": "/settings",
-"json": true,
-"fields": [
-"json"
-]
-}
 ]
 },
 {
-"title": "8. Integration Targets",
+"title": "7. Integration Targets",
 "list": "/integration-targets",
 "actions": [
 {
@@ -1222,7 +1178,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "9. Tags, Lists & Campaign Triggers",
+"title": "8. Tags, Lists & Campaign Triggers",
 "list": "/tags",
 "actions": [
 {
@@ -1310,7 +1266,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "10. Billing, Call Logs & Portfolio Sync",
+"title": "9. Billing, Call Logs & Portfolio Sync",
 "list": "/checkout/sessions",
 "actions": [
 {
@@ -1345,7 +1301,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "11. Import Logs & Export Templates",
+"title": "10. Import Logs & Export Templates",
 "list": "/import-logs",
 "actions": [
 {
@@ -1381,7 +1337,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "12. Portfolio Company SMTP",
+"title": "11. Portfolio Company SMTP",
 "list": "/portfolio-companies",
 "actions": [
 {
@@ -1407,7 +1363,7 @@ const OPS_PANELS = [
 ]
 },
 {
-"title": "13. Email Provider (system mail)",
+"title": "12. Email Provider (system mail)",
 "list": "/admin/email-config",
 "actions": [
 {

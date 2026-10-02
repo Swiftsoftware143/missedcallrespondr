@@ -255,8 +255,10 @@
   <p>All platform resources are also available via the REST API at:</p>
   <pre><code>https://app.missedcallrespondr.com/api/v1/</code></pre>
   <p>
-    The tenant console is a client of this API. There is no API-keys screen in the console: an
-    account's programmatic access is set up by the platform operator.
+    The tenant console is a client of this API. There is no API-key capability on a tenant account:
+    the console has no API-keys screen and the API-key routes were removed, because a key minted
+    there was accepted by no endpoint. Every route the console uses takes your signed-in session
+    instead. Machine access to your own data is not a self-serve feature — ask the platform operator.
   </p>
 
   <!-- Dashboard -->
@@ -301,7 +303,8 @@
   <h2 id="call-log">Call Log</h2>
   <p>
     The <strong>Calls</strong> screen (the <em>Call Log</em> in the sidebar) lists this account's
-    inbound calls, newest first. It is a plain table with a <strong>Refresh</strong> button.
+    inbound calls, newest first. It is a plain table with a <strong>Refresh</strong> button and an
+    <strong>Export CSV</strong> button.
   </p>
 
   <h3>Table Columns</h3>
@@ -324,6 +327,14 @@
     The table shows the most recent 100 calls; <strong>Refresh</strong> reloads it from
     <code>GET /api/v1/calls</code>.
   </p>
+  <p>
+    <strong>Export CSV</strong> downloads the call log as <code>call-log.csv</code>, one row per
+    call, with the columns <code>ID, Caller, Called, When, Duration Seconds, Disposition</code>.
+    <em>Caller</em> follows the table's own rule — the name when one is known, the number otherwise.
+    The file comes from <code>GET /api/v1/call-logs/export</code>, which reads the same table this
+    screen lists, so the download cannot disagree with the rows above it; unlike the table it is not
+    capped at 100 rows. CSV is the only format.
+  </p>
 
   <div class="callout warning">
     <strong>What the Calls screen does not have</strong>
@@ -337,7 +348,8 @@
   <h2 id="phone-numbers">Phone Numbers</h2>
   <p>
     <strong>Phone Numbers</strong> lists the numbers this account holds, read from
-    <code>GET /api/v1/telnyx/numbers</code>.
+    <code>GET /api/v1/telnyx/numbers</code>. <strong>+ Add Number</strong> adds one, and the
+    <strong>Release</strong> button on a row removes it from the account.
   </p>
   <table>
     <thead>
@@ -349,9 +361,23 @@
       <tr><td>Added</td><td>When the number was added to the account.</td></tr>
     </tbody>
   </table>
+  <h3>Adding a Number</h3>
   <p>
-    The screen is read-only. Numbers are provisioned and released for the account by the platform
-    operator; a released number simply leaves this list.
+    <strong>+ Add Number</strong> takes the number with its country code (for example
+    <code>+15551234567</code>) and an optional label. How the number is acquired depends on the
+    account: when the platform holds a Telnyx credential the number is bought on the platform's
+    Telnyx account, and when the account has connected its own Telnyx key under
+    <a href="#integrations">Integrations</a> (Pro and Enterprise plans) the number must already be
+    yours on Telnyx and is registered here. How many an account may hold is the plan's own limit
+    (Free 1, Pro Monthly 5); at the cap, or when the platform has no Telnyx credential saved, the
+    server's own message is shown and nothing is added.
+  </p>
+
+  <h3>Releasing a Number</h3>
+  <p>
+    <strong>Release</strong> (confirmation required) removes the number from the account and frees the
+    plan slot, so it leaves this list and can be added back later. The platform operator can also
+    provision and release numbers for an account.
   </p>
 
   <!-- Response Rules -->
@@ -426,9 +452,10 @@
   <!-- Follow-ups -->
   <h2 id="followups">Follow-ups</h2>
   <p>
-    <strong>Follow-ups</strong> is the call-back queue. Rows are created for you: the
-    <strong>Respond</strong> button on a missed call schedules a call-back, and a
-    <strong>Callback</strong> response rule queues one automatically. You do not add them by hand.
+    <strong>Follow-ups</strong> is the call-back queue. Rows arrive on their own: the
+    <strong>Respond</strong> button on a missed call schedules a call-back and a
+    <strong>Callback</strong> response rule queues one automatically. You can also schedule one by
+    hand with <strong>+ New Follow-up</strong>, close it, or delete it.
   </p>
 
   <h3>What the Screen Shows</h3>
@@ -437,20 +464,28 @@
       <tr><th>Column</th><th>Description</th></tr>
     </thead>
     <tbody>
-      <tr><td>Contact</td><td>The contact the follow-up belongs to.</td></tr>
+      <tr><td>Call</td><td>The call the follow-up was raised for — the caller and when it came in. Every follow-up is attached to one of your calls.</td></tr>
       <tr><td>Scheduled</td><td>When the call-back is due.</td></tr>
-      <tr><td>Status</td><td>The task's state as the server reports it — <em>scheduled</em> while it is still due, <em>done</em> or <em>completed</em> once it is closed.</td></tr>
+      <tr><td>Status</td><td>The task's state as the server stores it — <em>pending</em> while the call-back is still due, <em>completed</em> once it is closed.</td></tr>
     </tbody>
   </table>
   <p>The list is read from <code>GET /api/v1/follow-ups</code>.</p>
 
-  <div class="callout warning">
-    <strong>What the Follow-ups screen does not have</strong>
-    There is no <em>+ New Follow-up</em> button and no create/edit form, so there is no
-    <em>Assigned To</em>, <em>Priority</em>, <em>Notes</em> or <em>Due Date</em> field, and no status
-    filter or search box. Rows arrive from the call-back path above and the screen reports their
-    status.
-  </div>
+  <h3>Managing Follow-ups</h3>
+  <ul>
+    <li><strong>+ New Follow-up</strong> — pick one of your calls, a type (the app's own value is
+      <code>call_back</code>), the due date and time, and optional notes
+      (<code>POST /api/v1/follow-ups</code>). A follow-up is always attached to a call
+      (<code>call_id</code> is a required foreign key), so the button stays off until the account has
+      at least one call.</li>
+    <li><strong>Mark done</strong> — closes a follow-up (<code>PUT /api/v1/follow-ups/:id</code> with
+      status <code>completed</code> plus the completion time).</li>
+    <li><strong>Delete</strong> — removes it (confirmation required).</li>
+  </ul>
+  <p>
+    There is no status filter, no search box and no <em>Assigned To</em> field: the list is every
+    follow-up on the account.
+  </p>
 
   <!-- Contacts -->
   <h2 id="contacts">Contacts</h2>
@@ -480,13 +515,22 @@
       <code>PUT /api/v1/contacts/:id/fields/:field_id</code>.</li>
   </ul>
 
-  <div class="callout warning">
-    <strong>What the Contacts screen does not have</strong>
-    There is no <em>+ New Contact</em> button, no edit or delete action on a row, and no contact
-    detail page — clicking a row does nothing. Contacts are not created automatically from inbound
-    calls; a new caller reaches your CRM through the CoreSwift integration
+  <h3>Adding and Editing Contacts</h3>
+  <ul>
+    <li><strong>+ New Contact</strong> — name and phone are required; email, company, tags (comma
+      separated) and notes are optional (<code>POST /api/v1/contacts</code>).</li>
+    <li><strong>Edit</strong> — reopens the row in the same form and saves with
+      <code>PUT /api/v1/contacts/:id</code>. Emptying an optional box clears that field.</li>
+    <li><strong>Delete</strong> — removes the contact and its custom-field values
+      (<code>DELETE /api/v1/contacts/:id</code>, confirmation required).</li>
+  </ul>
+  <p>
+    A duplicate email inside the same account is refused by the server, which shows its own message.
+    There is still no contact detail page — clicking a row does nothing, and the row's Fields button
+    opens the custom-field values. Contacts are not created automatically from inbound calls; a new
+    caller reaches your CRM through the CoreSwift integration
     (<a href="#integrations">Integrations</a>), which captures every missed call as a lead.
-  </div>
+  </p>
 
   <!-- Tickets -->
   <h2 id="tickets">Tickets</h2>
@@ -650,8 +694,10 @@
 
   <div class="callout warning">
     <strong>There is no Settings page</strong>
-    Phone, timezone, company profile, logo, API keys, notification preferences and business hours are
-    not part of the console. No response rule references business hours either: a rule's trigger is
+    Phone, timezone, company profile, logo, notification preferences and business hours are not part
+    of the console, and the account-settings and API-key routes were removed from the API — nothing
+    read a stored tenant setting, so those screens were deliberately not built. No response rule
+    references business hours either: a rule's trigger is
     <em>All missed calls</em>, <em>Specific numbers</em>, <em>Time of day</em> or <em>Day of week</em>
     (see <a href="#response-rules">Response Rules</a>).
   </div>
@@ -686,6 +732,14 @@
     No. Type your message straight into the rule's <strong>Message</strong> field. Message Templates
     are a separate library you keep for reuse — a rule never references one, so copy the wording in if
     you want to use it.
+  </p>
+
+  <h3>How do I export my call data?</h3>
+  <p>
+    Open the <strong>Calls</strong> screen and click <strong>Export CSV</strong>. The file
+    <code>call-log.csv</code> holds every call on the account — not just the 100 the table renders —
+    with the columns <code>ID, Caller, Called, When, Duration Seconds, Disposition</code>. It is the
+    same data the table lists, and CSV is the only format.
   </p>
 
   <h3>What variable syntax does the app support?</h3>

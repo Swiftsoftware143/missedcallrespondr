@@ -127,18 +127,66 @@ const Overview = () => {
 };
 
 // ===== PHONE NUMBERS =====
+// kanban t_f06b1710 — this screen was read-only while POST /telnyx/numbers and
+// DELETE /telnyx/numbers/:id were mounted and gated by the plan's own max_phone_numbers, so the
+// sold entitlement had no panel. Adding a number buys it on the platform's Telnyx account when the
+// platform holds a credential; a Pro/Enterprise tenant that has connected its own Telnyx key
+// (Integrations) registers a number it already owns. Releasing leaves the list (the route
+// soft-deletes the row) and frees the plan slot. Whatever the server refuses, its own sentence shows.
 const PhoneNumbers = () => {
-  const st = viewState('phoneNumbers', { list: [] });
-  const load = async () => { try { const d = await API.get('/telnyx/numbers'); st.list = Array.isArray(d) ? d : (Array.isArray(d.numbers) ? d.numbers : []); renderApp(); } catch (e) { console.error(e); st.list = []; renderApp(); } };
+  const st = viewState('phoneNumbers', { list: [], showAdd: false, busy: null, notice: null, error: null });
+  const load = async () => {
+    // kanban t_f06b1710 — the reload must NOT clear st.error: every write action ends with load(),
+    // so a `st.error = null` here wiped the server's own refusal the moment the list reloaded, and
+    // the operator saw "nothing happened" instead of "Telnyx not configured by admin" (measured in
+    // real Chromium). Each action clears the slot when it STARTS.
+    try { const d = await API.get('/telnyx/numbers'); st.list = Array.isArray(d) ? d : (Array.isArray(d.numbers) ? d.numbers : []); }
+    catch (e) { st.error = 'Could not load numbers: ' + e.message; st.list = []; }
+    renderApp();
+  };
   if (!st._loaded) { st._loaded = true; load(); }
+  const openAdd = () => { st.error = null; st.notice = null; Object.assign(viewState('numbers_form', {}), { number: '', name: '' }); st.showAdd = true; renderApp(); };
+  const add = async () => {
+    const f = viewState('numbers_form', { number: '', name: '' });
+    const number = (f.number || '').trim();
+    if (!number) { st.error = 'Enter the phone number with its country code, e.g. +15551234567'; renderApp(); return; }
+    st.busy = 'add'; st.error = null; st.notice = null; renderApp();
+    try {
+      const body = { number };
+      if ((f.name || '').trim()) body.friendly_name = f.name.trim();
+      await API.post('/telnyx/numbers', body);
+      st.notice = number + ' added'; st.showAdd = false; f.number = ''; f.name = '';
+    } catch (e) { st.error = 'Could not add the number: ' + e.message; }
+    st.busy = null; load();
+  };
+  const release = async (n) => {
+    if (!confirm('Release ' + (n.number || 'this number') + '? It leaves your account and frees the plan slot.')) return;
+    st.busy = n.id; st.error = null; st.notice = null; renderApp();
+    try { await API.del('/telnyx/numbers/' + n.id); st.notice = (n.number || 'The number') + ' released'; }
+    catch (e) { st.error = 'Could not release the number: ' + e.message; }
+    st.busy = null; load();
+  };
   return html`<div>
-    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Phone Numbers</h2></div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Phone Numbers</h2>
+      <button class="btn btn-sm btn-green" onClick=${openAdd}>+ Add Number</button></div>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Number</th><th>Status</th><th>Added</th></tr></thead>
-        <tbody>${st.list.map(n => html`<tr><td class="font-medium">${n.number || n.phone_number || n.id || '-'}</td><td><span class="badge ${n.status==='active'||(n.active!==false)?'badge-green':'badge-yellow'}">${n.status||(n.active!==false?'active':'inactive')}</span></td><td class="text-gray-500">${n.created_at?new Date(n.created_at).toLocaleDateString():'-'}</td></tr>`)}
-        ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No phone numbers. Configure your Telnyx integration to provision numbers.</td></tr>`}
+      <table class="table"><thead><tr><th>Number</th><th>Status</th><th>Added</th><th></th></tr></thead>
+        <tbody>${st.list.map(n => html`<tr><td class="font-medium">${n.number || n.phone_number || n.id || '-'}</td><td><span class="badge ${n.status==='active'||(n.active!==false)?'badge-green':'badge-yellow'}">${n.status||(n.active!==false?'active':'inactive')}</span></td><td class="text-gray-500">${n.created_at?new Date(n.created_at).toLocaleDateString():'-'}</td><td><button class="btn btn-sm btn-red" disabled=${st.busy === n.id} onClick=${() => release(n)}>Release</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No phone numbers yet. Add one, or wait for the platform operator to provision it.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.showAdd && html`<div class="modal" onClick=${e => e.target===e.currentTarget && (st.showAdd = false, renderApp())}><div class="modal-content">
+      <h3 class="text-lg font-bold mb-4">Add a number</h3>
+      ${(() => { const f = viewState('numbers_form', { number: '', name: '' });
+        return html`<div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">Phone number</label><input class="input" value=${f.number} onInput=${e => { f.number = e.target.value; }} placeholder="+15551234567" /></div>
+        <div><label class="text-sm font-medium block mb-1">Label (optional)</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} placeholder="Front desk" /></div>
+        <p class="text-xs text-gray-500">The number is bought on the platform's Telnyx account when the platform holds one. A tenant that has connected its own Telnyx key under Integrations registers a number it already owns. Your plan limits how many you can hold.</p>
+        <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { st.showAdd = false; renderApp(); }}>Cancel</button><button class="btn" disabled=${st.busy === 'add'} onClick=${add}>Add</button></div>
+      </div>`; })()}
+    </div></div>`}
   </div>`;
 };
 
@@ -154,6 +202,28 @@ const Calls = () => {
     renderApp();
   };
   if (!st._loaded) { st._loaded = true; load(); }
+  // kanban t_f06b1710 — export what this screen lists. The route used to read `call_logs` while the
+  // table below lists `inbound_calls` (GET /calls); it now reads the SAME table and emits these
+  // columns, so the file cannot disagree with the rows on screen. The token rides in the header, so
+  // the file is fetched and handed to a blob download rather than opened as a bare link.
+  const exportCsv = async () => {
+    st.error = null; st.notice = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/call-logs/export', { headers: { 'Authorization': 'Bearer ' + API.token } });
+      if (!r.ok) {
+        let m = 'Export failed (' + r.status + ')';
+        try { const j = await r.json(); m = j.error || j.message || m; } catch (e) { /* not JSON */ }
+        throw new Error(m);
+      }
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = 'call-log.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      st.notice = 'Call log exported as call-log.csv';
+    } catch (e) { st.error = 'Could not export the call log: ' + e.message; }
+    renderApp();
+  };
   const respond = async (c) => {
     st.busy = c.id; st.notice = null; st.error = null; renderApp();
     try {
@@ -166,7 +236,10 @@ const Calls = () => {
   const rows = st.list.slice(0, 100);
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Calls</h2>
-      <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button></div>
+      <div class="flex items-center gap-2">
+        <button class="btn btn-sm btn-outline" onClick=${exportCsv}>Export CSV</button>
+        <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
+      </div></div>
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
     <div class="card p-0 overflow-hidden">
@@ -389,17 +462,84 @@ const Messages = () => {
 };
 
 // ===== FOLLOW-UPS =====
+// kanban t_f06b1710 — this screen was read-only while POST/PUT/DELETE /follow-ups were mounted and
+// gated by the plan's own max_follow_ups (a gate whose only caller would have been a panel that did
+// not exist: the Respond action and a Callback rule INSERT the row directly). The "Contact" column is
+// fixed here too: it read f.contact_name || f.contact_id and FollowUp has NEITHER key (the row holds
+// call_id), so every row painted '-' — the column now resolves call_id against GET /calls, which is
+// what the row really references. A follow-up is always attached to one of your calls (call_id is a
+// NOT NULL foreign key), so the picker lists your calls and the button is off until one exists.
 const FollowUps = () => {
-  const st = viewState('followups', { list: [] });
-  if (!st._loaded) { st._loaded = true; API.get('/follow-ups').then(d => { st.list = Array.isArray(d) ? d : []; renderApp(); }).catch(() => {}); }
+  const st = viewState('followups', { list: [], calls: [], showNew: false, busy: null, notice: null, error: null });
+  const load = async () => {
+    try { const c = await API.get('/calls'); st.calls = Array.isArray(c) ? c : (Array.isArray(c.calls) ? c.calls : []); } catch (e) { st.calls = []; }
+    // kanban t_f06b1710 — no `st.error = null` on the reload: it erased a write action's own error.
+    try { const d = await API.get('/follow-ups'); st.list = Array.isArray(d) ? d : []; }
+    catch (e) { st.error = 'Could not load follow-ups: ' + e.message; st.list = []; }
+    renderApp();
+  };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const callOf = (f) => (st.calls || []).find(c => c.id === f.call_id) || null;
+  const callLabel = (f) => {
+    const c = callOf(f);
+    if (!c) return f.call_id ? String(f.call_id).slice(0, 8) + '…' : '-';
+    return (c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + new Date(c.call_time).toLocaleString() : '');
+  };
+  const openNew = () => { st.error = null; st.notice = null; Object.assign(viewState('followups_form', {}), { call_id: '', type: 'call_back', when: '', notes: '' }); st.showNew = true; renderApp(); };
+  const create = async () => {
+    const f = viewState('followups_form', { call_id: '', type: 'call_back', when: '', notes: '' });
+    if (!f.call_id) { st.error = 'Pick the call this follow-up belongs to'; renderApp(); return; }
+    if (!f.when) { st.error = 'Pick when the call-back is due'; renderApp(); return; }
+    st.busy = 'new'; st.error = null; st.notice = null; renderApp();
+    try {
+      // datetime-local is 'YYYY-MM-DDTHH:MM' and the route binds a NaiveDateTime, which needs seconds
+      const when = String(f.when).length === 16 ? String(f.when) + ':00' : String(f.when);
+      await API.post('/follow-ups', { call_id: f.call_id, follow_type: (f.type || '').trim() || 'call_back', scheduled_at: when, notes: (f.notes || '').trim() || null });
+      st.notice = 'Follow-up scheduled'; st.showNew = false;
+      f.call_id = ''; f.when = ''; f.notes = '';
+    } catch (e) { st.error = 'Could not schedule the follow-up: ' + e.message; }
+    st.busy = null; load();
+  };
+  const markDone = async (f) => {
+    st.busy = f.id; st.error = null; st.notice = null; renderApp();
+    try {
+      // naive UTC like every other timestamp the app stores (the server writes Utc::now().naive_utc())
+      const now = new Date().toISOString().slice(0, 19);
+      await API.put('/follow-ups/' + f.id, { status: 'completed', completed_at: now });
+      st.notice = 'Follow-up marked completed';
+    } catch (e) { st.error = 'Could not update the follow-up: ' + e.message; }
+    st.busy = null; load();
+  };
+  const remove = async (f) => {
+    if (!confirm('Delete this follow-up?')) return;
+    st.busy = f.id; st.error = null; st.notice = null; renderApp();
+    try { await API.del('/follow-ups/' + f.id); st.notice = 'Follow-up deleted'; }
+    catch (e) { st.error = 'Could not delete the follow-up: ' + e.message; }
+    st.busy = null; load();
+  };
   return html`<div>
-    <h2 class="text-xl font-bold mb-4">Follow-ups</h2>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Follow-ups</h2>
+      <button class="btn btn-sm btn-green" disabled=${st.calls.length === 0} onClick=${openNew}>+ New Follow-up</button></div>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    ${st.calls.length === 0 && html`<p class="text-xs text-gray-500 mb-2">A follow-up is always attached to one of your calls; none have come in yet, so there is nothing to schedule against.</p>`}
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Contact</th><th>Scheduled</th><th>Status</th></tr></thead>
-        <tbody>${st.list.map(f => html`<tr><td class="font-medium">${f.contact_name||f.contact_id||'-'}</td><td class="text-gray-500">${f.scheduled_at?new Date(f.scheduled_at).toLocaleString():'-'}</td><td><span class="badge ${f.status==='done'||f.status==='completed'?'badge-green':f.status==='scheduled'?'badge-blue':'badge-yellow'}">${f.status||'scheduled'}</span></td></tr>`)}
-        ${st.list.length===0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No follow-ups scheduled.</td></tr>`}
+      <table class="table"><thead><tr><th>Call</th><th>Scheduled</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${st.list.map(f => html`<tr><td class="text-gray-500">${callLabel(f)}</td><td class="text-gray-500">${f.scheduled_at?new Date(f.scheduled_at + 'Z').toLocaleString():'-'}</td><td><span class="badge ${f.status==='completed'||f.status==='done'?'badge-green':f.status==='scheduled'?'badge-blue':'badge-yellow'}">${f.status||'pending'}</span></td><td>${f.status==='completed'||f.status==='done' ? '' : html`<button class="btn btn-sm btn-outline" disabled=${st.busy === f.id} onClick=${() => markDone(f)}>Mark done</button>`}<button class="btn btn-sm btn-red" disabled=${st.busy === f.id} onClick=${() => remove(f)}>Delete</button></td></tr>`)}
+        ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No follow-ups scheduled.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.showNew && html`<div class="modal" onClick=${e => e.target===e.currentTarget && (st.showNew = false, renderApp())}><div class="modal-content">
+      <h3 class="text-lg font-bold mb-4">New Follow-up</h3>
+      ${(() => { const f = viewState('followups_form', { call_id: '', type: 'call_back', when: '', notes: '' });
+        return html`<div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">Call</label><select class="input" value=${f.call_id} onChange=${e => { f.call_id = e.target.value; }}><option value="">Pick a call…</option>${st.calls.map(c => html`<option value=${c.id}>${(c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + new Date(c.call_time).toLocaleString() : '')}</option>`)}</select></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><input class="input" value=${f.type} onInput=${e => { f.type = e.target.value; }} placeholder="call_back" /></div>
+        <div><label class="text-sm font-medium block mb-1">Due</label><input class="input" type="datetime-local" value=${f.when} onInput=${e => { f.when = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
+        <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { st.showNew = false; renderApp(); }}>Cancel</button><button class="btn" disabled=${st.busy === 'new'} onClick=${create}>Schedule</button></div>
+      </div>`; })()}
+    </div></div>`}
   </div>`;
 };
 
@@ -418,14 +558,17 @@ const Contacts = () => {
   const st = viewState('contacts', {
     list: [], fields: [], search: '', searching: false, showFields: false, showValues: null,
     values: {}, draft: { name: '', type: 'text', order: 0 }, responder: '', busy: null,
-    notice: null, error: null
+    notice: null, error: null,
+    showForm: false, editItem: null, formSeeded: false
   });
   const load = async () => {
     try { const f = await API.get('/contacts/custom-fields'); st.fields = Array.isArray(f) ? f : []; }
     catch (e) { st.fields = []; }
     try {
       const d = st.fields.length ? await API.get('/contacts/with-fields') : await API.get('/contacts');
-      st.list = Array.isArray(d) ? d : []; st.error = null;
+      // kanban t_f06b1710 — no `st.error = null` here: the write actions reload through load(), and
+      // clearing the slot on a successful reload hid the server's refusal (e.g. a duplicate email).
+      st.list = Array.isArray(d) ? d : [];
     } catch (e) { st.error = 'Could not load contacts: ' + e.message; st.list = []; }
     renderApp();
   };
@@ -464,6 +607,37 @@ const Contacts = () => {
     st.busy = null; load();
   };
 
+  // kanban t_f06b1710 — POST /contacts and PUT|DELETE /contacts/:id were mounted with no control
+  // anywhere in the console. The panel below is the create/edit form (one shared draft, seeded on
+  // OPEN — guard rule 4) plus the per-row Edit/Delete controls.
+  //   create: empty optionals are OMITTED so the API stores NULL (some('') would store an empty
+  //           string, which the create path's duplicate-email check treats as absent but the UI
+  //           would then show as a real value);
+  //   update: an emptied box sends '' — PUT binds it straight through, so that is how a field is
+  //           cleared, and the row shows '-' again.
+  const showContact = (c) => { st.editItem = c; st.formSeeded = false; st.error = null; st.notice = null; st.showForm = true; renderApp(); };
+  const hideContact = () => { st.showForm = false; renderApp(); };
+  const saveContact = async (data, isEdit) => {
+    st.busy = 'form'; st.error = null; st.notice = null; renderApp();
+    try {
+      if (isEdit) await API.put('/contacts/' + st.editItem.id, data);
+      else {
+        const body = {};
+        Object.keys(data).forEach(k => { const v = data[k]; if (v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '') && !(Array.isArray(v) && v.length === 0)) body[k] = v; });
+        await API.post('/contacts', body);
+      }
+      st.showForm = false; st.notice = isEdit ? 'Contact updated' : 'Contact added';
+    } catch (e) { st.error = 'Could not save the contact: ' + e.message; }
+    st.busy = null; load();
+  };
+  const removeContact = async (c) => {
+    if (!confirm('Delete ' + (c.name || 'this contact') + '? Their custom-field values go too.')) return;
+    st.busy = c.id; st.error = null; st.notice = null; renderApp();
+    try { await API.del('/contacts/' + c.id); st.notice = 'Contact deleted'; }
+    catch (e) { st.error = 'Could not delete the contact: ' + e.message; }
+    st.busy = null; load();
+  };
+
   const openValues = async (c) => {
     st.showValues = c; st.values = {}; st.error = null; renderApp();
     const seed = (c.custom_fields || []).reduce((a, f) => { a[f.field_id] = f.value == null ? '' : f.value; return a; }, {});
@@ -494,6 +668,7 @@ const Contacts = () => {
       <h2 class="text-xl font-bold">Contacts</h2>
       <div class="flex items-center gap-2">
         <input class="input" style="width:240px" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
+        <button class="btn btn-sm btn-green" onClick=${() => showContact(null)}>+ New Contact</button>
         <button class="btn btn-sm btn-outline" onClick=${() => { st.showFields = !st.showFields; renderApp(); }}>Custom fields (${st.fields.length})</button>
         <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
       </div>
@@ -525,7 +700,7 @@ const Contacts = () => {
             <td class="text-gray-500">${c.phone || '-'}</td>
             <td class="text-gray-500">${c.email || '-'}</td>
             ${st.fields.map(f => { const k = fieldKey(f); return html`<td class="text-gray-500">${vals[k] != null && vals[k] !== '' ? vals[k] : html`<span class="text-gray-300">—</span>`}</td>`; })}
-            <td>${st.fields.length ? html`<button class="btn btn-sm btn-outline" onClick=${() => openValues(c)}>Fields</button>` : ''}</td>
+            <td><div class="flex gap-1 justify-end">${st.fields.length ? html`<button class="btn btn-sm btn-outline" onClick=${() => openValues(c)}>Fields</button>` : ''}<button class="btn btn-sm btn-outline" onClick=${() => showContact(c)}>Edit</button><button class="btn btn-sm btn-red" disabled=${st.busy === c.id} onClick=${() => removeContact(c)}>Delete</button></div></td>
           </tr>`; })}
         ${rows.length === 0 && html`<tr><td colspan=${4 + st.fields.length} class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
       </tbody></table>
@@ -539,6 +714,35 @@ const Contacts = () => {
         <button class="btn btn-outline" onClick=${() => { st.showValues = null; renderApp(); }}>Cancel</button>
         <button class="btn" disabled=${st.busy === 'values' || st.fields.length === 0} onClick=${saveValues}>Save</button>
       </div>
+    </div></div>`}
+    ${st.showForm && html`<div class="modal" onClick=${e => e.target === e.currentTarget && hideContact()}><div class="modal-content">
+      <h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'New'} Contact</h3>
+      ${(() => {
+        const f = viewState('contacts_form', { name: '', phone: '', email: '', company: '', notes: '', tags: '' });
+        if (!st.formSeeded) {
+          const row = st.editItem;
+          f.name = row ? (row.name || '') : '';
+          f.phone = row ? (row.phone || '') : '';
+          f.email = row ? (row.email || '') : '';
+          f.company = row ? (row.company || '') : '';
+          f.notes = row ? (row.notes || '') : '';
+          f.tags = row && Array.isArray(row.tags) ? row.tags.join(', ') : '';
+          st.formSeeded = true;
+        }
+        const submit = () => {
+          const name = (f.name || '').trim(), phone = (f.phone || '').trim();
+          if (!name || !phone) { st.error = 'Name and phone are required'; renderApp(); return; }
+          saveContact({ name: name, phone: phone, email: (f.email || '').trim(), company: (f.company || '').trim(), notes: (f.notes || '').trim(), tags: (f.tags || '').split(',').map(s => s.trim()).filter(Boolean) }, !!st.editItem);
+        };
+        return html`<div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Phone</label><input class="input" value=${f.phone} onInput=${e => { f.phone = e.target.value; }} placeholder="+15551234567" /></div>
+        <div><label class="text-sm font-medium block mb-1">Email (optional)</label><input class="input" value=${f.email} onInput=${e => { f.email = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Company (optional)</label><input class="input" value=${f.company} onInput=${e => { f.company = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Tags (comma separated, optional)</label><input class="input" value=${f.tags} onInput=${e => { f.tags = e.target.value; }} placeholder="vip, after-hours" /></div>
+        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
+        <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${hideContact}>Cancel</button><button class="btn" disabled=${st.busy === 'form'} onClick=${submit}>${st.editItem ? 'Save' : 'Add'}</button></div>
+      </div>`; })()}
     </div></div>`}
   </div>`;
 };

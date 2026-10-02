@@ -103,11 +103,7 @@ pub mod max {
     pub const INTEGRATION_TARGETS_NAME: usize = 255;
     pub const INTEGRATION_TARGETS_PROVIDER: usize = 100;
 
-    // api_keys / provider_keys
-    pub const API_KEYS_NAME: usize = 255;
-    /// `api_keys.prefix` — the SERVER-generated key prefix. The census found this column answering
-    /// 500 for every create (see `api_key_handler::API_KEY_PREFIX`), so its bound is pinned here too.
-    pub const API_KEYS_PREFIX: usize = 8;
+    // provider_keys (api_keys' own bounds went with the deleted route group — kanban t_f06b1710)
     pub const PROVIDER_KEYS_PROVIDER: usize = 64;
     pub const PROVIDER_KEYS_BASE_URL: usize = 512;
     pub const PROVIDER_KEYS_SCOPE: usize = 16;

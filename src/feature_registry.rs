@@ -189,15 +189,12 @@ pub const REGISTRY: &[FeatureDef] = &[
         enforced_by: "POST /api/v1/integration-targets (integration_target_handler::create)",
         read_by_gate: true,
     },
-    FeatureDef {
-        key: "max_api_keys",
-        label: "Api Keys",
-        kind: FeatureKind::Limit,
-        unit: Some("keys"),
-        storage: Storage::FeatureLimits,
-        enforced_by: "POST /api/v1/api-keys (api_key_handler::create)",
-        read_by_gate: true,
-    },
+    // kanban t_f06b1710 — `max_api_keys` was REMOVED from the registry with the deleted API-key
+    // route group. The registry exists to stop silent drift in both directions, and its own test
+    // (`every_registry_key_is_read_by_a_gate`) refused a `read_by_gate: true` entry whose only gate
+    // call site no longer exists — which is exactly right: a catalogue row the admin panel shows for
+    // a capability with no route is the lie this file prevents. Residual, carded: `feature_limits`
+    // rows and `plans.features` on tenant-free plans still mention api_keys (plan DATA, not code).
     FeatureDef {
         key: "max_message_templates",
         label: "Message templates",
