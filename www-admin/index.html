@@ -1499,16 +1499,15 @@ const App = () => {
   ];
 
   const SiteConfig = () => {
-  const [data, setData] = S.useState ? (() => { const [d, sd] = S.useState ? [null, null] : [null, null]; try { const [d2, sd2] = [S.__sc_data||null, (v) => { S.__sc_data=v; renderApp(); }]; return [d2, sd2]; } catch(e) { return [null, null]; } })() : [null, null];
-  const loaded = S.__sc_loaded || false;
-  if (!loaded) {
-    S.__sc_loaded = true;
-    API.get('/admin/site').then(d => {
-      S.__sc_data = d;
-      renderApp();
-    }).catch(() => { S.__sc_error = true; renderApp(); });
-  }
-  if (S.__sc_error) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-red-500">Not available.</p></div>`;
+  // kanban t_2f99528b — this tab used to read its state out of `S.__sc_data`, guarded by
+  // `S.useState ? … : [null, null]`, and NOTHING ever sets `S.useState`: the guard was always false,
+  // so `data` was hard-coded null and the tab rendered "Loading..." forever. Its fields never
+  // appeared, which is why "the panel's Site Settings save" had never been exercised through the UI.
+  // The neighbouring components (Line 1368) use preact's own state; this one does the same.
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => { API.get('/admin/site').then(setData).catch(e => { console.error(e); setErr(e); }); }, []);
+  if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
   if (!data) return html`<div class="card"><h2 class="text-xl font-bold mb-4">Site Configuration</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
   
   const f = (n, v, t) => t==='textarea'
@@ -1517,14 +1516,17 @@ const App = () => {
   const gv = id => { const e = document.getElementById('field_'+id); return e ? e.value : ''; };
   const sv = (nm, v) => { const e = document.getElementById('field_'+nm); if(e) e.value = v||''; };
   
-  setTimeout(() => {
+  // Fill the uncontrolled inputs once the row has arrived (the old code used a 50 ms setTimeout
+  // racing the commit; a data-keyed effect cannot lose that race).
+  useEffect(() => {
+    if (!data) return;
     sv('title',data.title);sv('description',data.description);sv('keywords',data.keywords);
     sv('canonical_url',data.canonical_url);sv('og_title',data.og_title);sv('og_description',data.og_description);
     sv('og_image_url',data.og_image_url);sv('favicon_url',data.favicon_url);
     sv('ga_id',data.ga_id);sv('gtm_id',data.gtm_id);sv('head_scripts',data.head_scripts);sv('body_scripts',data.body_scripts);
     sv('legal_tos',data.legal_tos);sv('legal_privacy',data.legal_privacy);sv('legal_refunds',data.legal_refunds);
     sv('schema_json',data.schema_json);
-  }, 50);
+  }, [data]);
   
   const save = async () => {
     const b = {};
