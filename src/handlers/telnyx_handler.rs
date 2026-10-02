@@ -294,19 +294,18 @@ fn hangup_response() -> Json<Value> {
     }))
 }
 
-/// Build a Telnyx call-control "answer + record + gather" response.
+/// Build a Telnyx call-control "answer + gather" response.
+///
+/// The `record_start` command this used to carry was retired with the voicemail surface (kanban
+/// t_1d4fc956): nothing in the app ever handled the recording event it produced (`call.recording.saved`
+/// is acked with `{"commands":[]}` at the top of `webhook`), so the command bought a recording that
+/// was never fetched or stored — and there is no STT integration, so nothing could have transcribed
+/// it either. Asking Telnyx for it again would keep paying for what cannot be used.
 fn answer_and_gather_response() -> Json<Value> {
     Json(json!({
         "commands": [
             {
                 "type": "answer"
-            },
-            {
-                "type": "record_start",
-                "options": {
-                    "format": "wav",
-                    "play_beep": false
-                }
             },
             {
                 "type": "gather_using_audio",
@@ -445,8 +444,11 @@ pub async fn webhook(
 
     // -- 7. Insert call_log record
     sqlx::query(
-        "INSERT INTO call_logs (id, caller_number, called_number, duration, disposition, cost, recorded, tenant_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+        // `recorded` was dropped from the table (kanban t_1d4fc956 RETIRE-VOICEMAILS): this writer
+        // hardcoded `false` and no surface ever read the column, so it asserted a recording that
+        // cannot exist. `notes` is untouched.
+        "INSERT INTO call_logs (id, caller_number, called_number, duration, disposition, cost, tenant_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
     )
     .bind(Uuid::new_v4())
     .bind(&normalized_caller)
@@ -454,7 +456,6 @@ pub async fn webhook(
     .bind(Option::<i32>::None)    // duration
     .bind("missed")
     .bind(if byok { None } else { Some(1.0) }) // cost (1 credit)
-    .bind(false)                  // recorded
     .bind(tenant_id)
     .bind(now)
     .execute(&state.pool)

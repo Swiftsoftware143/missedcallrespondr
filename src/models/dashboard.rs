@@ -19,7 +19,6 @@ pub struct DashboardResponse {
     pub total_calls: i64,
     pub missed_calls: i64,
     pub answered_calls: i64,
-    pub voicemails: i64,
     pub follow_ups_pending: i64,
     pub response_rate: f64,
 }

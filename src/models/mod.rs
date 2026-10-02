@@ -19,5 +19,4 @@ pub mod message;
 pub mod message_template;
 pub mod response_rule;
 pub mod ticket;
-pub mod voicemail;
 pub mod workflow;

@@ -171,6 +171,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000025_response_rules_priority",
             include_str!("../migrations/000025_response_rules_priority.sql"),
         ),
+        // 000026 retires the DEAD `voicemails` surface (kanban t_1d4fc956): the table (no writer
+        // anywhere, 0 rows), its three read routes, and the orphan `inbound_calls.recording_url` /
+        // `voicemail_url` / `call_logs.recorded` columns. Pure idempotent DROPs — this runner
+        // re-executes every file on every boot, so the second pass is a no-op.
+        (
+            "000026_retire_voicemails",
+            include_str!("../migrations/000026_retire_voicemails.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

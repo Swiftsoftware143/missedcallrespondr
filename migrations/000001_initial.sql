@@ -35,8 +35,7 @@ CREATE TABLE IF NOT EXISTS inbound_calls (
     called_number TEXT NOT NULL,
     call_time TIMESTAMP NOT NULL DEFAULT NOW(),
     duration INTEGER,
-    recording_url TEXT,
-    voicemail_url TEXT,
+    -- (recording_url / voicemail_url removed by kanban t_1d4fc956 — 000026_retire_voicemails.sql)
     disposition TEXT NOT NULL DEFAULT 'missed',
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -128,22 +127,9 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE INDEX IF NOT EXISTS idx_contacts_tenant ON contacts(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
 
--- Voicemails
-CREATE TABLE IF NOT EXISTS voicemails (
-    id UUID PRIMARY KEY,
-    call_id UUID NOT NULL REFERENCES inbound_calls(id) ON DELETE CASCADE,
-    audio_url TEXT,
-    transcription TEXT,
-    duration INTEGER,
-    listened BOOLEAN NOT NULL DEFAULT false,
-    notes TEXT,
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_voicemails_tenant ON voicemails(tenant_id);
-
+-- Voicemails: the table was retired by kanban t_1d4fc956 (000026_retire_voicemails.sql). No writer
+-- ever existed (`INSERT INTO voicemails` = 0 hits), no screen read it, and there is no STT
+-- integration in this crate, so the CREATE is gone rather than left as dead DDL for a fresh install.
 -- Call Logs
 CREATE TABLE IF NOT EXISTS call_logs (
     id UUID PRIMARY KEY,
@@ -152,7 +138,7 @@ CREATE TABLE IF NOT EXISTS call_logs (
     duration INTEGER,
     disposition TEXT NOT NULL,
     cost DOUBLE PRECISION,
-    recorded BOOLEAN NOT NULL DEFAULT false,
+    -- (recorded removed by kanban t_1d4fc956 — the only writer hardcoded false, nothing read it)
     notes TEXT,
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()

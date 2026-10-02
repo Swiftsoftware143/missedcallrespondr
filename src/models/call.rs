@@ -11,8 +11,6 @@ pub struct InboundCall {
     pub called_number: String,
     pub call_time: NaiveDateTime,
     pub duration: Option<i32>,
-    pub recording_url: Option<String>,
-    pub voicemail_url: Option<String>,
     pub disposition: String,
     pub tenant_id: Uuid,
     pub created_at: NaiveDateTime,
@@ -26,8 +24,6 @@ pub struct CreateInboundCallRequest {
     pub called_number: String,
     pub call_time: Option<NaiveDateTime>,
     pub duration: Option<i32>,
-    pub recording_url: Option<String>,
-    pub voicemail_url: Option<String>,
     pub disposition: Option<String>,
 }
 
@@ -35,7 +31,5 @@ pub struct CreateInboundCallRequest {
 pub struct UpdateInboundCallRequest {
     pub caller_name: Option<String>,
     pub duration: Option<i32>,
-    pub recording_url: Option<String>,
-    pub voicemail_url: Option<String>,
     pub disposition: Option<String>,
 }

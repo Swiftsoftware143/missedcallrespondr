@@ -11,7 +11,6 @@ pub struct CallLog {
     pub duration: Option<i32>,
     pub disposition: String,
     pub cost: Option<f64>,
-    pub recorded: bool,
     pub notes: Option<String>,
     pub tenant_id: Uuid,
     pub created_at: NaiveDateTime,

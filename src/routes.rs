@@ -12,7 +12,7 @@ use crate::{
         contact_handler, coreswift_integration_handler, dashboard_handler, follow_up_handler,
         integration_handler, integration_target_handler, lists_handler, message_handler,
         message_template_handler, portfolio_handler, provider_keys_handler, response_rule_handler,
-        telnyx_handler, voicemail_handler,
+        telnyx_handler,
     },
     state::AppState,
 };
@@ -108,10 +108,6 @@ pub fn create_router(state: AppState) -> Router {
                 .delete(call_handler::delete_call),
         )
         .route(
-            "/api/v1/calls/:id/voicemail",
-            get(call_handler::get_call_voicemail),
-        )
-        .route(
             "/api/v1/calls/:id/respond",
             post(call_handler::respond_to_call),
         )
@@ -190,15 +186,12 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/contacts/:contact_id/fields/:field_id",
             put(contact_custom_field_handler::update_contact_field_value),
         )
-        // Voicemails
-        .route(
-            "/api/v1/voicemails",
-            get(voicemail_handler::list_voicemails),
-        )
-        .route(
-            "/api/v1/voicemails/:id",
-            get(voicemail_handler::get_voicemail).put(voicemail_handler::update_voicemail),
-        )
+        // Voicemails (kanban t_1d4fc956 RETIRE-VOICEMAILS): `GET /api/v1/voicemails`,
+        // `GET|PUT /api/v1/voicemails/:id` and `GET /api/v1/calls/:id/voicemail` are GONE with the
+        // `voicemails` table they read. Nothing could ever write a row (the Telnyx webhook has no
+        // `call.recording.saved` arm, so its `record_start` was never captured), no console screen
+        // existed, and there is no STT integration in this crate — the whole surface was
+        // empty-by-construction. See migrations/000026_retire_voicemails.sql.
         // Call Logs
         .route("/api/v1/call-logs", get(call_log_handler::list_call_logs))
         .route(

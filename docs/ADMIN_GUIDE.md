@@ -6,9 +6,9 @@ MissedCallRespondr (MCR) handles call tracking, SMS messaging, the response rule
 missed call, and the call-back follow-ups those rules queue. All transactional emails use the
 database-backed template system.
 
-There is NO voicemail capability: see the Voicemail row of [Module Handlers](#module-handlers) and
-kanban t_b4cbe8bc. Nothing in the product records, stores, transcribes or plays a voicemail, and no
-console screen and no guide may claim one.
+There is NO voicemail capability, and as of kanban t_1d4fc956 there is no voicemail SURFACE either:
+see the Voicemail row of [Module Handlers](#module-handlers). Nothing in the product records, stores,
+transcribes or plays a voicemail, and no console screen and no guide may claim one.
 
 ## Quick Reference
 
@@ -169,7 +169,7 @@ anti-drift tests in that file will fail the build (that is deliberate).
 | Module | Handler | Description |
 |---|---|---|
 | API Keys | **DELETED (kanban t_f06b1710)** | The handler, its module and `POST|GET /api/v1/api-keys` + `PUT|DELETE /api/v1/api-keys/:id` are GONE. Measurement: NO auth path in this crate read `api_keys` (no `x-api-key` anywhere, no key-checking middleware; the only reader was `features::count_usage` for the plan quota), so a key minted by that route authenticated nothing anywhere — a credential no endpoint would accept. The table stays for history. |
-| Call Logs | `call_log_handler` | `GET /api/v1/call-logs` still reads `call_logs` (the billing log with cost/recorded). `GET /api/v1/call-logs/export` now reads **`inbound_calls`** — the table the console's Calls screen lists — and emits that screen's own columns, so the CSV cannot disagree with the rows on screen (kanban t_f06b1710: it used to serve `call_logs` while the screen rendered `inbound_calls`; the webhook writes the two 1:1, but `POST /api/v1/calls` can add rows only the screen's table has) |
+| Call Logs | `call_log_handler` | `GET /api/v1/call-logs` still reads `call_logs` (the billing log with cost — its `recorded` column was dropped with the voicemail surface, kanban t_1d4fc956). `GET /api/v1/call-logs/export` now reads **`inbound_calls`** — the table the console's Calls screen lists — and emits that screen's own columns, so the CSV cannot disagree with the rows on screen (kanban t_f06b1710: it used to serve `call_logs` while the screen rendered `inbound_calls`; the webhook writes the two 1:1, but `POST /api/v1/calls` can add rows only the screen's table has) |
 | Contacts | `contact_handler` | Contact management. The console's Contacts screen now creates (`POST /api/v1/contacts` — the only caller of the `max_contacts` gate), edits (`PUT /api/v1/contacts/:id`) and deletes (`DELETE /api/v1/contacts/:id`) rows (kanban t_f06b1710) |
 | Custom Fields | `contact_custom_field_handler` | Custom contact fields |
 | Dashboard | `dashboard_handler` | Stats and overview |
@@ -184,7 +184,7 @@ anti-drift tests in that file will fail the build (that is deliberate).
 | Settings | **DELETED (kanban t_f06b1710)** | The handler, its module, `models/setting.rs` and the routes `GET`/`PUT /api/v1/settings` are GONE. Measurement: `tenant_settings` had exactly one reader (the handler's own GET) and no writer outside the handler, so a Settings panel could only have saved keys nothing reads — a decorative control. The console's Profile screen is unchanged and writes `/api/v1/auth/profile` + `/api/v1/auth/password` |
 | Telnyx | `telnyx_handler` | Telnyx API bridge + the number inventory: `GET /api/v1/telnyx/numbers` (ACTIVE rows only), `POST /api/v1/telnyx/numbers` (the `max_phone_numbers` gate; buys on the platform credential, or registers a number the tenant already owns when BYOK is on) and `DELETE /api/v1/telnyx/numbers/:id` (soft delete = release, frees the plan slot). The console's Phone Numbers screen now adds and releases (kanban t_f06b1710); BYOK itself is Pro/Enterprise-only, so on Free every add goes through the platform credential — with none saved the route answers 500 `Telnyx not configured by admin` and adds nothing |
 | Triggers | `triggers_handler` | Trigger automation rules |
-| Voicemail | `voicemail_handler` | **DEAD SURFACE — no writer (kanban t_b4cbe8bc).** `voicemails` is written by NOTHING: the webhook answers the call and issues Telnyx `record_start`, but no `call.recording.saved` arm exists, so the recording is never captured and no row is ever inserted (`SELECT count(*) FROM voicemails` = 0). `GET /api/v1/voicemails`, `GET/PUT /api/v1/voicemails/:id` and `GET /api/v1/calls/:id/voicemail` therefore read a table that can only ever be empty, and no console screen exists. `transcription` is a free-text column written only by `PUT /api/v1/voicemails/:id` — there is no transcription engine and no Pending/Completed/Failed vocabulary |
+| Voicemail | **REMOVED (kanban t_1d4fc956 — the dead surface t_b4cbe8bc measured)** | The `voicemail_handler`, `models/voicemail.rs`, the `voicemails` table and all three routes (`GET /api/v1/voicemails`, `GET|PUT /api/v1/voicemails/:id`, `GET /api/v1/calls/:id/voicemail`) are GONE; migration `000026_retire_voicemails.sql` drops the table and its orphan columns on live. Why retire rather than wire: `INSERT INTO voicemails` = 0 hits anywhere, `SELECT count(*) FROM voicemails` = 0, the webhook handled ONLY `call_received`/`call_initiated` (so the Telnyx `record_start` on the handled arm was never captured — that command is retired too), there is NO speech-to-text integration in this crate, and no served screen ever read the table. Wiring would mean inventing an STT provider, a transcription-status vocabulary and a console screen for a surface no tenant can currently reach. The orphan writers went with it: `inbound_calls.recording_url`, `inbound_calls.voicemail_url` and `call_logs.recorded` (whose only writer hardcoded `false`). `POST|PUT /api/v1/calls` no longer accepts those body fields (unknown fields are ignored) |
 
 **Affiliates are not a module of this app (kanban t_5deebeb1).** The affiliate system lives in
 FunnelSwift; this app only *connects* to it, over two outbound `x-internal-key` wires, with no local
@@ -268,9 +268,9 @@ inbound call", while no inbound-call path read the table — no rule had ever fi
   means no action. `priority` was added by migration 000025 (`INTEGER NOT NULL DEFAULT 100`); the
   console's list is ordered the same way, so the screen shows the evaluation order.
 - **Triggers** (`trigger_condition`): `all_missed_calls` (every inbound call — this service records
-  every ring as missed, then answers the call and issues a Telnyx `record_start` — the recording is
-  never captured (see the Voicemail row of Module Handlers), so there is no voicemail on the
-  tenant's behalf either), `specific_numbers`
+  every ring as missed, then answers the call and gathers a digit; no recording is requested any more
+  and none is ever stored, see the Voicemail row of Module Handlers, kanban t_1d4fc956),
+  `specific_numbers`
   (`schedule.numbers`, matched on digits with a >= 7-digit floor so a 10-digit local form matches the
   E.164 caller), `time_of_day` (`schedule.window.start/end`, "HH:MM", a window may cross midnight),
   `day_of_week` (`schedule.days`, `mon`…`sun`, UTC — the clock the store uses).
