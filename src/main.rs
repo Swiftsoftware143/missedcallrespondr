@@ -3,6 +3,7 @@ mod body_deadline;
 mod config;
 mod db;
 mod email;
+mod email_provider;
 mod error;
 mod features;
 mod handlers;

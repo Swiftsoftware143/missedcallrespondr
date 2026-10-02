@@ -1353,7 +1353,13 @@ async fn deliver_credentials(
             )
             .await
             {
-                tracing::warn!("Failed to send welcome email to {}: {}", email, e);
+                // The account EXISTS and the password was generated; if this send fails the customer
+                // has no way in. `error!` with the consequence spelled out (kanban t_6d575da6).
+                tracing::error!(
+                    "account created but the CREDENTIALS EMAIL FAILED for {} — the customer has no password: {}",
+                    email,
+                    e
+                );
             }
         } else {
             // User exists with password → send purchase confirmed
@@ -1371,8 +1377,8 @@ async fn deliver_credentials(
             )
             .await
             {
-                tracing::warn!(
-                    "Failed to send purchase confirmed email to {}: {}",
+                tracing::error!(
+                    "payment processed but the PURCHASE-CONFIRMED EMAIL FAILED for {}: {}",
                     email,
                     e
                 );
@@ -1416,7 +1422,11 @@ async fn deliver_credentials(
             email::send_template_email(&state.pool, tenant_id, email, "welcome_credentials", &vars)
                 .await
         {
-            tracing::warn!("Failed to send welcome email to {}: {}", email, e);
+            tracing::error!(
+                "new account created but the CREDENTIALS EMAIL FAILED for {} — the customer has no password: {}",
+                email,
+                e
+            );
         }
     }
 

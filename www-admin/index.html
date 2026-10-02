@@ -1218,6 +1218,48 @@ const OPS_PANELS = [
 ]
 }
 ]
+},
+{
+"title": "13. Email Provider (system mail)",
+"list": "/admin/email-config",
+"actions": [
+{
+"label": "Save provider (Mailgun form API / SendGrid / Sendiio)",
+"method": "PUT",
+"path": "/admin/email-config",
+"fields": [
+"provider",
+"api_url",
+"api_key",
+"domain",
+"from_address",
+"from_name"
+],
+"hints": {
+"provider": "mailgun | sendgrid | sendiio — the dropdown values this app can actually deliver through",
+"api_url": "e.g. https://api.mailgun.net/v3/mail.missedcallrespondr.com/messages",
+"api_key": "leave blank to keep the stored key (it comes back masked)",
+"domain": "optional — used to build the Mailgun URL when api_url is blank",
+"from_address": "the From address, e.g. noreply@mail.missedcallrespondr.com",
+"from_name": "the display name, e.g. MissedCall Respondr"
+}
+},
+{
+"label": "Save raw config (JSON, advanced)",
+"method": "PUT",
+"path": "/admin/email-config",
+"json": true,
+"fields": [
+"json"
+]
+},
+{
+"label": "Send test email (goes to my admin address)",
+"method": "POST",
+"path": "/admin/email-config/test",
+"fields": []
+}
+]
 }
 ];
 

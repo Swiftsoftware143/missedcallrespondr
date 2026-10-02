@@ -1,7 +1,8 @@
 use serde_json::json;
 use sqlx::PgPool;
-use std::env;
 use uuid::Uuid;
+
+use crate::email_provider;
 
 /// Render a template string by substituting the placeholders that ARE keys of `vars`.
 ///
@@ -101,6 +102,8 @@ pub async fn send_template_email(
             let use_html = t.is_html.unwrap_or(true);
 
             send_email_request(
+                pool,
+                template_type,
                 to,
                 &subject,
                 &text_body,
@@ -112,7 +115,7 @@ pub async fn send_template_email(
             tracing::info!(
                 "email.send_template_email: no usable db template for template_type={template_type} (tenant {tenant_id}) — sending the inline body"
             );
-            send_inline(to, template_type, &vars, app_name, app_url).await
+            send_inline(pool, to, template_type, &vars, app_name, app_url).await
         }
     }
 }
@@ -167,6 +170,7 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
 }
 
 async fn send_inline(
+    pool: &PgPool,
     to: &str,
     template_type: &str,
     vars: &serde_json::Value,
@@ -193,25 +197,49 @@ async fn send_inline(
                 "Welcome to {}, {}!\n\nYour account has been created successfully.\n\nHere are your login credentials:\n\nEmail: {}\nPassword: {}\n\nLogin at: {}/login\n\nYou can now:\n- Set up your missed call responses\n- Configure call forwarding rules\n- Monitor your call activity\n\nFor help, contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
                 app_name, name, email, password, app_url, app_name
             );
-            send_email_request(to, &format!("Welcome to {}!", app_name), &body, "").await
+            send_email_request(
+                pool,
+                template_type,
+                to,
+                &format!("Welcome to {}!", app_name),
+                &body,
+                "",
+            )
+            .await
         }
         "purchase_confirmed" => {
             let body = format!(
                 "Hi {},\n\nThank you for your purchase! Your payment for the {} plan has been received successfully.\n\nYou can access your dashboard at: {}/dashboard\n\nIf you have any questions, please contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
                 name, plan_name_val, app_url, app_name
             );
-            send_email_request(to, "Payment Received - Thank You!", &body, "").await
+            send_email_request(
+                pool,
+                template_type,
+                to,
+                "Payment Received - Thank You!",
+                &body,
+                "",
+            )
+            .await
         }
         "password_reset" => {
             let body = format!(
                 "Your password reset code is: {}\n\nThis code expires in 1 hour.\n\nIf you did not request this password reset, please ignore this email.\n\n- SwiftSoftware",
                 token
             );
-            send_email_request(to, "Password Reset Request", &body, "").await
+            send_email_request(pool, template_type, to, "Password Reset Request", &body, "").await
         }
         _ => {
             let body = format!("{} Notification:\n\n{}", app_name, vars);
-            send_email_request(to, &format!("{} Notification", app_name), &body, "").await
+            send_email_request(
+                pool,
+                template_type,
+                to,
+                &format!("{} Notification", app_name),
+                &body,
+                "",
+            )
+            .await
         }
     }
 }
@@ -267,38 +295,6 @@ pub async fn send_reset_email(
     send_template_email(pool, tenant_id, to, "password_reset", &vars).await
 }
 
-/// Which HTTP auth scheme a provider expects for its API key.
-///
-/// This is a TRANSPORT detail, not a credential: Mailgun authenticates
-/// `Authorization: Basic base64("api:<private-or-sending-key>")` and answers
-/// `{"Error":"unauthorized"}` to a `Bearer` header *before* it ever looks at the key, so a
-/// perfectly good Mailgun credential presented the old way reads as "the key is bad".
-/// SendGrid/Postmark/Resend-style JSON APIs want `Bearer` (which is where this sender came
-/// from), so that stays the default for every other host.
-///
-/// `EMAIL_API_AUTH=basic|bearer` overrides the guess when a provider changes shape.
-fn auth_scheme(api_url: &str) -> &'static str {
-    match env::var("EMAIL_API_AUTH").map(|v| v.to_ascii_lowercase()) {
-        Ok(v) if v == "basic" => "basic",
-        Ok(v) if v == "bearer" => "bearer",
-        _ => {
-            let host = api_url
-                .split("://")
-                .nth(1)
-                .unwrap_or(api_url)
-                .split('/')
-                .next()
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if host.contains("mailgun") {
-                "basic"
-            } else {
-                "bearer"
-            }
-        }
-    }
-}
-
 /// Host of `api_url` for logging — the URL carries no secret, but the key never goes near a log.
 fn url_host(api_url: &str) -> &str {
     api_url
@@ -310,78 +306,97 @@ fn url_host(api_url: &str) -> &str {
         .unwrap_or(api_url)
 }
 
-/// Core email sender — sends via HTTP API (Mailgun, SendGrid, SMTP.com, etc.)
+/// Record the outcome of the last send attempt where an operator can see it.
+///
+/// The defect this replaced was invisible from every surface: `auth::register` created the account,
+/// the send failed, and only the container log said so. Every attempt (success AND failure) is now
+/// recorded under `admin_settings.email_last_send` and served by
+/// `GET /api/v1/admin/email-config`, so "the welcome mail never arrived" is answerable without
+/// `docker logs`.
+///
+/// Best-effort by construction: a recording failure is logged and never changes the send's result.
+async fn record_last_send(
+    pool: &PgPool,
+    kind: &str,
+    to: &str,
+    provider: &str,
+    outcome: &Result<String, String>,
+) {
+    let payload = json!({
+        "at": chrono::Utc::now().to_rfc3339(),
+        "kind": kind,
+        "to": to,
+        "provider": provider,
+        "ok": outcome.is_ok(),
+        "detail": match outcome {
+            Ok(receipt) => receipt.clone(),
+            Err(e) => e.clone(),
+        },
+    });
+    if let Err(e) = sqlx::query(
+        "INSERT INTO admin_settings (key, value, description, updated_at) \
+         VALUES ($1, $2::jsonb, 'Last system-mail send attempt (written by the sender; admin-visible)', NOW()) \
+         ON CONFLICT (key) DO UPDATE SET value = $2::jsonb, updated_at = NOW()",
+    )
+    .bind(email_provider::LAST_SEND_KEY)
+    .bind(payload.to_string())
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("could not record the last mail-send outcome: {e}");
+    }
+}
+
+/// Core email sender.
+///
+/// The provider, its credential and the BODY SHAPE are resolved by `email_provider` from the
+/// panel-managed `admin_settings.email` row first and the `EMAIL_*` env as the fallback. Mailgun is
+/// a form API: the previous implementation posted one JSON body with a top-level `"from"` to every
+/// provider, so Mailgun authenticated the request and then answered
+/// `400 {"message":"from parameter is missing"}` — the account was created and its welcome mail
+/// could never be sent (kanban t_6d575da6). `kind` names what the message IS ("welcome",
+/// "password_reset", …) so a failure is attributable on the admin surface.
 async fn send_email_request(
+    pool: &PgPool,
+    kind: &str,
     to: &str,
     subject: &str,
     text_body: &str,
     html_body: &str,
 ) -> Result<(), String> {
-    let api_url = env::var("EMAIL_API_URL").map_err(|_| "EMAIL_API_URL not set".to_string())?;
-    let api_key = env::var("EMAIL_API_KEY").map_err(|_| "EMAIL_API_KEY not set".to_string())?;
-    let from = env::var("EMAIL_FROM").unwrap_or_else(|_| "swiftsoftware143@yahoo.com".to_string());
+    let cfg = email_provider::resolve(pool).await.ok_or_else(|| {
+        "no email provider configured — save the admin panel's Email Provider \
+         (admin_settings.email) or set EMAIL_API_URL/EMAIL_API_KEY/EMAIL_FROM"
+            .to_string()
+    })?;
 
-    let mut payload = json!({
-        "from": from,
-        "to": to,
-        "subject": subject,
-        "text": text_body,
-    });
-
-    if !html_body.is_empty() {
-        payload
-            .as_object_mut()
-            .map(|m| m.insert("html".to_string(), json!(html_body)));
-    }
-
-    // The wire shape Mailgun needs is Basic; presenting the key as Bearer is a 401 that
-    // looks like a bad credential (see `auth_scheme`). The scheme is logged, the key is not.
-    let scheme = auth_scheme(&api_url);
-    let auth_header = if scheme == "basic" {
-        use base64::Engine;
-        format!(
-            "Basic {}",
-            base64::engine::general_purpose::STANDARD.encode(format!("api:{}", api_key))
-        )
+    let html = if html_body.is_empty() {
+        None
     } else {
-        format!("Bearer {}", api_key)
+        Some(html_body)
     };
+    let outcome = email_provider::deliver(&cfg, to, subject, text_body, html).await;
 
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(&api_url)
-        .header("Authorization", auth_header)
-        .header("Content-Type", "application/json")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send email request: {}", e))?;
-
-    // Read the body on BOTH paths: on success it is the provider's own receipt (Mailgun:
-    // {"id":"<...>","message":"Queued. Thank you."}), and that receipt is the only proof the
-    // message actually left the box — before this, success returned `Ok(())` and logged
-    // nothing, so "sent" and "silently did nothing" were indistinguishable in this app's logs.
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    let receipt: String = body.chars().take(200).collect();
-
-    if !status.is_success() {
-        // Log the shape of the request alongside the provider's answer: "401" alone cannot
-        // distinguish a rejected KEY from a rejected auth SCHEME, and that distinction is the
-        // difference between "Email API returned 401" and "go rotate the credential".
-        tracing::warn!(
-            "email.provider_response: auth={scheme} host={} to={to} status={status} body={receipt:?}",
-            url_host(&api_url)
-        );
-        return Err(format!("Email API returned {}: {}", status, receipt));
+    // The provider's own receipt on success (`{"id":"<…>","message":"Queued. Thank you."}`) is the
+    // only proof the message left the box; on failure the status + body is what distinguishes a
+    // rejected KEY from a rejected transport. Neither the key nor the URL's query is logged.
+    match &outcome {
+        Ok(receipt) => tracing::info!(
+            "email.provider_response: provider={} source={} host={} kind={kind} to={to} receipt={receipt:?}",
+            cfg.provider,
+            cfg.source,
+            url_host(&cfg.api_url)
+        ),
+        Err(e) => tracing::error!(
+            "email.provider_error: provider={} source={} host={} kind={kind} to={to}: {e}",
+            cfg.provider,
+            cfg.source,
+            url_host(&cfg.api_url)
+        ),
     }
 
-    tracing::info!(
-        "email.provider_response: auth={scheme} host={} to={to} status={status} body={receipt:?}",
-        url_host(&api_url)
-    );
-
-    Ok(())
+    record_last_send(pool, kind, to, &cfg.provider, &outcome).await;
+    outcome.map(|_| ())
 }
 
 #[derive(Debug, sqlx::FromRow)]

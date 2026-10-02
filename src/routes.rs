@@ -578,6 +578,17 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/telnyx-config",
             get(telnyx_handler::get_admin_config).put(telnyx_handler::put_admin_config),
         )
+        // Admin system-mail provider (kanban t_6d575da6) — the panel-managed slot every fleet app
+        // has. `/api/v1/admin/*` is platform-admin only at the middleware, so this inherits it.
+        .route(
+            "/api/v1/admin/email-config",
+            get(crate::handlers::email_settings_handler::get_email_config)
+                .put(crate::handlers::email_settings_handler::update_email_config),
+        )
+        .route(
+            "/api/v1/admin/email-config/test",
+            post(crate::handlers::email_settings_handler::test_email_config),
+        )
         // Site configuration
         .route(
             "/api/v1/admin/site",

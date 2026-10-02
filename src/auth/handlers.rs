@@ -114,7 +114,15 @@ pub async fn register(
         if let Err(e) =
             crate::email::send_template_email(&wl_pool, nil, &wl_email, "welcome", &vars).await
         {
-            tracing::warn!("Welcome email failed for {}: {}", wl_email, e);
+            // `error!`, not `warn!`: the account exists either way, so the ONLY signal that the
+            // customer got no mail is this line. Before kanban t_6d575da6 the transport itself was
+            // broken (JSON to a form API) and this line was a `warn!` nobody read, which is how the
+            // defect stayed invisible until a registration probe found it.
+            tracing::error!(
+                "account created but the WELCOME EMAIL FAILED for {} — the customer has no welcome/credentials mail: {}",
+                wl_email,
+                e
+            );
         }
     });
 

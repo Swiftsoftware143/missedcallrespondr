@@ -13,6 +13,7 @@ pub mod coreswift_external;
 pub mod coreswift_integration_handler;
 pub mod dashboard_handler;
 pub mod deals_handler;
+pub mod email_settings_handler;
 pub mod email_templates_handler;
 pub mod export_templates_handler;
 pub mod follow_up_handler;

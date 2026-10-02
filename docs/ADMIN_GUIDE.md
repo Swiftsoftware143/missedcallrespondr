@@ -53,13 +53,47 @@ All transactional emails use the `email_templates` table with `{{variable}}` pla
 1. Triggering event (account created, payment received, reset requested)
 2. `send_template_email()` called with template type + variable map
 3. DB lookup by type (tenant-scoped → default)
-4. `{{variable}}` placeholders rendered from map
+4. `{variable}` placeholders rendered from map
 5. Fallback to hardcoded inline if no DB template exists
-6. Email queued to `outbound_messages` for async SMTP send
+6. Delivery through the configured provider (see **Email Provider**), which returns the provider's
+   own receipt; a failure is logged at ERROR and recorded on the admin surface
 
 ### Default Seeds
 
 Three templates seeded: Welcome Email, Purchase Confirmation, Password Reset.
+
+## Email Provider (system mail)
+
+Every transactional email leaves the box through ONE provider config, editable in the admin panel
+(**Operator Console → 13. Email Provider (system mail)**, `admin.missedcallrespondr.com`) so it is
+manageable from a phone.
+
+**Resolution order:** `admin_settings.email` (the panel row, key `email`) **first**, then the
+`EMAIL_API_URL` / `EMAIL_API_KEY` / `EMAIL_FROM` environment variables (a stopgap; the panel row is
+the standard). The row's `api_key` is sealed at rest (`enc:v1:`), and a masked key returned by GET can
+be saved back without clobbering the stored credential.
+
+**Body shape is per provider** — this is not cosmetic: Mailgun takes
+`application/x-www-form-urlencoded` (with `Authorization: Basic api:<key>`), while SendGrid takes JSON
+`{"from":{"email":…}}` with a Bearer token. Sending JSON to Mailgun authenticates fine and then
+answers `400 {"message":"from parameter is missing"}`; that defect (kanban t_6d575da6) is why the
+welcome/credentials mail could never be sent. Values are parameter-encoded, so a From or Subject
+carrying `&` or `=` arrives intact.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/email-config` | current config (secrets masked), live `source`, supported providers, last send |
+| PUT | `/api/v1/admin/email-config` | save — **merges** into the stored row, so a blank field is left alone (`""` clears it) |
+| POST | `/api/v1/admin/email-config/test` | send a real message to the calling admin's address; returns the provider's true answer |
+
+Providers offered: `mailgun`, `sendgrid`, `sendiio` — exactly the arms the app can deliver through; a
+save of any other value is rejected rather than stored as a dead setting.
+
+`admin_settings.email_last_send` records the outcome of the last **system-mail** send (kind, recipient,
+provider, receipt) and is shown by the GET above, so "the customer never got the mail" is answerable
+without reading container logs. A deliberate *test* send reports its result inline and does not
+overwrite that row. A failed credential mail is never fatal to account creation — the loud
+`account created but the WELCOME/CREDENTIALS EMAIL FAILED` line plus `email_last_send` are the signal.
 
 ## Module Handlers
 
