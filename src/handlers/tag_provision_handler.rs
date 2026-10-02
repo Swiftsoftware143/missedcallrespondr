@@ -152,6 +152,37 @@ pub async fn handle_tag_provision(
     let tenant_slug = provision_tenant_slug(&state.config);
     let tenant_id = resolve_provision_tenant(&state.pool, tenant_slug).await?;
 
+    // THE CONTACT ALLOWANCE BINDS EVERY WRITER TO `contacts` (kanban t_f6fdfeee).
+    // This path used to INSERT with no check at all, so a tag campaign could push this tenant past
+    // its plan ceiling (free = 5 contacts) while `POST /api/v1/contacts` answered 402 at the same
+    // moment. The owner tenant is resolved by NAME from config (above), so the check runs against
+    // THAT tenant's active plan — exactly the read contact_handler.rs:34 makes for its own tenant.
+    //
+    // The placement is deliberate:
+    //   * AFTER the existing-email early return, so re-delivery of a lead this app already holds
+    //     still answers 200 `already_exists` and is never refused (it creates no row);
+    //   * `enforce_feature_limit` answers Ok when the tenant has no active plan and when the plan
+    //     declares no limit, so a tenant without a plan is ALLOWED, never a 500 (card Q2);
+    //   * the refusal is returned to the caller as the SAME 402 body
+    //     `POST /api/v1/contacts` produces (`{"error":"<label> limit reached (n/limit)..."}`) and is
+    //     logged here with the tag, the campaign id and the owner slug — FunnelSwift's delivery is
+    //     fire-and-forget, so the log line is what makes the loss visible on an unattended box.
+    if let Err(refusal) =
+        crate::features::enforce_feature_limit(&state.pool, tenant_id, "max_contacts", "Contacts")
+            .await
+    {
+        tracing::warn!(
+            "tag_provision: REFUSED by the contact allowance — tenant_slug={} tenant_id={} tag={} campaign_id={:?} email={} reason={:?}",
+            tenant_slug,
+            tenant_id,
+            req.tag.name,
+            req.tag.campaign_id,
+            email,
+            refusal
+        );
+        return Err(refusal);
+    }
+
     sqlx::query(
         r#"INSERT INTO contacts (id, name, email, phone, company, notes, tenant_id, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())"#
