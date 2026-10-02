@@ -1,0 +1,19 @@
+-- 000023_messages_status_logged_default.sql — the `messages.status` column default stops claiming a
+-- delivery that never happens (kanban t_4bcf81a8, measured 2026-10-02).
+--
+-- WHY
+--   `messages.status` was created `TEXT NOT NULL DEFAULT 'sent'` (000001_initial.sql). Nothing in
+--   this service transmits a message — the only Telnyx call in the repo is `/v2/phone_numbers`
+--   (buy/release), there is no `/v2/messages`, no Twilio client and no outbound queue — so the
+--   schema's own default asserted a delivery for any writer that omitted the column (psql, a
+--   hotfix, a future handler). The single writer (`message_handler::create_message`, the tenant
+--   console's Send Message form) now BINDS `status = 'logged'` and leaves `sent_at` NULL; this file
+--   removes the landmine for every other writer so the store cannot default to a false "sent".
+--
+-- LIVE SAFETY
+--   Live carries no migration ledger (see the baseline file header) and `run_migrations` re-executes
+--   every file on every boot, so each statement is idempotent: SET DEFAULT applied twice is the same
+--   state. No data statement is here on purpose — `messages` held 0 rows at measurement time and a
+--   retroactive `UPDATE ... SET status='logged'` could not distinguish a row that really was
+--   delivered from one that was not, which is exactly the claim this card refuses to make.
+ALTER TABLE messages ALTER COLUMN status SET DEFAULT 'logged';

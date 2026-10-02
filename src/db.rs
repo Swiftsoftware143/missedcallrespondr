@@ -145,6 +145,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000022_retire_max_users_plan_value",
             include_str!("../migrations/000022_retire_max_users_plan_value.sql"),
         ),
+        // 000023 stops the `messages.status` column from DEFAULTing to 'sent' (kanban t_4bcf81a8):
+        // nothing in this service transmits a message, so the store's own default asserted a
+        // delivery for any writer that omitted the column. The one writer now binds 'logged' and
+        // leaves sent_at NULL; this removes the landmine for every other writer. One idempotent
+        // ALTER, no data statement (messages held 0 rows, and a retroactive relabel could not tell a
+        // delivered row from a merely recorded one — the exact claim the card refuses to make).
+        (
+            "000023_messages_status_logged_default",
+            include_str!("../migrations/000023_messages_status_logged_default.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
