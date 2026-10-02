@@ -17,6 +17,38 @@ use crate::error::AppError;
 use crate::features;
 use crate::state::AppState;
 
+/// Gate rule 5d (class 14): a statement must be a COMPLETE compile-time literal, never assembled at
+/// run time. `update_api_key` has three optional fields, so the UPDATE has exactly 2^3 = 8 texts;
+/// all eight are const literals and only the CHOICE between them is run time. The values are bind
+/// parameters, which also retires the hand-rolled quote escaping (`name = '{}'` +
+/// `.replace('\'', "''")`) this statement used to carry.
+const UPD_NAME_URL_ACTIVE: &str = "UPDATE api_keys SET name = $1, target_url = $2, is_active = $3, updated_at = NOW() WHERE id = $4";
+const UPD_NAME_URL: &str =
+    "UPDATE api_keys SET name = $1, target_url = $2, updated_at = NOW() WHERE id = $3";
+const UPD_NAME_ACTIVE: &str =
+    "UPDATE api_keys SET name = $1, is_active = $2, updated_at = NOW() WHERE id = $3";
+const UPD_URL_ACTIVE: &str =
+    "UPDATE api_keys SET target_url = $1, is_active = $2, updated_at = NOW() WHERE id = $3";
+const UPD_NAME: &str = "UPDATE api_keys SET name = $1, updated_at = NOW() WHERE id = $2";
+const UPD_URL: &str = "UPDATE api_keys SET target_url = $1, updated_at = NOW() WHERE id = $2";
+const UPD_ACTIVE: &str = "UPDATE api_keys SET is_active = $1, updated_at = NOW() WHERE id = $2";
+const UPD_TIME: &str = "UPDATE api_keys SET updated_at = NOW() WHERE id = $1";
+
+/// The one place the eight literals are chosen. Separate from the handler so the test below can
+/// assert the choice AND the placeholder/bind order for all eight flag combinations.
+fn update_api_key_sql(has_name: bool, has_url: bool, has_active: bool) -> &'static str {
+    match (has_name, has_url, has_active) {
+        (true, true, true) => UPD_NAME_URL_ACTIVE,
+        (true, true, false) => UPD_NAME_URL,
+        (true, false, true) => UPD_NAME_ACTIVE,
+        (false, true, true) => UPD_URL_ACTIVE,
+        (true, false, false) => UPD_NAME,
+        (false, true, false) => UPD_URL,
+        (false, false, true) => UPD_ACTIVE,
+        (false, false, false) => UPD_TIME,
+    }
+}
+
 fn generate_api_key() -> (String, String) {
     let prefix = "missedca_".to_string();
     let random_part: String = (0..16)
@@ -122,26 +154,26 @@ pub async fn update_api_key(
         return Err(AppError::NotFound("API key not found".into()));
     }
 
-    let mut set_parts: Vec<String> = Vec::new();
-    if let Some(name) = req.get("name").and_then(|v| v.as_str()) {
-        set_parts.push(format!("name = '{}'", name.replace('\'', "''")));
-    }
-    if let Some(url) = req.get("target_url").and_then(|v| v.as_str()) {
-        set_parts.push(format!("target_url = '{}'", url.replace('\'', "''")));
-    }
-    if let Some(active) = req.get("is_active").and_then(|v| v.as_bool()) {
-        set_parts.push(format!("is_active = {}", active));
-    }
-    set_parts.push("updated_at = NOW()".to_string());
+    let name = req.get("name").and_then(|v| v.as_str());
+    let url = req.get("target_url").and_then(|v| v.as_str());
+    let active = req.get("is_active").and_then(|v| v.as_bool());
 
-    if !set_parts.is_empty() {
-        let sql = format!(
-            "UPDATE api_keys SET {} WHERE id = '{}'",
-            set_parts.join(", "),
-            id
-        );
-        sqlx::query(&sql).execute(&state.pool).await?;
+    let sql = update_api_key_sql(name.is_some(), url.is_some(), active.is_some());
+
+    // Binds in the order their placeholders appear in every one of the eight literals:
+    // name, target_url, is_active, then the row id.
+    let mut q = sqlx::query(sql);
+    if let Some(v) = name {
+        q = q.bind(v);
     }
+    if let Some(v) = url {
+        q = q.bind(v);
+    }
+    if let Some(v) = active {
+        q = q.bind(v);
+    }
+    q = q.bind(id);
+    q.execute(&state.pool).await?;
 
     Ok(Json(json!({ "message": "API key updated", "id": id })))
 }
@@ -162,4 +194,62 @@ pub async fn delete_api_key(
     }
 
     Ok(Json(json!({ "message": "API key deleted", "id": id })))
+}
+
+#[cfg(test)]
+mod update_sql_tests {
+    //! Gate rule 5d (class 14) pin for `update_api_key` (kanban t_e7903ef6). Each literal must
+    //! select exactly the columns the caller provided plus the always-present `updated_at`, and the
+    //! placeholders must be `$1..$N` in the same order the handler binds them: name, target_url,
+    //! is_active, then the id. The targets are read out of each statement's own text, so the
+    //! assertion is about the statement and not about a constant equalling itself.
+    use super::*;
+
+    const PLACEHOLDERS: [&str; 4] = ["$1", "$2", "$3", "$4"];
+
+    fn set_targets(sql: &str) -> Vec<&str> {
+        let set_clause = sql
+            .split(" SET ")
+            .nth(1)
+            .expect("statement has a SET clause")
+            .split(" WHERE ")
+            .next()
+            .expect("SET comes before WHERE");
+        set_clause
+            .split(", ")
+            .map(|col| col.split(" = ").next().unwrap_or(col))
+            .collect()
+    }
+
+    #[test]
+    fn every_flag_combination_selects_the_matching_columns_and_bind_order() {
+        for has_name in [false, true] {
+            for has_url in [false, true] {
+                for has_active in [false, true] {
+                    let sql = update_api_key_sql(has_name, has_url, has_active);
+                    let mut want: Vec<&str> = Vec::new();
+                    if has_name {
+                        want.push("name");
+                    }
+                    if has_url {
+                        want.push("target_url");
+                    }
+                    if has_active {
+                        want.push("is_active");
+                    }
+                    want.push("updated_at");
+                    assert_eq!(
+                        set_targets(sql),
+                        want,
+                        "SET targets for ({has_name}, {has_url}, {has_active})"
+                    );
+                    // one placeholder per column above, numbered $1..$N with no gaps
+                    assert_eq!(sql.matches('$').count(), want.len());
+                    assert!(PLACEHOLDERS[..want.len()].iter().all(|p| sql.contains(*p)));
+                    // the row id is the last placeholder of every literal
+                    assert!(sql.ends_with(PLACEHOLDERS[want.len() - 1]));
+                }
+            }
+        }
+    }
 }

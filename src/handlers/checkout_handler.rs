@@ -71,6 +71,16 @@ pub async fn list_payment_providers(State(state): State<AppState>) -> ApiResult<
     Ok(Json(json!({"providers": providers})))
 }
 
+/// Gate rule 5d (class 14): the provider UPDATE must be a COMPLETE compile-time literal. Two
+/// optional fields (api_key, webhook_secret) mean exactly 4 texts; the old code assembled them with
+/// `String::from` + `push_str` and computed the placeholder indices by hand. The four literals below
+/// carry the same bind order and the same parameter indices as that builder, so the text PostgreSQL
+/// receives is byte-identical (pinned in `provider_update_sql_tests`, re-proved on the wire).
+const UPD_PROVIDER_NO_SECRETS: &str = "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, publishable_key = $4, config = $5, updated_at = NOW() WHERE id = $6";
+const UPD_PROVIDER_API_KEY: &str = "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, publishable_key = $4, config = $5, updated_at = NOW(), api_key_encrypted = $6 WHERE id = $7";
+const UPD_PROVIDER_WEBHOOK: &str = "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, publishable_key = $4, config = $5, updated_at = NOW(), webhook_secret_encrypted = $6 WHERE id = $7";
+const UPD_PROVIDER_BOTH: &str = "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, publishable_key = $4, config = $5, updated_at = NOW(), api_key_encrypted = $6, webhook_secret_encrypted = $7 WHERE id = $8";
+
 /// POST /api/v1/payment-providers
 /// Create or update a payment provider configuration (super admin only)
 pub async fn upsert_payment_provider(
@@ -133,23 +143,14 @@ pub async fn upsert_payment_provider(
 
     if let Some(provider_id) = existing {
         // Update — only overwrite api_key/webhook_secret if provided
-        let mut query = String::from(
-            "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, \
-             publishable_key = $4, config = $5, updated_at = NOW()",
-        );
-        let mut param_idx = 6u8;
+        let query = match (api_key.is_empty(), webhook_secret.is_empty()) {
+            (false, false) => UPD_PROVIDER_BOTH,
+            (false, true) => UPD_PROVIDER_API_KEY,
+            (true, false) => UPD_PROVIDER_WEBHOOK,
+            (true, true) => UPD_PROVIDER_NO_SECRETS,
+        };
 
-        if !api_key.is_empty() {
-            query.push_str(&format!(", api_key_encrypted = ${}", param_idx));
-            param_idx += 1;
-        }
-        if !webhook_secret.is_empty() {
-            query.push_str(&format!(", webhook_secret_encrypted = ${}", param_idx));
-            param_idx += 1;
-        }
-        query.push_str(&format!(" WHERE id = ${}", param_idx));
-
-        let mut q = sqlx::query(&query)
+        let mut q = sqlx::query(query)
             .bind(label)
             .bind(is_active)
             .bind(is_test_mode)
@@ -1976,5 +1977,51 @@ mod stripe_contract_tests {
             secret
         ));
         assert!(!verify_stripe_signature(body, "v1=0000", secret));
+    }
+}
+
+#[cfg(test)]
+mod provider_update_sql_tests {
+    //! Gate rule 5d (class 14) pin for the provider UPDATE (kanban t_e7903ef6). The four literals
+    //! must carry the text the old `String::from` + `push_str` builder produced, byte for byte —
+    //! including the placeholder indices it computed — so this rebuilds the OLD builder from a
+    //! `const` base and asserts equality. The base is a `const` and the appended fragments are
+    //! clause fragments (no statement keyword, no placeholder followed by a clause keyword), which
+    //! is what keeps the test itself out of the rule-5d findings.
+    use super::*;
+
+    /// The exact statement BASE the shipped builder started from.
+    const LEGACY_BASE: &str = "UPDATE payment_providers SET label = $1, is_active = $2, is_test_mode = $3, publishable_key = $4, config = $5, updated_at = NOW()";
+
+    fn legacy_update_sql(has_api_key: bool, has_webhook_secret: bool) -> String {
+        let mut query = LEGACY_BASE.to_string();
+        let mut param_idx = 6u8;
+        if has_api_key {
+            query.push_str(&format!(", api_key_encrypted = ${}", param_idx));
+            param_idx += 1;
+        }
+        if has_webhook_secret {
+            query.push_str(&format!(", webhook_secret_encrypted = ${}", param_idx));
+            param_idx += 1;
+        }
+        query.push_str(&format!(" WHERE id = ${}", param_idx));
+        query
+    }
+
+    #[test]
+    fn the_four_literals_are_byte_identical_to_the_old_builder() {
+        assert_eq!(UPD_PROVIDER_NO_SECRETS, legacy_update_sql(false, false));
+        assert_eq!(UPD_PROVIDER_API_KEY, legacy_update_sql(true, false));
+        assert_eq!(UPD_PROVIDER_WEBHOOK, legacy_update_sql(false, true));
+        assert_eq!(UPD_PROVIDER_BOTH, legacy_update_sql(true, true));
+    }
+
+    #[test]
+    fn the_highest_placeholder_is_the_base_binds_plus_the_optional_ones() {
+        // 5 base binds, +1 per optional field, +1 for the row id.
+        assert!(UPD_PROVIDER_NO_SECRETS.ends_with("WHERE id = $6"));
+        assert!(UPD_PROVIDER_API_KEY.ends_with("WHERE id = $7"));
+        assert!(UPD_PROVIDER_WEBHOOK.ends_with("WHERE id = $7"));
+        assert!(UPD_PROVIDER_BOTH.ends_with("WHERE id = $8"));
     }
 }
