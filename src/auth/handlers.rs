@@ -12,6 +12,7 @@ use crate::{
         RegisterRequest, ResetPasswordRequest, TeamMember, TeamMemberResponse,
     },
     error::AppError,
+    security::email_addr,
     state::AppState,
 };
 
@@ -19,8 +20,16 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let existing = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE email = $1")
-        .bind(&req.email)
+    // ── Address boundary (kanban t_54b1ffab) ────────────────────────────────────────────────
+    // FIRST, before any SELECT and long before any INSERT. `users.email` is both the login identity
+    // and the only address the welcome/credentials mail can ever reach; the handler used to bind
+    // `req.email` verbatim, so the literal string `bad` became a real account that no mail could
+    // ever be delivered to. Normalises (trim + lowercase) as well as validates, and the normalised
+    // value is what is checked, stored, put in the token and mailed.
+    let email = email_addr::normalize(&req.email).map_err(AppError::Unprocessable)?;
+
+    let existing = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE lower(email) = $1")
+        .bind(&email)
         .fetch_optional(&state.pool)
         .await?;
 
@@ -49,7 +58,7 @@ pub async fn register(
         "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(user_id)
-    .bind(&req.email)
+    .bind(&email)
     .bind(&password_hash)
     .bind(&req.name)
     .bind(account_id)
@@ -81,7 +90,7 @@ pub async fn register(
 
     let claims = Claims {
         sub: user_id,
-        email: req.email.clone(),
+        email: email.clone(),
         aid: account_id,
         role: "account_owner".into(),
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
@@ -101,7 +110,7 @@ pub async fn register(
 
     // Send welcome email
     let wl_pool = state.pool.clone();
-    let wl_email = req.email.clone();
+    let wl_email = email.clone();
     let wl_name = req.name.clone();
     tokio::spawn(async move {
         let vars = serde_json::json!({
@@ -130,7 +139,7 @@ pub async fn register(
         token,
         team_member: TeamMemberResponse {
             id: user_id,
-            email: req.email,
+            email,
             name: req.name,
             tenant_id: account_id,
             role: "account_owner".into(),
@@ -142,8 +151,13 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE email = $1")
-        .bind(&req.email)
+    // The same normalisation `register` stores by, matched case-insensitively so an account stored
+    // with capitals (or created before normalisation existed — live has `Zaarhub@gmail.com`) still
+    // resolves when the customer retypes their address with different casing. A malformed value is
+    // NOT refused here: login answers its own 401 for every wrong credential, and it must not become
+    // an account-existence oracle. It simply matches nothing.
+    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE lower(email) = $1")
+        .bind(email_addr::lookup_key(&req.email))
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
@@ -254,10 +268,17 @@ pub async fn forgot_password(
     State(state): State<AppState>,
     Json(req): Json<ForgotPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if let Some(user) = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE email = $1")
-        .bind(&req.email)
-        .fetch_optional(&state.pool)
-        .await?
+    // The SAME boundary rule as `register`, from the same function: an address that could never
+    // receive the reset mail is refused with the same 422/field shape instead of silently
+    // reporting "if the email exists…" for an address that cannot exist as a mailbox. This reply
+    // is unconditional for every well-formed address, so it still leaks nothing about accounts.
+    let email = email_addr::normalize(&req.email).map_err(AppError::Unprocessable)?;
+
+    if let Some(user) =
+        sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE lower(email) = $1")
+            .bind(&email)
+            .fetch_optional(&state.pool)
+            .await?
     {
         let token = uuid::Uuid::new_v4().to_string();
         let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);

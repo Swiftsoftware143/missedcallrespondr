@@ -16,6 +16,14 @@ pub enum AppError {
     Internal(String),
     Conflict(String),
     UpgradeRequired(String),
+    /// Well-formed JSON whose *content* is invalid — the one refusal the request-body layer cannot
+    /// make for us. Added by kanban t_54b1ffab for the email-format boundary: 422 with
+    /// `{"error": "email: …"}`. The distinction from `BadRequest` is deliberate and narrow: the
+    /// extractor rejections collapsed onto 400 by [`rejection_as_json`] are *malformed requests*
+    /// (unparsable JSON, wrong field type); this variant is a request that parsed fine and named a
+    /// field whose value is semantically impossible. Never return it with a `text/plain` body —
+    /// every frontend does `await r.json()` before checking `r.ok`.
+    Unprocessable(String),
 }
 
 impl IntoResponse for AppError {
@@ -27,6 +35,7 @@ impl IntoResponse for AppError {
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::UpgradeRequired(msg) => (StatusCode::PAYMENT_REQUIRED, msg),
+            AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
         };
         (status, Json(json!({"error": message}))).into_response()
     }

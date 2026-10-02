@@ -40,16 +40,18 @@ pub async fn portfolio_sync(
         .unwrap_or("")
         .to_string();
 
-    if email.is_empty() {
-        return Err(AppError::BadRequest("email is required".into()));
-    }
+    // Boundary validation for the cross-app admin create path (kanban t_54b1ffab): this route mints
+    // a tenant AND a `users` row from a caller-supplied address, so it obeys the same rule the public
+    // signup does — before the first SELECT, and the normalised value is what gets stored.
+    let email = crate::security::email_addr::normalize(&email).map_err(AppError::Unprocessable)?;
 
     // Check email uniqueness
-    let existing = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE email = $1")
-        .bind(&email)
-        .fetch_one(&state.pool)
-        .await
-        .unwrap_or(0);
+    let existing =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE lower(email) = $1")
+            .bind(&email)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(0);
 
     if existing > 0 {
         return Err(AppError::Conflict(format!(
@@ -86,7 +88,7 @@ pub async fn portfolio_sync(
 
     // Check for duplicate email
     let email_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)")
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE lower(email) = $1)")
             .bind(&email)
             .fetch_one(&state.pool)
             .await

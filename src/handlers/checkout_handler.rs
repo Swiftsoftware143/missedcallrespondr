@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::config::Claims;
 use crate::email;
 use crate::error::AppError;
+use crate::security::email_addr;
 use crate::state::AppState;
 use rand::Rng;
 
@@ -438,6 +439,15 @@ pub async fn create_checkout_session(
         .unwrap_or("/");
 
     let metadata = req.get("metadata").cloned().unwrap_or(json!({}));
+
+    // The address a paid signup will later be minted under: `deliver_credentials` reads
+    // `metadata.customer_email` back out of `checkout_sessions` and creates the tenant/user from it.
+    // Refuse a malformed one HERE — before any provider session exists, so nothing is charged against
+    // an account that could never be reached (kanban t_54b1ffab). Absent metadata is fine; this route
+    // is also used by existing customers who already have an account.
+    if let Some(raw) = metadata.get("customer_email").and_then(|v| v.as_str()) {
+        email_addr::normalize(raw).map_err(AppError::Unprocessable)?;
+    }
 
     // Get the active provider config
     let provider = get_active_provider(&state.pool, &provider_type)
@@ -1301,6 +1311,15 @@ async fn deliver_credentials(
     account_id: Uuid,
     purchasable_type: &str,
 ) -> Result<(), AppError> {
+    // ── Address boundary (kanban t_54b1ffab) ────────────────────────────────────────────────
+    // Every statement below runs off this value: the `INSERT INTO users` that mints the account and
+    // the credential mail that is this function's entire purpose. Normalise + validate ONCE here so a
+    // malformed address (an old `checkout_sessions.metadata` row, or a caller that bypassed
+    // `create_checkout_session`'s check) can never become a user row. The caller logs the refusal —
+    // no tenant, no user, and therefore no dead account.
+    let email = email_addr::normalize(email).map_err(AppError::Unprocessable)?;
+    let email = email.as_str();
+
     // Derive a plan name from purchasable_type
     let plan_name = purchasable_type.replace(['_', '-'], " ");
     let plan_name = plan_name

@@ -127,6 +127,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000020_tenant_plans_one_row_per_tenant",
             include_str!("../migrations/000020_tenant_plans_one_row_per_tenant.sql"),
         ),
+        // 000021 is the store-level half of the email-boundary fix (kanban t_54b1ffab): the column
+        // that holds an account's login identity had no format CHECK at all, which is how the literal
+        // string `bad` became a real account on live. Guards an existing constraint with a
+        // pg_constraint probe, so the boot-time runner re-executing it on live is a no-op.
+        (
+            "000021_users_email_format_check",
+            include_str!("../migrations/000021_users_email_format_check.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
