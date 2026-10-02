@@ -51,30 +51,35 @@ fn regenerate_html(settings: &serde_json::Value) -> Result<(), AppError> {
     let html = inject_settings(&html, settings);
     fs::write(html_path, &html)
         .map_err(|e| AppError::Internal(format!("Failed to write: {}", e)))?;
-    // Regenerate legal pages
+    // Regenerate legal pages — but NEVER over an EMPTY value (t_ee69c81c).
+    //
+    // privacy/terms/refunds are tracked, published marketing pages (`www/{privacy,terms,refunds}.html`
+    // in the app repo -> fleet/marketing-www-parity.py), and `regen_legal` below renders a bare
+    // title-only stub. Rendering it from an empty value — which is what every routine site-settings
+    // save round-trip carries, because GET merges `default_site_settings()` (legal_*: "") into the
+    // body the panel PUTs straight back — replaced the real public Privacy/Terms/Refund pages with
+    // title-only placeholders and left the site that way. An empty value means "not authored here":
+    // leave the tracked page served.
     if let (Some(t), Some(p), Some(r)) = (
         settings.get("legal_tos").and_then(|v| v.as_str()),
         settings.get("legal_privacy").and_then(|v| v.as_str()),
         settings.get("legal_refunds").and_then(|v| v.as_str()),
     ) {
-        regen_legal(
-            "terms",
-            "Terms of Service",
-            t,
-            "/opt/swift/nginx/www/missedcall/",
-        )?;
-        regen_legal(
-            "privacy",
-            "Privacy Policy",
-            p,
-            "/opt/swift/nginx/www/missedcall/",
-        )?;
-        regen_legal(
-            "refunds",
-            "Refund & Cancellation Policy",
-            r,
-            "/opt/swift/nginx/www/missedcall/",
-        )?;
+        for (slug, title, text) in [
+            ("terms", "Terms of Service", t),
+            ("privacy", "Privacy Policy", p),
+            ("refunds", "Refund & Cancellation Policy", r),
+        ] {
+            if text.trim().is_empty() {
+                tracing::info!(
+                    "site settings: legal_{} is empty — leaving the tracked {}.html served",
+                    slug,
+                    slug
+                );
+                continue;
+            }
+            regen_legal(slug, title, text, "/opt/swift/nginx/www/missedcall/")?;
+        }
     }
     Ok(())
 }
