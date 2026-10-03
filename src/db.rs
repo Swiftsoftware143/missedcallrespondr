@@ -205,6 +205,21 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000028_retire_workflows",
             include_str!("../migrations/000028_retire_workflows.sql"),
         ),
+        // 000029 makes the TWO price columns agree (2026-10-03). `plans` kept its price in
+        // `price` AND `price_monthly` and each generation of rows filled only one: the Aug-8 trio had
+        // `price` (Pro 49, Enterprise 199) with `price_monthly` at 0, while "Pro Monthly" (Aug 19) had
+        // `price_monthly` 49 with `price` at 0. The app reads them in DIFFERENT places — the plans list
+        // selects `price_monthly::float8`, while the purchase path selects `price::float8` and does
+        // `price.unwrap_or(0.0)` — so Pro and Enterprise DISPLAYED $0 and "Pro Monthly" would have
+        // CHECKED OUT at $0. One value, two columns, disagreeing.
+        //
+        // GREATEST(price_monthly, price) into both keeps Free at 0 (both its columns are legitimately 0,
+        // so it must not become chargeable) and preserves the 490 yearly already set on Pro Monthly.
+        // Idempotent: after the first pass no row matches the WHERE, so the boot-time re-run is a no-op.
+        (
+            "000029_plans_price_columns_agree",
+            include_str!("../migrations/000029_plans_price_columns_agree.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
