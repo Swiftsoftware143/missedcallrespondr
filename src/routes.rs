@@ -542,8 +542,15 @@ pub fn create_router(state: AppState) -> Router {
         // The plan × feature registry (kanban t_dd2f7e32): the catalogue the admin console renders
         // and the write path its "Set plan feature" control calls. Static segments, so they win
         // over `/api/v1/admin/plans/:id` below (same as `assign`).
+        // The path is deliberately `/plan-registry`, NOT `/plans/registry`.
+        // MEASURED 2026-10-03: as `/plans/registry` it was UNREACHABLE — `/api/v1/admin/plans/:id`
+        // captured it and the handler died on `Uuid::parse_str("registry")` ("UUID parsing failed:
+        // invalid character: found `r` at 0"), so the catalogue the console needs could not be fetched
+        // at all. The old comment claimed "static segments win over /plans/:id" -- they do not on this
+        // router, which is assembled with `merge()`. No caller depended on the old path (the console
+        // only mentioned it in help strings), so the unambiguous path is the safe fix.
         .route(
-            "/api/v1/admin/plans/registry",
+            "/api/v1/admin/plan-registry",
             get(crate::handlers::plans_handler::plan_registry),
         )
         .route(

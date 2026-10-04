@@ -356,7 +356,7 @@ pub async fn admin_update_plan_features(
     Ok(Json(json!({"message": "Features updated"})))
 }
 
-/// GET /api/v1/admin/plans/registry — the plan × feature CATALOGUE (kanban t_dd2f7e32).
+/// GET /api/v1/admin/plan-registry — the plan × feature CATALOGUE (kanban t_dd2f7e32).
 ///
 /// One row per registry key, one column per live plan, plus the resolved value and its SOURCE for
 /// every plan × key. Both halves come from `crate::features::{resolve_limit, resolve_flag}` — the
