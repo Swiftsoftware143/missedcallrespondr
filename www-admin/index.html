@@ -1561,6 +1561,7 @@ const App = () => {
 
   const nav = [
     { id: 'ops', label: 'Operator Console', icon: '🛠', adminOnly: true },
+    { id: 'plans', label: 'Plans & Features', icon: '💳', adminOnly: true },
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'portfolio', label: 'Portfolio', icon: '🏢' },
     { id: 'rules', label: 'Response Rules', icon: '⚙️' },
@@ -1649,7 +1650,216 @@ const App = () => {
 };
 
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole };
+  // ---- PLANS & FEATURES (kanban t_dd2f7e32 console screen) ----
+  // Renders GET /api/v1/admin/plan-registry — the plan x feature CATALOGUE built from the very
+  // resolvers the gates call (crate::features::{resolve_limit,resolve_flag}), so "what the panel
+  // shows" is by construction the trade enforced. Every control calls a write path that already
+  // existed on the API:
+  //   PUT    /api/v1/admin/plans/entitlement    {plan, feature, value}   per-cell grant / cap edit
+  //   POST   /api/v1/admin/plans                {name, slug, ...}        create a plan
+  //   PUT    /api/v1/admin/plans/:id            {partial}                edit a plan
+  //   DELETE /api/v1/admin/plans/:id                                     delete a plan
+  //   POST   /api/v1/admin/plans/assign         {tenant_id, plan_id, billing_cycle}
+  //   POST   /api/v1/admin/plans/grant-top-tier seat every unset key on the top tier
+  const LimitCell = ({ value, unit, busy, onSave }) => {
+    const [v, setV] = useState(value == null ? '' : String(value));
+    useEffect(() => { setV(value == null ? '' : String(value)); }, [value]);
+    const n = parseInt(v, 10);
+    const dirty = !isNaN(n) && n !== value;
+    const commit = () => { if (!isNaN(n)) onSave(n); };
+    return html`<div class="flex items-center gap-1">
+      <input class="input" style="width:84px" value=${v} disabled=${busy} placeholder="unset"
+        onInput=${e => setV(e.target.value)}
+        onKeyDown=${e => { if (e.key === 'Enter') commit(); }} />
+      <button class="btn btn-sm ${dirty ? '' : 'btn-outline'}" disabled=${busy} onClick=${commit}
+        title="Save this cap (${unit || 'value'})">${dirty ? 'Save' : 'ok'}</button>
+    </div>`;
+  };
+
+  const FlagCell = ({ on, busy, onSave }) => html`<button class="btn btn-sm ${on ? 'btn-green' : 'btn-outline'}"
+    disabled=${busy} onClick=${() => onSave(on ? 0 : 1)}>${on ? '✓ on' : 'off'}</button>`;
+
+  const Plans = () => {
+    const [reg, setReg] = useState(null);
+    const [err, setErr] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [note, setNote] = useState(null);
+    const [modal, setModal] = useState(null); // null | {mode:'create'|'edit', id?, form:{...}}
+    const [assign, setAssign] = useState({ tenant_id: '', plan_id: '', billing_cycle: 'monthly' });
+
+    const load = () => API.get('/admin/plan-registry').then(d => { setReg(d); setErr(null); }).catch(e => setErr(e));
+    useEffect(() => { load(); }, []);
+    const flash = (m) => { setNote(m); setTimeout(() => setNote(null), 5000); };
+
+    const setCell = async (plan, feature, value) => {
+      setBusy(true);
+      try {
+        const r = await API.put('/admin/plans/entitlement', { plan, feature, value });
+        flash(`Saved ${feature} on "${plan}" (stored in ${r.storage})` + (r.warning ? ' — ' + r.warning : ''));
+        await load();
+      } catch(e) { alert('Not saved: ' + e.message); }
+      setBusy(false);
+    };
+    const savePlan = async () => {
+      const f = modal.form;
+      if (!f.name) { alert('Plan name is required'); return; }
+      setBusy(true);
+      try {
+        const body = { name: f.name, slug: f.slug || undefined, description: f.description || undefined,
+          price_monthly: parseFloat(f.price_monthly) || 0, price_yearly: parseFloat(f.price_yearly) || 0,
+          is_active: !!f.is_active };
+        if (modal.mode === 'edit') await API.put('/admin/plans/' + modal.id, body);
+        else await API.post('/admin/plans', body);
+        setModal(null); flash(modal.mode === 'edit' ? 'Plan updated' : 'Plan created'); await load();
+      } catch(e) { alert('Not saved: ' + e.message); }
+      setBusy(false);
+    };
+    const delPlan = async (p) => {
+      if (!confirm('Delete plan "' + p.name + '"? Tenants on it are not reassigned.')) return;
+      setBusy(true);
+      try { await API.del('/admin/plans/' + p.id); flash('Plan deleted'); await load(); }
+      catch(e) { alert('Not deleted: ' + e.message); }
+      setBusy(false);
+    };
+    const doAssign = async () => {
+      if (!assign.tenant_id || !assign.plan_id) { alert('tenant_id and plan are required'); return; }
+      setBusy(true);
+      try { await API.post('/admin/plans/assign', assign); flash('Plan assigned'); }
+      catch(e) { alert('Not assigned: ' + e.message); }
+      setBusy(false);
+    };
+    const grantTop = async () => {
+      setBusy(true);
+      try { const r = await API.post('/admin/plans/grant-top-tier', {}); flash(`Seated ${(r.granted || []).length} key(s) on "${r.top_plan}"`); await load(); }
+      catch(e) { alert('Not granted: ' + e.message); }
+      setBusy(false);
+    };
+
+    if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Plans & Features</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
+    if (!reg) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Plans & Features</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
+
+    const plans = reg.plans || [];
+    const registry = reg.registry || [];
+    const gmap = {};
+    (reg.grant_matrix || []).forEach(r => { gmap[r.feature] = r; });
+
+    return html`<div>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold">Plans & Features</h2>
+        <div class="flex gap-2">
+          <button class="btn btn-sm btn-outline" disabled=${busy}
+            onClick=${() => setModal({ mode: 'create', form: { name: '', slug: '', description: '', price_monthly: '', price_yearly: '', is_active: true } })}>+ New Plan</button>
+          <button class="btn btn-sm" disabled=${busy} onClick=${grantTop}>Grant top tier every feature</button>
+        </div>
+      </div>
+
+      <div class="card" style="border-left:4px solid ${reg.superset_ok ? '#059669' : '#dc2626'}">
+        <p class="text-sm"><b>Top tier:</b> ${reg.top_plan}</p>
+        <p class="text-xs text-gray-500">${reg.top_rule}</p>
+        <p class="text-sm mt-1">Superset check: ${reg.superset_ok
+          ? html`<span class="badge badge-green">no lower plan beats ${reg.top_plan}</span>`
+          : html`<span class="badge badge-red">VIOLATIONS</span>`}</p>
+        ${!reg.superset_ok && html`<ul class="text-xs text-red-600 mt-1 list-disc pl-5">${(reg.superset_violations || []).map(v => html`<li>${v}</li>`)}</ul>`}
+        <p class="text-xs text-gray-500 mt-2">${reg.value_legend}</p>
+        ${note && html`<p class="text-sm text-blue-700 mt-2">${note}</p>`}
+      </div>
+
+      <div class="card p-0 overflow-hidden">
+        <div class="p-3 border-b"><h3 class="font-semibold">Feature matrix</h3>
+          <p class="text-xs text-gray-500">Edit a cap (blank = unset), or toggle an on/off feature. Values save immediately through the gate's own resolver.</p></div>
+        <div style="overflow-x:auto">
+          <table class="table">
+            <thead><tr><th>Feature</th>${plans.map(p => html`<th>${p.name}${p.is_top ? html` <span class="badge badge-purple">top</span>` : ''}<div class="text-xs font-normal text-gray-400">${p.slug}</div></th>`)}</tr></thead>
+            <tbody>
+              ${registry.map(f => {
+                const row = gmap[f.key] || {};
+                return html`<tr>
+                  <td>
+                    <div class="font-medium">${f.label}</div>
+                    <div class="text-xs text-gray-400 font-mono">${f.key} · ${f.kind} · ${f.storage}</div>
+                    <div class="text-xs text-gray-400">${f.enforced_by}</div>
+                    <div class="text-xs text-gray-400">${f.unset_means}</div>
+                  </td>
+                  ${plans.map(p => {
+                    const v = p.values ? p.values[f.key] : null;
+                    const resolved = row[p.slug] != null ? row[p.slug] : '';
+                    return html`<td data-feature=${f.key} data-plan=${p.slug}>
+                      ${f.kind === 'limit'
+                        ? html`<${LimitCell} value=${v} unit=${f.unit} busy=${busy} onSave=${n => setCell(p.slug, f.key, n)} />`
+                        : html`<${FlagCell} on=${v === true} busy=${busy} onSave=${n => setCell(p.slug, f.key, n)} />`}
+                      <div class="text-xs text-gray-400 mt-1">${resolved}</div>
+                    </td>`;
+                  })}
+                </tr>`;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold mb-2">Plans</h3>
+        <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Price / mo</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${plans.map(p => html`<tr data-plan-id=${p.id}>
+            <td class="font-medium">${p.name} ${p.is_top ? html`<span class="badge badge-purple">top</span>` : ''}</td>
+            <td class="text-gray-500 font-mono">${p.slug}</td>
+            <td>$${p.price_monthly != null ? Number(p.price_monthly).toFixed(2) : '0.00'}</td>
+            <td>${p.is_active ? html`<span class="badge badge-green">active</span>` : html`<span class="badge badge-yellow">inactive</span>`}</td>
+            <td>
+              <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: '', is_active: p.is_active } })}>Edit</button>
+              <button class="btn btn-sm btn-red" onClick=${() => delPlan(p)}>Delete</button>
+            </td>
+          </tr>`)}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold mb-2">Assign a plan to an account</h3>
+        <p class="text-xs text-gray-500 mb-2">Find the tenant id in Operator Console → Impersonate a tenant. Assigning does not change the tenant's credit balance.</p>
+        <div class="flex gap-2 items-end flex-wrap">
+          <div><label class="block text-xs text-gray-600 mb-1">Tenant ID</label>
+            <input class="input" style="width:320px" value=${assign.tenant_id} placeholder="uuid"
+              onInput=${e => setAssign(Object.assign({}, assign, { tenant_id: e.target.value }))} /></div>
+          <div><label class="block text-xs text-gray-600 mb-1">Plan</label>
+            <select class="input" style="width:200px" value=${assign.plan_id}
+              onChange=${e => setAssign(Object.assign({}, assign, { plan_id: e.target.value }))}>
+              <option value="">— choose —</option>${plans.map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>
+          <div><label class="block text-xs text-gray-600 mb-1">Cycle</label>
+            <select class="input" style="width:120px" value=${assign.billing_cycle}
+              onChange=${e => setAssign(Object.assign({}, assign, { billing_cycle: e.target.value }))}>
+              <option value="monthly">monthly</option><option value="yearly">yearly</option></select></div>
+          <button class="btn" disabled=${busy} onClick=${doAssign}>Assign Plan</button>
+        </div>
+      </div>
+
+      ${modal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && setModal(null)}>
+        <div class="modal-content"><h3 class="text-lg font-bold mb-4">${modal.mode === 'edit' ? 'Edit' : 'New'} Plan</h3>
+          <div class="space-y-3">
+            <div><label class="block text-xs text-gray-600 mb-1">Name</label>
+              <input class="input" value=${modal.form.name}
+                onInput=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { name: e.target.value }) }))} /></div>
+            <div><label class="block text-xs text-gray-600 mb-1">Slug</label>
+              <input class="input" value=${modal.form.slug} placeholder="auto from name"
+                onInput=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { slug: e.target.value }) }))} /></div>
+            <div class="flex gap-2">
+              <div class="flex-1"><label class="block text-xs text-gray-600 mb-1">Price / month</label>
+                <input class="input" value=${modal.form.price_monthly}
+                  onInput=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { price_monthly: e.target.value }) }))} /></div>
+              <div class="flex-1"><label class="block text-xs text-gray-600 mb-1">Price / year</label>
+                <input class="input" value=${modal.form.price_yearly}
+                  onInput=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { price_yearly: e.target.value }) }))} /></div>
+            </div>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked=${modal.form.is_active}
+              onChange=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { is_active: e.target.checked }) }))} /> Active</label>
+          </div>
+          <div class="flex gap-2 mt-4"><button class="btn" disabled=${busy} onClick=${savePlan}>Save</button>
+            <button class="btn btn-outline" onClick=${() => setModal(null)}>Cancel</button></div>
+        </div>
+      </div>`}
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole, plans: Plans };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
