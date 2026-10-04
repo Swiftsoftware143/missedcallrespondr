@@ -371,13 +371,13 @@ pub async fn plan_registry(
     use sqlx::Row;
     let rows = sqlx::query(
         "SELECT id, name, slug, is_active, sort_order, price_monthly::float8 AS price_monthly, \
-         price::float8 AS price FROM plans \
+         price_yearly::float8 AS price_yearly, price::float8 AS price FROM plans \
          ORDER BY is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC",
     )
     .fetch_all(&state.pool)
     .await?;
 
-    let mut plan_rows: Vec<(Uuid, String, String, bool, i32, f64)> = Vec::new();
+    let mut plan_rows: Vec<(Uuid, String, String, bool, i32, f64, f64)> = Vec::new();
     for r in &rows {
         plan_rows.push((
             r.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -386,6 +386,7 @@ pub async fn plan_registry(
             r.try_get::<bool, _>("is_active").unwrap_or(true),
             r.try_get::<i32, _>("sort_order").unwrap_or(0),
             money(r, "price_monthly"),
+            money(r, "price_yearly"),
         ));
     }
     let top_slug = plan_rows
@@ -556,6 +557,7 @@ pub async fn plan_registry(
                 "is_active": p.3,
                 "sort_order": p.4,
                 "price_monthly": p.5,
+                "price_yearly": p.6,
                 "is_top": p.1 == top_slug,
                 "values": values,
                 "sources": sources,

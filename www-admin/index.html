@@ -1706,8 +1706,12 @@ const App = () => {
       setBusy(true);
       try {
         const body = { name: f.name, slug: f.slug || undefined, description: f.description || undefined,
-          price_monthly: parseFloat(f.price_monthly) || 0, price_yearly: parseFloat(f.price_yearly) || 0,
           is_active: !!f.is_active };
+        // A BLANK price field means "leave the stored value alone". It used to be sent as 0, which
+        // ZEROED a plan's yearly price on every edit (e.g. just toggling Active) — the modal never
+        // prefilled price_yearly, so the field was always blank on edit.
+        const pm = parseFloat(f.price_monthly); if (!isNaN(pm)) body.price_monthly = pm;
+        const py = parseFloat(f.price_yearly); if (!isNaN(py)) body.price_yearly = py;
         if (modal.mode === 'edit') await API.put('/admin/plans/' + modal.id, body);
         else await API.post('/admin/plans', body);
         setModal(null); flash(modal.mode === 'edit' ? 'Plan updated' : 'Plan created'); await load();
@@ -1806,7 +1810,7 @@ const App = () => {
             <td>$${p.price_monthly != null ? Number(p.price_monthly).toFixed(2) : '0.00'}</td>
             <td>${p.is_active ? html`<span class="badge badge-green">active</span>` : html`<span class="badge badge-yellow">inactive</span>`}</td>
             <td>
-              <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: '', is_active: p.is_active } })}>Edit</button>
+              <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: (p.price_yearly != null ? p.price_yearly : ''), is_active: p.is_active } })}>Edit</button>
               <button class="btn btn-sm btn-red" onClick=${() => delPlan(p)}>Delete</button>
             </td>
           </tr>`)}</tbody>
