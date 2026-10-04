@@ -962,6 +962,25 @@ pub async fn admin_assign_plan(
         max::TENANT_PLANS_BILLING_CYCLE,
     )?;
 
+    // Validate the two foreign keys BEFORE the write (measured live 2026-10-04): the INSERT
+    // below carries `tenant_plans_tenant_id_fkey` AND `tenant_plans_plan_id_fkey`, so a
+    // non-existent tenant_id (or plan_id) aborted the statement and the panel's assign
+    // action answered 500 {"error":"Database error"}. Both are caller errors — name them.
+    let tenant_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM tenants WHERE id = $1")
+        .bind(tenant_id)
+        .fetch_optional(&state.pool)
+        .await?;
+    if tenant_exists.is_none() {
+        return Err(AppError::NotFound(format!("No tenant with id {tenant_id}")));
+    }
+    let plan_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM plans WHERE id = $1")
+        .bind(plan_id)
+        .fetch_optional(&state.pool)
+        .await?;
+    if plan_exists.is_none() {
+        return Err(AppError::NotFound(format!("No plan with id {plan_id}")));
+    }
+
     // ONE row per tenant is the invariant this upsert relies on (kanban t_f5494ad5): the conflict
     // target `(tenant_id)` resolves against `tenant_plans_tenant_id_key`, the unique constraint the
     // live database was missing — without it this statement aborted with Postgres 42P10 and the
