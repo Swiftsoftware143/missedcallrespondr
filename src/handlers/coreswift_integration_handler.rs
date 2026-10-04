@@ -58,7 +58,17 @@ pub async fn lists(
 ) -> Result<Json<Value>, AppError> {
     let (api_key, base_url) = get_coreswift_connection(&state, &claims.aid)
         .await
-        .ok_or_else(|| AppError::NotFound("CoreSwift is not connected".to_string()))?;
+        .ok_or_else(|| {
+            // Same condition, same status as `push` below: "not connected" is a client-fixable
+            // state, not a missing resource. A 404 here read as a dead endpoint to an authenticated
+            // sweep of this route (the console's own call site catches ANY error and shows an empty
+            // list), which is exactly the "control calls a missing address" misread this fleet has
+            // hit before. 400 keeps the two CoreSwift entry points consistent.
+            AppError::BadRequest(
+                "CoreSwift is not connected — store your csk_ key in the Integration Center first"
+                    .to_string(),
+            )
+        })?;
 
     let url = format!("{base_url}/api/external/lists");
     let resp = reqwest::Client::new()
