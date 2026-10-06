@@ -220,6 +220,19 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000029_plans_price_columns_agree",
             include_str!("../migrations/000029_plans_price_columns_agree.sql"),
         ),
+        // 000030 retires the user-less HOLDER tenant the deleted tag receiver used to file every
+        // FunnelSwift lead into (kanban t_1d08bd9a, `FunnelSwift Leads` / slug `funnelswift` /
+        // id 0347dc35-…). 000018 created it and was retired with its handler (t_c2353c90); its row
+        // stayed on live because nothing could prove what else pointed at it. This file settles that
+        // by measurement: it walks every single-column FK to `tenants` from the CATALOG (plus
+        // `email_templates.aid`, the one tenant-ish column with no FK) and deletes the row ONLY when
+        // all of them hold zero rows for it, logging the verdict either way. Idempotent by
+        // construction — the second pass finds the row absent — and a no-op on a fresh install,
+        // which never had it.
+        (
+            "000030_retire_funnelswift_tenant",
+            include_str!("../migrations/000030_retire_funnelswift_tenant.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

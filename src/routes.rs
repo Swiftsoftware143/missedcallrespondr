@@ -45,6 +45,23 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/internal/portfolio-sync",
             post(crate::handlers::portfolio_sync_handler::portfolio_sync_internal),
         )
+        // The FunnelSwift tag → free-account receiver (kanban t_1d08bd9a, design §3.1). Mounted on
+        // the ANONYMOUS router because a sibling app presents `x-internal-key`, not a session — and
+        // named in `crate::auth::route_policy::INTERNAL_ROUTES`, so the one credential boundary
+        // demands that key before this handler is reached. Without it the caller gets the boundary's
+        // own 401 (proven live); the handler checks the key again and fails closed on an empty
+        // configured one. This is the frozen contract every target app answers, so FunnelSwift's one
+        // generic client can call them all.
+        //
+        // This is NOT the retired `/api/v1/internal/tag-provision` coming back: that receiver filed
+        // every lead into ONE hardcoded tenant (t_c9669881, the `FunnelSwift Leads` holder shape),
+        // which is why it was deleted with its migration (t_c2353c90). Nothing in this request names
+        // a tenant to write into — see `handlers::provision_handler`'s module docs — and the residue
+        // tenant of the old answer is retired by `migrations/000030_retire_funnelswift_tenant.sql`.
+        .route(
+            "/api/v1/internal/provision-free-account",
+            post(crate::handlers::provision_handler::provision_free_account),
+        )
         .route(
             "/api/v1/available-providers",
             get(provider_keys_handler::list_available_providers),
@@ -588,6 +605,16 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/admin/email-config/test",
             post(crate::handlers::email_settings_handler::test_email_config),
+        )
+        // Admin: the tag → free-account switch and entry-plan picker (kanban t_1d08bd9a, design
+        // §3.3). On the PROTECTED router under `/api/v1/admin/*`, which `auth_middleware` closes to
+        // platform admins only (403 for a tenant token — `middleware::admin_surface_denied`), so the
+        // switch that writes accounts is not reachable by a customer session. The handler carries no
+        // second role check: one place decides the admin surface.
+        .route(
+            "/api/v1/admin/provisioning-settings",
+            get(crate::handlers::provision_handler::get_provisioning_settings)
+                .put(crate::handlers::provision_handler::update_provisioning_settings),
         )
         // Site configuration
         .route(

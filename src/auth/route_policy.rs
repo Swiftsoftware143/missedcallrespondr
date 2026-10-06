@@ -13,14 +13,15 @@
 //! probe against 127.0.0.1:8088)
 //!
 //! ```text
-//!   111 mounted `.route(..)` entries in the one routing file, 111 distinct paths (every path is
+//!   113 mounted `.route(..)` entries in the one routing file, 113 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!    99 entries reach `protected_routes`, which carries `auth_middleware`
-//!    12 entries reach the ANONYMOUS `public_routes`:
+//!   100 entries reach `protected_routes`, which carries `auth_middleware`
+//!    13 entries reach the ANONYMOUS `public_routes`:
 //!        10 deliberate public routes  (this module's PUBLIC_ROUTES)
-//!         2 machine receivers whose credential is the app's own `x-internal-key`
-//!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`)
+//!         3 machine receivers whose credential is the app's own `x-internal-key`
+//!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
+//!            `/api/v1/internal/provision-free-account`)
 //! ```
 //!
 //! # What this app's contribution is
@@ -124,22 +125,27 @@ pub const PUBLIC_ROUTES: &[&str] = &[
 /// Service-to-service routes whose own shared key (`x-internal-key` = `INTERNAL_SYNC_KEY`) is the
 /// credential.
 ///
-/// Both handlers already check that key themselves — the boundary demands it as well, so that a
+/// All three handlers already check that key themselves — the boundary demands it as well, so that a
 /// route added under one of these prefixes without an entry here is an ordinary PRIVATE route rather
 /// than one whose safety depends on its author remembering. Nothing here is anonymous: the key is
 /// the caller's credential, and the boundary refuses a caller that presents none.
 pub const INTERNAL_ROUTES: &[&str] = &[
-    // The two machine receivers, both POST-only, both mounted on the anonymous router because a
+    // The three machine receivers, all POST-only, all mounted on the anonymous router because a
     // sibling app presents a key rather than a session. They deserialize their `Json` body BEFORE
     // the handler body runs, i.e. an anonymous POST reaches handler code today — which is exactly
     // why the key is demanded at the boundary as well as inside the handler.
     //
     // `/api/v1/internal/portfolio-companies` receives the portfolio-company push;
-    // `/api/v1/internal/portfolio-sync` receives the whole-tenant portfolio sync. Both are
-    // deliberately NOT registered under the `/api/v1/admin/*` prefix: that prefix carries the
-    // platform-admin ROLE gate, and a machine door must not be closed by a tenant-role decision.
+    // `/api/v1/internal/portfolio-sync` receives the whole-tenant portfolio sync;
+    // `/api/v1/internal/provision-free-account` receives FunnelSwift's tag → free-account request
+    // (kanban t_1d08bd9a, design §3.1) — the receiver that turns `MissedCall Respondr — Free` on a
+    // lead into a real account this business can log into and upgrade in place.
+    //
+    // None is registered under the `/api/v1/admin/*` prefix: that prefix carries the platform-admin
+    // ROLE gate, and a machine door must not be closed by a tenant-role decision.
     "/api/v1/internal/portfolio-companies",
     "/api/v1/internal/portfolio-sync",
+    "/api/v1/internal/provision-free-account",
 ];
 
 /// Is this path inside the API surface this boundary decides?
@@ -248,7 +254,7 @@ mod tests {
         }
         // the scan really sees the mounts (a silent zero would make the test vacuous)
         assert!(
-            route_literals().len() >= 111,
+            route_literals().len() >= 113,
             "route literal scan found too few: {}",
             route_literals().len()
         );
@@ -350,6 +356,7 @@ mod tests {
         for path in [
             "/api/v1/internal/portfolio-companies",
             "/api/v1/internal/portfolio-sync",
+            "/api/v1/internal/provision-free-account",
         ] {
             assert!(is_internal_route(path), "{} is a named key route", path);
             assert!(!is_public_route(path), "{} must not be anonymous", path);
@@ -360,7 +367,7 @@ mod tests {
             "/api/v1/internal/whatever",
             "/api/v1/internal/portfolio-sync/extra",
             "/api/v1/internal/tag-provision",
-            "/api/v1/internal/provision-free-account",
+            "/api/v1/internal/provision-free-account/extra",
         ] {
             assert!(!is_internal_route(path), "{} must be private", path);
             assert!(!is_public_route(path), "{} must be private", path);
@@ -422,19 +429,19 @@ mod tests {
     #[test]
     fn the_census_shape_is_what_the_docs_say() {
         assert_eq!(super::PUBLIC_ROUTES.len(), 10, "PUBLIC_ROUTES size");
-        assert_eq!(super::INTERNAL_ROUTES.len(), 2, "INTERNAL_ROUTES size");
-        // The 12 anonymous mounts the census found: 10 deliberate + 2 key receivers.
+        assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
+        // The 13 anonymous mounts the census found: 10 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            12
+            13
         );
-        // 111 entries / 111 distinct paths, and the two lists are disjoint.
+        // 113 entries / 113 distinct paths, and the two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 111, "mounted .route entries");
+        assert_eq!(lits.len(), 113, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 111, "distinct mounted paths");
+        assert_eq!(uniq.len(), 113, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

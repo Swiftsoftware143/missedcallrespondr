@@ -101,6 +101,55 @@ without reading container logs. A deliberate *test* send reports its result inli
 overwrite that row. A failed credential mail is never fatal to account creation — the loud
 `account created but the WELCOME/CREDENTIALS EMAIL FAILED` line plus `email_last_send` are the signal.
 
+## Provisioning: a FunnelSwift tag can create a free account here
+
+A lead captured in FunnelSwift can be tagged with **MissedCall Respondr — Free**. When this app's
+provisioning switch is ON, that tag creates a real, log-in-able free account for the business here:
+its own workspace, an owner login whose password is emailed to the contact address, and a plan row
+they can upgrade from inside the app.
+
+**Where:** the admin panel (`admin.missedcallrespondr.com`) → **Provisioning** in the left navigation.
+Two controls:
+
+| Control | What it does |
+|---|---|
+| **Create free accounts from tags** (Turn on / Turn off) | The master switch. Stored as `admin_settings.provision_from_tags_enabled`. **Ships OFF**, and while it is off every request is refused with `403 refused / provisioning_disabled` and nothing is created for anyone. |
+| **Plan for new accounts** (dropdown + Save plan) | The plan a tagged account starts on, stored as `admin_settings.provision_entry_plan_slug` (default `free`). Only this app's own free plans — active, `price_monthly = 0` AND legacy `price = 0` — are offered, so a tag can never seat a paying plan. |
+
+**The receiver FunnelSwift calls** (it is a machine door, not a page):
+
+```
+POST /api/v1/internal/provision-free-account
+Header: x-internal-key: <the shared INTERNAL_SYNC_KEY>
+{ "source":"funnelswift", "source_tenant_id":"…",
+  "tag":{"name":"MissedCall Respondr — Free","plan_slug":"free"},
+  "contact":{"email":"…","first_name":"…","last_name":"…","company":"…","phone":"…"},
+  "idempotency_key":"<lead uuid>:missedcallrespondr" }
+
+201 { "status":"provisioned",    "account_id":"…", "plan_slug":"free", "login_email":"…" }
+200 { "status":"already_exists", "account_id":"…" }
+403 { "status":"refused",        "reason":"provisioning_disabled" }
+422 { "status":"invalid",        "reason":"placeholder_email" | "no_free_plan" }
+```
+
+Rules that matter operationally:
+
+* **The account is the same shape the public signup mints** — one `tenants` row, one `account_owner`
+  `users` row, one `tenant_plans` row on the entry plan with the free tier's 50 starter credits.
+  Both doors call the one shared writer (`src/auth/signup.rs`), so they cannot drift, and the
+  tagged business can upgrade in place like any self-serve customer.
+* **Idempotent on the email address** (case-insensitive): a second delivery answers `200
+  already_exists` and mints nothing, so a retried or duplicated FunnelSwift delivery cannot create a
+  second workspace.
+* **No workspace is created for an address that cannot be a mailbox**, and the workspace is named
+  after the contact's company (or a neutral "<name>'s Workspace") — never after the tag or the
+  sending app.
+* **The password is generated here and mailed** through the app's `welcome_credentials` template.
+  A send failure does not fail the request: it is logged loudly as
+  `account created but the CREDENTIALS EMAIL FAILED …` and recorded in `admin_settings.email_last_send`.
+* **Nothing is deleted when a tag is removed** on the FunnelSwift side. Removing a tag never
+  cancels an account.
+
 ## Plans, tiers and the plan feature registry
 
 Four live tiers: **Enterprise** (the TOP tier), Pro, Pro Monthly and Free. "Top" is established from

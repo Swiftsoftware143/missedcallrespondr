@@ -26,6 +26,8 @@ pub mod plans_handler;
 pub mod portfolio_handler;
 pub mod portfolio_sync_handler;
 pub mod provider_keys_handler;
+/// The FunnelSwift tag → free-account receiver + its two console settings (kanban t_1d08bd9a).
+pub mod provision_handler;
 pub mod response_rule_eval;
 pub mod response_rule_handler;
 pub mod tag_groups_handler;

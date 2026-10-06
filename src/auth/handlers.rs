@@ -28,70 +28,45 @@ pub async fn register(
     // value is what is checked, stored, put in the token and mailed.
     let email = email_addr::normalize(&req.email).map_err(AppError::Unprocessable)?;
 
-    let existing = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE lower(email) = $1")
-        .bind(&email)
-        .fetch_optional(&state.pool)
-        .await?;
-
-    if existing.is_some() {
+    // The duplicate check runs FIRST, before the Argon2 work: `register` is reachable without a
+    // credential, and a hash nobody will store must not be computed for a duplicate (the shared
+    // core re-checks before its first write, so this is the cheap first gate, not the only one).
+    if super::signup::email_taken(&state.pool, &email).await? {
         return Err(AppError::Conflict(
             "A user with this email already exists. Try signing in.".into(),
         ));
     }
 
-    let account_id = uuid::Uuid::new_v4();
-    let account_slug = req.account_name.to_lowercase().replace(' ', "_");
-
-    sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
-        .bind(account_id)
-        .bind(&req.account_name)
-        .bind(&account_slug)
-        .execute(&state.pool)
-        .await?;
-
-    let user_id = uuid::Uuid::new_v4();
     let password_hash =
         hash_password(&req.password).map_err(|e| AppError::Internal(e.to_string()))?;
-    let now = chrono::Utc::now().naive_utc();
 
-    sqlx::query(
-        "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    // ── The mint, through the ONE shared writer (kanban t_1d08bd9a, design §3.1 rule 4) ─────────
+    // `auth::signup::create_account` is the same function the fleet-internal tag door
+    // (`POST /api/v1/internal/provision-free-account`) calls, so the account this public signup
+    // mints and the account a FunnelSwift tag mints cannot drift: one `tenants` row, one
+    // `account_owner` `users` row, one `tenant_plans` row on `free` with 50 starter credits.
+    // `account_slug: None` keeps the derivation this handler has always used, and
+    // `password_plain: None` keeps its welcome mail password-less and off the response's critical
+    // path — i.e. this door's observable behaviour is unchanged.
+    let ids = super::signup::create_account(
+        &state,
+        super::signup::NewAccount {
+            email: &email,
+            name: &req.name,
+            password_hash: &password_hash,
+            password_plain: None,
+            account_name: &req.account_name,
+            account_slug: None,
+            plan_slug: "free",
+            role: "account_owner",
+        },
     )
-    .bind(user_id)
-    .bind(&email)
-    .bind(&password_hash)
-    .bind(&req.name)
-    .bind(account_id)
-    .bind("account_owner")
-    .bind(now)
-    .bind(now)
-    .execute(&state.pool)
     .await?;
-
-    // Auto-assign Free plan with 50 starter credits
-    let free_plan = sqlx::query_as::<_, (uuid::Uuid,)>(
-        "SELECT id FROM plans WHERE slug = 'free' AND is_active = true LIMIT 1",
-    )
-    .fetch_optional(&state.pool)
-    .await?;
-
-    if let Some((plan_id,)) = free_plan {
-        let tp_id = uuid::Uuid::new_v4();
-        sqlx::query(
-            r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, credit_balance, lifetime_credits, status, billing_cycle)
-               VALUES ($1, $2, $3, 50, 50, 'active', 'free')"#
-        )
-        .bind(tp_id)
-        .bind(account_id)
-        .bind(plan_id)
-        .execute(&state.pool)
-        .await?;
-    }
 
     let claims = Claims {
-        sub: user_id,
+        sub: ids.user_id,
         email: email.clone(),
-        aid: account_id,
+        aid: ids.account_id,
         role: "account_owner".into(),
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
@@ -108,40 +83,13 @@ pub async fn register(
     // The live inbound hub path is handlers::coreswift_external::push_lead_to_coreswift
     // (tenant BYOK csk_ key), fired on real captures - not on signup.
 
-    // Send welcome email
-    let wl_pool = state.pool.clone();
-    let wl_email = email.clone();
-    let wl_name = req.name.clone();
-    tokio::spawn(async move {
-        let vars = serde_json::json!({
-            "name": wl_name,
-            "email": wl_email,
-            "app_name": "MissedCall Respondr",
-            "login_url": "https://app.missedcallrespondr.com"
-        });
-        let nil = uuid::Uuid::nil();
-        if let Err(e) =
-            crate::email::send_template_email(&wl_pool, nil, &wl_email, "welcome", &vars).await
-        {
-            // `error!`, not `warn!`: the account exists either way, so the ONLY signal that the
-            // customer got no mail is this line. Before kanban t_6d575da6 the transport itself was
-            // broken (JSON to a form API) and this line was a `warn!` nobody read, which is how the
-            // defect stayed invisible until a registration probe found it.
-            tracing::error!(
-                "account created but the WELCOME EMAIL FAILED for {} — the customer has no welcome/credentials mail: {}",
-                wl_email,
-                e
-            );
-        }
-    });
-
     Ok(Json(AuthResponse {
         token,
         team_member: TeamMemberResponse {
-            id: user_id,
+            id: ids.user_id,
             email,
             name: req.name,
-            tenant_id: account_id,
+            tenant_id: ids.account_id,
             role: "account_owner".into(),
         },
     }))

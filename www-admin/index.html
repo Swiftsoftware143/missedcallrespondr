@@ -1562,6 +1562,8 @@ const App = () => {
   const nav = [
     { id: 'ops', label: 'Operator Console', icon: '🛠', adminOnly: true },
     { id: 'plans', label: 'Plans & Features', icon: '💳', adminOnly: true },
+    // kanban t_1d08bd9a — the switch that lets a FunnelSwift tag create a real free account here.
+    { id: 'provisioning', label: 'Provisioning', icon: '🏷', adminOnly: true },
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'portfolio', label: 'Portfolio', icon: '🏢' },
     { id: 'rules', label: 'Response Rules', icon: '⚙️' },
@@ -1863,7 +1865,61 @@ const App = () => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole, plans: Plans };
+  // ---- PROVISIONING (kanban t_1d08bd9a) ----
+  // The switch that lets a FunnelSwift TAG create a real free account here, plus the in-app plan
+  // that account is seated on. Both values live in `admin_settings` and are read by the receiver
+  // (`src/handlers/provision_handler.rs`) on every call; this screen is the only writer.
+  //   GET /api/v1/admin/provisioning-settings  -> { enabled, slug, free_plans[] }
+  //   PUT /api/v1/admin/provisioning-settings  -> same shape
+  // Ships OFF: a tag creates nothing at all until the switch below is turned on.
+  const Provisioning = () => {
+    const [data, setData] = useState(null);
+    const [err, setErr] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [note, setNote] = useState(null);
+    const [slug, setSlug] = useState('');
+    const load = () => API.get('/admin/provisioning-settings')
+      .then(d => { setData(d); setSlug(d.provision_entry_plan_slug || 'free'); setErr(null); })
+      .catch(e => { console.error(e); setErr(e); });
+    useEffect(() => { load(); }, []);
+    const flash = (m) => { setNote(m); setTimeout(() => setNote(null), 5000); };
+    const save = async (body) => {
+      setBusy(true);
+      try {
+        const r = await API.put('/admin/provisioning-settings', body);
+        setData(r); setSlug(r.provision_entry_plan_slug || 'free'); flash('Saved');
+      } catch (e) { alert('Not saved: ' + ((e && e.message) || 'request failed')); }
+      setBusy(false);
+    };
+    if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Provisioning</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
+    if (!data) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Provisioning</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
+    const on = data.provision_from_tags_enabled === true;
+    return html`<div class="card" data-provisioning=${on ? 'on' : 'off'}>
+      <h2 class="text-xl font-bold mb-2">Provisioning</h2>
+      <p class="text-xs text-gray-500 mb-4">When FunnelSwift tags a lead with “MissedCall Respondr — Free”, this app creates a real free account for that business: its own workspace, a login with a password emailed to them, and a plan they can upgrade from inside the app. Nothing is created for anyone while the switch below is off.</p>
+      <div class="border rounded-lg p-4 mb-4 flex items-center justify-between gap-4">
+        <div>
+          <div class="font-semibold">Create free accounts from tags</div>
+          <div class="text-xs text-gray-500">Status: <span class="badge ${on ? 'badge-green' : 'badge-yellow'}">${on ? 'ON — tags create accounts' : 'OFF — tags create nothing'}</span></div>
+        </div>
+        <button class="btn ${on ? 'btn-red' : 'btn-green'}" disabled=${busy} onClick=${() => save({ provision_from_tags_enabled: !on })}>${busy ? '...' : (on ? 'Turn off' : 'Turn on')}</button>
+      </div>
+      <div class="border rounded-lg p-4 mb-4">
+        <div class="font-semibold mb-1">Plan for new accounts</div>
+        <p class="text-xs text-gray-500 mb-2">The plan a tagged account starts on. Only this app's own free plans (price $0) can be chosen — a tag can never seat a paying plan.</p>
+        <div class="flex gap-2 items-end flex-wrap">
+          <select class="input" style="width:280px" value=${slug} onChange=${e => setSlug(e.target.value)}>
+            ${(data.free_plans || []).map(p => html`<option value=${p.slug}>${p.name} (${p.slug})</option>`)}
+          </select>
+          <button class="btn" disabled=${busy || slug === data.provision_entry_plan_slug} onClick=${() => save({ provision_entry_plan_slug: slug })}>Save plan</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-400">FunnelSwift calls this app with the shared internal key at <code>POST /api/v1/internal/provision-free-account</code>. Its answer tells FunnelSwift what happened: 201 account created, 200 an account already existed, 403 while the switch above is off, 422 for an address that cannot be a mailbox.</p>
+      ${note && html`<p class="text-sm text-blue-700 mt-2">${note}</p>`}
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
