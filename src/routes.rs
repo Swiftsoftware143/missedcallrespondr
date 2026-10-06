@@ -85,7 +85,9 @@ pub fn create_router(state: AppState) -> Router {
         // what keeps the three bodyless GET routes on this surface unchanged — proven live, N1
         // `GET /api/v1/health` with a declared-but-absent body answers 200 at t+0.00 s in BOTH
         // phases, and a `Content-Length: 0` POST is answered at once too (N2).
-        .layer(middleware::from_fn_with_state(
+        // `route_layer` (kanban t_f8e7dd85): the deadline applies to this router's ROUTES, not to its
+        // fallback, so `merge` cannot adopt a deadline-wrapped 404 for the whole app.
+        .route_layer(middleware::from_fn_with_state(
             body_read_deadline,
             crate::body_deadline::body_read_deadline_middleware,
         ));
@@ -612,32 +614,50 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/checkout/sessions",
             get(checkout_handler::list_checkout_sessions),
         )
-        // Body-read deadline INNERMOST: the FIRST `.layer()` of this chain is the layer CLOSEST to
-        // the handler (axum wraps in application order), so `auth_middleware` — applied next — stays
-        // OUTSIDE it. That ordering is the contract, and it is why mounting this at the merged
-        // router instead would be wrong: an unauthenticated request must be answered 401 at
-        // t+0.00 s with its declared body never buffered, and only a request that HAS a credential
-        // may be made to wait for a body. Proven live in both phases: O1/O2 (no credential,
-        // declared-but-absent body) answer 401 at t+0.00 s, while L11/L12/L13 (a real session, the
-        // same declared-but-absent body) park before the fix and answer 408 ON the bound after it.
-        .layer(middleware::from_fn_with_state(
+        // Body-read deadline INNERMOST: `route_layer` applies to the routes in THIS router and never
+        // to its fallback, so the first one applied is the layer CLOSEST to the handler, and
+        // `auth_middleware` — applied next — stays OUTSIDE it. That ordering is the contract, and it
+        // is why mounting this at the merged router instead would be wrong: an unauthenticated
+        // request must be answered 401 at t+0.00 s with its declared body never buffered, and only a
+        // request that HAS a credential may be made to wait for a body. Proven live in both phases:
+        // O1/O2 (no credential, declared-but-absent body) answer 401 at t+0.00 s, while
+        // L11/L12/L13 (a real session, the same declared-but-absent body) park before the fix and
+        // answer 408 ON the bound after it.
+        //
+        // BOTH layers are `route_layer` (kanban t_f8e7dd85): `Router::layer` also wraps the router's
+        // FALLBACK, which flips its `default_fallback` flag, and `merge` then ADOPTS that wrapped
+        // fallback — measured live, an unmounted `GET /whatever` answered this middleware's
+        // `401 {"error":"Missing authorization header"}` instead of the router's own 404. With
+        // `route_layer` the fallback is untouched and the committed allowlist (see
+        // `crate::auth::route_policy`) is what decides, not a layering accident.
+        .route_layer(middleware::from_fn_with_state(
             body_read_deadline,
             crate::body_deadline::body_read_deadline_middleware,
         ))
-        .layer(middleware::from_fn_with_state(
+        .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
         ));
 
+    // The one credential boundary (kanban t_f8e7dd85) — mounted with `route_layer`, so it decides
+    // every MOUNTED route and an unmatched path still gets the router's own 404. It sits INSIDE the
+    // CORS layer (applied last, i.e. outermost) so a refused browser request still carries the CORS
+    // headers a preflight needs; the preflight itself is answered by `CorsLayer` before it reaches
+    // here. See `crate::auth::route_policy` for the committed allowlist it reads.
+    let boundary_state = state.clone();
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .with_state(state)
+        .route_layer(middleware::from_fn_with_state(
+            boundary_state,
+            crate::auth::boundary::require_credential,
+        ))
         // One place, every handler: extractor rejections (415/400/422) answer this app's own
         // JSON error shape instead of axum's unreadable text/plain — see error.rs. Layered
         // inside CORS so the rewritten response still leaves with the CORS headers.
         .layer(middleware::from_fn(crate::error::rejection_as_json))
         .layer(CorsLayer::permissive())
-        .with_state(state)
 }
 
 async fn health_check() -> axum::Json<serde_json::Value> {
