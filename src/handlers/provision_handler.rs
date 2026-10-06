@@ -252,8 +252,9 @@ pub async fn provision_free_account(
         return Err(AppError::Unauthorized("Invalid internal key".into()));
     }
 
-    // 2. Master toggle — ships OFF; David enables it per app from the console (design §3.1 rule 2).
-    if !admin_setting_bool(&state.pool, "provision_from_tags_enabled", false).await? {
+    // 2. Master toggle — ships ON (code default true, so a FRESH INSTALL has the door open); an
+    //    operator closes it from the console (design §3.1 rule 2).
+    if !admin_setting_bool(&state.pool, "provision_from_tags_enabled", true).await? {
         return Ok(refused("provisioning_disabled"));
     }
 
@@ -401,7 +402,7 @@ pub async fn get_provisioning_settings(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
 ) -> Result<Json<Value>, AppError> {
-    let enabled = admin_setting_bool(&state.pool, "provision_from_tags_enabled", false).await?;
+    let enabled = admin_setting_bool(&state.pool, "provision_from_tags_enabled", true).await?;
     let plan_slug = admin_setting_str(&state.pool, "provision_entry_plan_slug", "free").await?;
     let plans = free_plans(&state.pool).await?;
     Ok(Json(json!({
