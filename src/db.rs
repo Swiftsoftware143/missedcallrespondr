@@ -233,6 +233,18 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000030_retire_funnelswift_tenant",
             include_str!("../migrations/000030_retire_funnelswift_tenant.sql"),
         ),
+        // 000031 seals the TWO money-bearing credentials in `payment_providers` at rest, the class
+        // of kanban t_6104de65: `api_key_encrypted` and `webhook_secret_encrypted` were named after
+        // an encryption promise migration 000010 never kept — the upsert bound the raw request
+        // value into both, so a Stripe secret key and the endpoint's webhook signing secret sat in
+        // the clear. This file arms the two CHECK constraints (sealed-or-empty) so a future writer
+        // that forgets to seal FAILS CLOSED. Idempotent because this runner re-executes every file
+        // on every boot: the DROP/ADD pair resets the flag and the DO block re-validates it once
+        // every row is compliant.
+        (
+            "000031_payment_providers_secrets_encrypted_at_rest",
+            include_str!("../migrations/000031_payment_providers_secrets_encrypted_at_rest.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

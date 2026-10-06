@@ -44,6 +44,25 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&pool).await?;
     tracing::info!("Migrations complete");
 
+    // At-rest seal for the payment-provider credentials (the class of kanban t_6104de65).
+    // `payment_providers` holds two money-bearing credentials — the provider's secret key and the
+    // endpoint's webhook signing secret — in columns migration 000010 named after an encryption
+    // promise the write path never kept. The upsert now seals before it binds and the read path
+    // opens after it reads; THIS is the half that converges a row arriving plaintext from an older
+    // dump, and (because a restored database can drop a constraint) the path that re-arms the guard.
+    // Never fatal: a credential row must not stop the app booting.
+    match security::payment_provider_secrets::seal_legacy_payment_provider_secrets(&pool).await {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!(
+            rows = n,
+            "payment_providers: sealed legacy plaintext credential(s) at rest"
+        ),
+        Err(e) => tracing::error!(
+            "payment_providers credential backfill failed (plaintext may remain at rest): {}",
+            e
+        ),
+    }
+
     // BYOK at-rest encryption posture (PROVIDER_KEY_ENC_SECRET). DISABLED means provider key
     // writes fail closed rather than storing a plaintext credential.
     tracing::info!(
