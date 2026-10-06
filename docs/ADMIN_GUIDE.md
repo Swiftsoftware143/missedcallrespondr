@@ -337,6 +337,17 @@ writer of `messages` rows. It now transmits: an `outbound` message calls
   `message.sent` moves a row to `sent`, `message.finalized` to `delivered` (setting `delivered_at`)
   or `failed` — matched by `provider_message_id`. A `delivered` row is terminal; an event whose id
   matches no row changes nothing (including every `message.received`, which this app does not store).
+- **Every delivery is verified before a byte of it is read** (kanban t_0e4ae7b7). The receiver is
+  anonymous because Telnyx cannot present a session — its credential is the delivery's own Ed25519
+  signature: base64 `telnyx-signature-ed25519` over the raw bytes `<telnyx-timestamp>|<body>`,
+  against the account public key from Telnyx Mission Control, with a 5-minute freshness window and a
+  replay guard. A delivery that fails any arm is answered **401** (missing / mismatched signature,
+  tampered body, stale or unreadable stamp, replay) and **nothing is applied**. There is no
+  universal Telnyx key, so the receiver is configured per deployment: set **`TELNYX_PUBLIC_KEY`**
+  (base64, 32 bytes) in the deploy env. **It fails CLOSED** — while that key is unset every
+  delivery, correctly signed or not, is refused `503 telnyx_verification_not_configured` and logged
+  at ERROR; `TELNYX_SIGNATURE_TOLERANCE_SECS` (clamped 30..86400, default 300) widens the freshness
+  window without a rebuild. The boot log names the posture.
 - **`TELNYX_API_BASE`** overrides the API host (default `https://api.telnyx.com`), exactly as
   `PAYPAL_API_BASE` does for the PayPal verify call. It exists for acceptance runs against a stub
   server; unset behaviour is byte-identical to the production host.
@@ -353,6 +364,7 @@ inbound call", while no inbound-call path read the table — no rule had ever fi
   `call_received`/`call_initiated`, after the tenant is resolved by the CALLED number, the credit is
   taken and `inbound_calls` / `call_logs` are written. The evaluation is SPAWNED (like the CoreSwift
   lead push), so a slow provider call can never delay the call-control answer Telnyx is waiting for.
+  The Ed25519 check above runs BEFORE any of that: an unverified delivery never reaches this arm.
 - **The call-control reply is `{"commands":[{"type":"answer"}]}`** (kanban t_6e679d39). The handled
   arm answers the call and asks Telnyx for nothing else; the `gather_using_audio` command it used to
   carry is retired, judged by measurement: (a) nothing consumed the digits — the receiver matches

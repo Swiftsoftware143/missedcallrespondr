@@ -71,6 +71,25 @@ async fn main() -> anyhow::Result<()> {
         handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS
     );
 
+    // Telnyx delivery verification (kanban t_0e4ae7b7): the receiver verifies Telnyx's Ed25519
+    // signature on every delivery and FAILS CLOSED when this deployment has no account key. In the
+    // boot log for the same reason as the bounds above: an operator whose inbound telephony is
+    // refusing needs to read the posture at startup, not wait for a refused delivery to find out.
+    tracing::info!(
+        "Telnyx webhook signature verification: {} (Ed25519 over `<telnyx-timestamp>|<body>` against \
+         TELNYX_PUBLIC_KEY; freshness tolerance {}s from this host's clock, \
+         TELNYX_SIGNATURE_TOLERANCE_SECS clamped 30..86400, default {})",
+        if cfg.telnyx_public_key.is_some() {
+            "ENABLED".to_string()
+        } else {
+            "NOT CONFIGURED - every delivery is refused 503 telnyx_verification_not_configured and \
+             nothing is applied; set the account public key from Telnyx Mission Control"
+                .to_string()
+        },
+        cfg.telnyx_signature_tolerance_secs,
+        security::telnyx_signature::DEFAULT_SIGNATURE_TOLERANCE_SECS
+    );
+
     // Body-read deadline (kanban t_7f688018): how long a request body may take to arrive before the
     // request is answered 408 and its task, connection and partially-read buffer are released. In
     // the boot log for the same reason as the bounds above — an operator diagnosing "a webhook
