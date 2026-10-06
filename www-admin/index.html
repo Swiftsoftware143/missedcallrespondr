@@ -1871,7 +1871,8 @@ const App = () => {
   // (`src/handlers/provision_handler.rs`) on every call; this screen is the only writer.
   //   GET /api/v1/admin/provisioning-settings  -> { enabled, slug, free_plans[] }
   //   PUT /api/v1/admin/provisioning-settings  -> same shape
-  // Ships OFF: a tag creates nothing at all until the switch below is turned on.
+  // Ships ON (code default true): a tag mints a free account immediately; turn the switch
+  // below OFF to make this app create nothing.
   const Provisioning = () => {
     const [data, setData] = useState(null);
     const [err, setErr] = useState(null);
