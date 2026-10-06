@@ -193,38 +193,6 @@ fn looks_like_placeholder(email: &str) -> bool {
         || email.ends_with(".invalid")
 }
 
-/// A tenant slug that is not already taken. `tenants.slug` is UNIQUE and `register` derives its slug
-/// as `name.to_lowercase().replace(' ', "_")` — so two leads of the same business (or a name that
-/// matches an existing workspace) collide, and a unique violation here would 500 the caller without
-/// ever telling it why. Base from the app's own derivation plus a short random suffix, retried
-/// against the index rather than trusting one draw.
-async fn unique_tenant_slug(db: &sqlx::PgPool, name: &str) -> Result<String, AppError> {
-    let base: String = name
-        .to_lowercase()
-        .replace(' ', "_")
-        .chars()
-        .take(24)
-        .collect();
-    let base = if base.trim_matches('_').is_empty() {
-        "account".to_string()
-    } else {
-        base
-    };
-    for _ in 0..5 {
-        let short = &Uuid::new_v4().to_string()[..8];
-        let candidate = format!("{base}_{short}");
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenants WHERE slug = $1)")
-                .bind(&candidate)
-                .fetch_one(db)
-                .await?;
-        if !exists {
-            return Ok(candidate);
-        }
-    }
-    Ok(format!("{base}_{}", Uuid::new_v4()))
-}
-
 /// The entry plan this app will seat a tag-provisioned account on, resolved IN-APP (design §3.1
 /// rule 1): the `admin_settings` slug, DEFAULT `free`. A plan qualifies only when it is active AND
 /// free in BOTH price columns — `plans` carries a legacy `price` and the `price_monthly` the panel
@@ -347,7 +315,7 @@ pub async fn provision_free_account(
     let raw_password = generate_password();
     let password_hash = crate::auth::models::hash_password(&raw_password)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    let account_slug = unique_tenant_slug(&state.pool, &account_name).await?;
+    let account_slug = crate::auth::signup::unique_account_slug(&state.pool, &account_name).await?;
 
     let ids = match crate::auth::signup::create_account(
         &state,

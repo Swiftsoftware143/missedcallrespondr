@@ -15,11 +15,16 @@
 //! file a lead into a tenant nobody could log into. [`create_account`] mints its OWN tenant and keys
 //! everything off the caller's contact address, so no request can name a tenant to write into.
 //!
-//! A THIRD minting site still exists and is deliberately untouched here: the paid-checkout path
-//! `handlers::checkout_handler::deliver_credentials` mints a tenant + user when a payment completes
-//! and seats no plan row. Folding it in would change the paid path's observable behaviour (its
-//! `purchase_confirmed` mail, its existing-user arms) and is not this card; it is named in the audit
-//! report instead of silently left out.
+//! The THIRD minting site is folded in too (kanban t_98cb7b36): the paid-checkout path
+//! `handlers::checkout_handler::deliver_credentials` no longer writes its own `tenants`/`users`
+//! INSERTs. Its account-less arm calls [`create_account`] with the plan the checkout SESSION was
+//! opened for, so a buyer is never handed a workspace with no `tenant_plans` row — and, when the
+//! session names no plan this app can resolve, it mints NOTHING and says so instead. Its two arms
+//! for an address that already has a user (a password → `purchase_confirmed`; no password →
+//! generate and mail) are unchanged: they mint nothing.
+//!
+//! [`unique_account_slug`] lives here, not beside either door: `tenants.slug` is UNIQUE and a slug
+//! is the account writer's own business, so every door must derive one the same way.
 
 use chrono::Utc;
 use uuid::Uuid;
@@ -52,7 +57,9 @@ pub struct NewAccount<'a> {
     /// collide on this UNIQUE constraint and 500 the caller).
     pub account_slug: Option<&'a str>,
     /// The plan to seat, resolved IN-APP by the caller (design §3.1 rule 1). `plans.slug` is this
-    /// app's plan identity; `register` passes `"free"`.
+    /// app's plan identity: `register` passes `"free"`, the tag door passes the entry plan its own
+    /// setting names, and the paid-checkout door passes the plan the checkout session was opened
+    /// for (kanban t_98cb7b36). The caller owns that resolution — this module never guesses a plan.
     pub plan_slug: &'a str,
     /// The owner user's role. `register` mints `account_owner`.
     pub role: &'a str,
@@ -79,6 +86,41 @@ pub async fn email_taken(db: &sqlx::PgPool, email: &str) -> Result<bool, AppErro
         .fetch_one(db)
         .await?;
     Ok(n > 0)
+}
+
+/// A `tenants.slug` that is not already taken.
+///
+/// `tenants.slug` is UNIQUE and [`create_account`]'s own derivation is
+/// `account_name.to_lowercase().replace(' ', "_")` — so two workspaces of the same name (two leads
+/// of one business, a name that matches an existing workspace) collide and the caller gets a UNIQUE
+/// violation instead of an account. Base from that same derivation plus a short random suffix,
+/// retried against the index rather than trusting one draw. Every door that has no better slug
+/// derives it with this one function, so the shape cannot drift between them.
+pub async fn unique_account_slug(db: &sqlx::PgPool, name: &str) -> Result<String, AppError> {
+    let base: String = name
+        .to_lowercase()
+        .replace(' ', "_")
+        .chars()
+        .take(24)
+        .collect();
+    let base = if base.trim_matches('_').is_empty() {
+        "account".to_string()
+    } else {
+        base
+    };
+    for _ in 0..5 {
+        let short = &Uuid::new_v4().to_string()[..8];
+        let candidate = format!("{base}_{short}");
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenants WHERE slug = $1)")
+                .bind(&candidate)
+                .fetch_one(db)
+                .await?;
+        if !exists {
+            return Ok(candidate);
+        }
+    }
+    Ok(format!("{base}_{}", Uuid::new_v4()))
 }
 
 /// Create an account. Refuses (without writing anything) if the address is already a login.

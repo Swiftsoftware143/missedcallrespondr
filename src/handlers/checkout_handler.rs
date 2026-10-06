@@ -1307,22 +1307,65 @@ pub fn hash_password(password: &str) -> Result<String, AppError> {
     Ok(hash.to_string())
 }
 
-/// Deliver credentials to the user who just completed a purchase.
-/// - If user exists with password_hash → send purchase_confirmed email
-/// - If user exists without password_hash → generate temp password, hash, update, send welcome
-/// - If no user → create tenant, create user, send welcome
+/// The plan a checkout SESSION was opened for, as this app's own plan identity (`plans.id` +
+/// `plans.slug`), or `None` when the session names no plan this app can seat (kanban t_98cb7b36).
+///
+/// Two spellings are accepted because both are the session's own vocabulary, in this order:
+///   * `purchasable_type = "plan"` — the shipped create path's plan purchase, whose plan IS
+///     `purchasable_id` (`plans.id`).
+///   * `purchasable_type = <the plan's own slug>` — a caller that names the plan directly
+///     (`"pro-monthly"`), with the underscored spelling normalised because this very token is what
+///     the confirmation mail turns into a label (`"pro_monthly"` → `"Pro Monthly"`).
+///
+/// An INACTIVE plan resolves to nothing on purpose: seating a plan the app has retired would be a
+/// worse lie than refusing. `is_active` is the same predicate `features::plan_slug` reads.
+async fn resolve_purchased_plan(
+    pool: &sqlx::PgPool,
+    purchasable_type: &str,
+    purchasable_id: Option<Uuid>,
+) -> Result<Option<(Uuid, String)>, sqlx::Error> {
+    if purchasable_type == "plan" {
+        if let Some(plan_id) = purchasable_id {
+            return sqlx::query_as::<_, (Uuid, String)>(
+                "SELECT id, slug FROM plans WHERE id = $1 AND is_active = true LIMIT 1",
+            )
+            .bind(plan_id)
+            .fetch_optional(pool)
+            .await;
+        }
+    }
+    sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, slug FROM plans WHERE (slug = $1 OR slug = replace($1, '_', '-')) \
+         AND is_active = true ORDER BY (slug = $1) DESC LIMIT 1",
+    )
+    .bind(purchasable_type)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Deliver credentials to the person who just completed a purchase.
+/// - If no user exists for the address → MINT the account through the ONE writer
+///   (`auth::signup::create_account`), on the plan the session was opened for, and mail the
+///   generated password. With no resolvable plan, NOTHING is minted — see the arm below.
+/// - If a user exists WITH a password → send `purchase_confirmed`.
+/// - If a user exists with an EMPTY password → generate one, store it, send the credentials.
 ///
 /// The welcome send uses `template_type = "welcome_credentials"`, NOT `"welcome"`: this is the one
 /// flow where the password is GENERATED for the customer and is unknowable to them, so the email is
 /// the only place it can be delivered. Self-serve signup (`auth::register`) sends `"welcome"`, whose
 /// default row deliberately carries no password placeholder — the user chose that password two
 /// seconds earlier, and emailing a user-chosen secret only spreads it (card t_46d8d40e).
+///
+/// `session_account_id` is the tenant that OPENED the session — the payer. It is NOT the minted
+/// account's tenant (the mint keys off the delivery address and mints its own); it is carried here
+/// for the log line that correlates a refusal with the session that caused it.
 async fn deliver_credentials(
     state: &AppState,
     email: &str,
     customer_name: &str,
-    account_id: Uuid,
+    session_account_id: Uuid,
     purchasable_type: &str,
+    purchased_plan: Option<(Uuid, String)>,
 ) -> Result<(), AppError> {
     // ── Address boundary (kanban t_54b1ffab) ────────────────────────────────────────────────
     // Every statement below runs off this value: the `INSERT INTO users` that mints the account and
@@ -1417,49 +1460,76 @@ async fn deliver_credentials(
             }
         }
     } else {
-        // No user found → create tenant + user
-        let slug = format!(
-            "tenant-{}",
-            account_id.to_string().split('-').next().unwrap_or("new")
-        );
-        let tenant_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(tenant_id)
-            .bind(customer_name)
-            .bind(&slug)
-            .execute(&state.pool)
-            .await?;
+        // ── No user for this address → MINT the account, on the plan the session was opened for ──
+        // (kanban t_98cb7b36.) What was here before was WRONG in two ways that only showed once a
+        // real payment provider exists:
+        //   1. it wrote its own `INSERT INTO tenants` + `INSERT INTO users` — a SECOND account
+        //      writer, exactly what the ONE-writer rule (design §3.1 rule 4) forbids; and
+        //   2. it seated NO `tenant_plans` row at all, so a customer who PAID got a workspace the
+        //      app reads as the FREE tier (`features::plan_slug`'s `free` floor) until an operator
+        //      assigned a plan by hand.
+        // It also minted `role = 'admin'`, which `auth::middleware::is_platform_admin` treats as a
+        // PLATFORM admin — i.e. it handed every paying customer the whole `/api/v1/admin/*` and
+        // payment-provider surface (impersonate any tenant, list every tenant, rewrite payment
+        // config). `register` and the tag door both mint `account_owner`, and that is what this
+        // app's tenant surfaces accept, so that is what is minted here.
+        //
+        // The account is now the SAME shape every other door mints, because it is the same call:
+        // `auth::signup::create_account` with the resolved plan, which writes the tenant, the
+        // `account_owner` user AND the `tenant_plans` row, and mails the generated password through
+        // `welcome_credentials` (awaited, failure logged) — the same mail this arm used to send.
+        //
+        // A plan is REQUIRED. With nothing this app can resolve from the session there is no plan
+        // to seat, and minting a planless workspace for a paid session is the defect this arm
+        // removes. So nothing is created and the refusal is logged with the session's own
+        // vocabulary. The session stays `completed` and the webhook still answers 2xx: the payment
+        // WAS received, and the provider must not be told to retry a fulfilment whose only missing
+        // input is the plan.
+        let Some((plan_id, plan_slug)) = purchased_plan else {
+            tracing::error!(
+                "PAID CHECKOUT MINT REFUSED — the session names no plan this app can seat, so NO \
+                 account was created (purchasable_type={:?}, session tenant={}): the buyer would \
+                 have been handed a workspace capped at the free tier for a plan they paid for. \
+                 Open the session for a plan (purchasable_type=\"plan\" plus the plan's id as \
+                 purchasable_id, or purchasable_type = the plan's own slug) and re-deliver.",
+                purchasable_type,
+                session_account_id
+            );
+            return Ok(());
+        };
 
         let temp_password = generate_temp_password();
-        let hash = hash_password(&temp_password)?;
-        let user_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO users (id, email, password_hash, name, tenant_id, role) VALUES ($1, $2, $3, $4, $5, 'admin')"
+        let password_hash = hash_password(&temp_password)?;
+        let account_slug =
+            crate::auth::signup::unique_account_slug(&state.pool, customer_name).await?;
+        let ids = crate::auth::signup::create_account(
+            state,
+            crate::auth::signup::NewAccount {
+                email,
+                name: customer_name,
+                password_hash: &password_hash,
+                // The generated password IS the credential this mail carries — the same posture as
+                // the tag door, and the reason `create_account` sends the mail before it returns.
+                password_plain: Some(&temp_password),
+                account_name: customer_name,
+                account_slug: Some(&account_slug),
+                plan_slug: &plan_slug,
+                role: "account_owner",
+            },
         )
-        .bind(user_id)
-        .bind(email)
-        .bind(&hash)
-        .bind(customer_name)
-        .bind(tenant_id)
-        .execute(&state.pool)
         .await?;
 
-        let vars = json!({
-            "name": customer_name,
-            "email": email,
-            "password": &temp_password,
-            "app_url": "https://app.missedcallrespondr.com",
-        });
-        if let Err(e) =
-            email::send_template_email(&state.pool, tenant_id, email, "welcome_credentials", &vars)
-                .await
-        {
-            tracing::error!(
-                "new account created but the CREDENTIALS EMAIL FAILED for {} — the customer has no password: {}",
-                email,
-                e
-            );
-        }
+        // The plan row is the whole point of this arm: a mint that seats no plan is the defect.
+        // Logged with the plan so a paid delivery is correlatable with what the buyer received.
+        tracing::info!(
+            tenant = %ids.account_id,
+            user = %ids.user_id,
+            email = %email,
+            plan = %plan_slug,
+            plan_id = %plan_id,
+            session_tenant = %session_account_id,
+            "paid checkout minted an account on the plan the session was opened for"
+        );
     }
 
     Ok(())
@@ -1520,9 +1590,12 @@ async fn handle_checkout_completed(
         .await?;
 
     // ── Credential delivery ──
-    // Query the checkout session to get account_id and metadata
+    // Query the checkout session to get account_id, metadata and what was BOUGHT (kanban
+    // t_98cb7b36): `purchasable_type` plus, for a plan purchase, `purchasable_id`. Read in ONE
+    // statement so the plan the session was opened for can never be assembled from two rows.
     let session_row = sqlx::query(
-        r#"SELECT account_id, user_id, metadata FROM checkout_sessions
+        r#"SELECT account_id, user_id, metadata, purchasable_type, purchasable_id
+           FROM checkout_sessions
            WHERE provider_session_id = $1 AND provider_type = $2"#,
     )
     .bind(&provider_session_id)
@@ -1534,16 +1607,13 @@ async fn handle_checkout_completed(
         let account_id: Uuid = row.try_get("account_id")?;
         let metadata: Value = row.try_get("metadata")?;
         let customer_email = metadata.get("customer_email").and_then(|v| v.as_str());
-        let purchasable_type: String = {
-            let ptype: String = sqlx::query_scalar(
-                "SELECT purchasable_type FROM checkout_sessions WHERE provider_session_id = $1 AND provider_type = $2"
-            )
-            .bind(&provider_session_id)
-            .bind(provider_type)
-            .fetch_one(&state.pool)
-            .await?;
-            ptype
-        };
+        let purchasable_type: String = row.try_get("purchasable_type")?;
+        let purchasable_id: Option<Uuid> = row.try_get("purchasable_id")?;
+
+        // Resolve the plan this session was opened for ONCE, here, so the mint below seats exactly
+        // what was bought — and a session that names no plan this app can seat mints nothing.
+        let purchased_plan =
+            resolve_purchased_plan(&state.pool, &purchasable_type, purchasable_id).await?;
 
         if let Some(email) = customer_email {
             let customer_name = metadata
@@ -1551,9 +1621,15 @@ async fn handle_checkout_completed(
                 .and_then(|v| v.as_str())
                 .unwrap_or(email.split('@').next().unwrap_or("Customer"));
 
-            if let Err(e) =
-                deliver_credentials(state, email, customer_name, account_id, &purchasable_type)
-                    .await
+            if let Err(e) = deliver_credentials(
+                state,
+                email,
+                customer_name,
+                account_id,
+                &purchasable_type,
+                purchased_plan,
+            )
+            .await
             {
                 tracing::warn!("Credential delivery failed for {}: {:?}", email, e);
             }
