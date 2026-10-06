@@ -24,6 +24,22 @@ pub struct AppConfig {
     /// (the field the admin console's Payment providers panel writes), so PayPal can be enabled
     /// from the console without a redeploy.
     pub paypal_webhook_id: String,
+    /// This deployment's Telnyx ACCOUNT Ed25519 public key (base64, 32 bytes), from Telnyx Mission
+    /// Control. The credential `POST /api/v1/telnyx/webhook` verifies every delivery against
+    /// (kanban t_0e4ae7b7).
+    ///
+    /// There is NO universal Telnyx public key — it is per account — so the receiver cannot carry
+    /// one and must be configured. Optional on purpose: unset is not an outage, it is an
+    /// UNCONFIGURED receiver, and the receiver answers `503 telnyx_verification_not_configured`
+    /// and applies NOTHING (fail closed). A delivery that cannot be verified is never acted on.
+    /// `TELNYX_PUBLIC_KEY`.
+    pub telnyx_public_key: Option<String>,
+    /// How far a Telnyx delivery's `telnyx-timestamp` may be from THIS host's clock before the
+    /// receiver refuses it even though its Ed25519 signature verified (kanban t_0e4ae7b7, the
+    /// freshness arm). An absolute difference, so a stamp in the FUTURE is bounded the same way as
+    /// one in the past. Defaults to Telnyx's own 300 s; a host whose clock wanders can be widened
+    /// without a rebuild. `TELNYX_SIGNATURE_TOLERANCE_SECS`.
+    pub telnyx_signature_tolerance_secs: i64,
     /// How far a Stripe delivery's `t=` stamp may be from THIS host's clock before the receiver
     /// refuses it even though its HMAC verified (kanban t_4754e612, the freshness arm of the
     /// `stripe_webhook` contract, the port of ADASwift t_08628ca6 / WorkflowSwift t_72a4bcdf). An
@@ -75,6 +91,24 @@ impl AppConfig {
             // Optional, empty when unset: see the field's doc comment. Read once here so the
             // webhook receiver never has to touch the environment per request.
             paypal_webhook_id: std::env::var("PAYPAL_WEBHOOK_ID").unwrap_or_default(),
+            // Telnyx delivery verification (kanban t_0e4ae7b7). `Option`, and an empty value is
+            // normalised to `None`, so a stray `TELNYX_PUBLIC_KEY=` line in the deploy env leaves
+            // the receiver unconfigured (503, nothing applied) rather than "configured" with a key
+            // that verifies nothing. Read once here so the request path never touches the env.
+            telnyx_public_key: std::env::var("TELNYX_PUBLIC_KEY")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            // Telnyx signature freshness. Same posture as the bounds below: unset or unparseable
+            // falls back to Telnyx's own 300 s rather than refusing to boot, and the value is
+            // clamped so a mistyped one cannot become an outage — 0 would refuse every delivery
+            // whose stamp is not this exact second, and a day-sized value would hand a captured
+            // delivery a day-long replay window.
+            telnyx_signature_tolerance_secs: std::env::var("TELNYX_SIGNATURE_TOLERANCE_SECS")
+                .ok()
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .unwrap_or(crate::security::telnyx_signature::DEFAULT_SIGNATURE_TOLERANCE_SECS)
+                .clamp(30, 86_400),
             // Stripe signature freshness (kanban t_4754e612). Same posture as the two bounds
             // above: unset or unparseable falls back to the default (Stripe's own 300 s) rather
             // than refusing to boot, and the value is clamped so a mistyped one cannot become an

@@ -103,11 +103,20 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // scoped by no account.
     "/api/v1/available-providers",
     // --- telephony receiver whose own SIGNATURE is the credential ------------------------------
-    // Telnyx posts call-control events here with no session. The receiver is the app's inbound
-    // telephony door; it is mounted on the anonymous router because Telnyx cannot present a session,
-    // and it is also mounted with the body-read deadline. This is a receiver surface, not a data
-    // surface. (Its own verification gap — a delivery that arrives unsigned is not refused here —
-    // is NAMED on the card as a separate job, not hidden by this list.)
+    // Telnyx posts call-control and message-delivery events here with no session. The receiver is
+    // the app's inbound telephony door; it is mounted on the anonymous router because Telnyx cannot
+    // present a session, and it is also mounted with the body-read deadline. This is a receiver
+    // surface, not a data surface.
+    //
+    // Its credential is the delivery's own Ed25519 signature (kanban t_0e4ae7b7): the handler
+    // verifies base64 `telnyx-signature-ed25519` over the raw bytes `<telnyx-timestamp>|<body>`
+    // against this deployment's `TELNYX_PUBLIC_KEY`, enforces a freshness window on
+    // `telnyx-timestamp`, refuses a replay, and answers 401 — or 503 while no key is configured —
+    // BEFORE any byte of the event is read or applied. The extractor is raw `Bytes`, never
+    // `Json<Value>`, because the signature covers the exact bytes Telnyx sent. The route stays on
+    // this list because a webhook cannot present a JWT and removing it would refuse every genuine
+    // delivery at the boundary. (The gap this comment used to NAME — a delivery that arrives
+    // unsigned was not refused here — is closed; see `crate::security::telnyx_signature`.)
     "/api/v1/telnyx/webhook",
     // --- payment receivers whose own SIGNATURE is the credential --------------------------------
     // Stripe and PayPal post here with no session; each receiver verifies the HMAC over the raw body

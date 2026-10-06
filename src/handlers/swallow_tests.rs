@@ -72,6 +72,14 @@ pub fn test_state() -> AppState {
             // Unconfigured on purpose: the PayPal receiver must answer 503 paypal_not_configured
             // in this probe state, never as if it had processed anything (kanban t_5cf44e1b).
             paypal_webhook_id: String::new(),
+            // Unconfigured on purpose: the Telnyx receiver must answer 503
+            // telnyx_verification_not_configured in this probe state and apply nothing, never as if
+            // it had processed a delivery (kanban t_0e4ae7b7).
+            telnyx_public_key: None,
+            // The shipped default, so a probe that reaches the Telnyx freshness arm is judged by the
+            // same 300 s the deployment uses (kanban t_0e4ae7b7).
+            telnyx_signature_tolerance_secs:
+                crate::security::telnyx_signature::DEFAULT_SIGNATURE_TOLERANCE_SECS,
             // The shipped default, so a probe that reaches the Stripe receiver's freshness arm is
             // judged by the same 300 s the deployment uses (kanban t_4754e612).
             stripe_signature_tolerance_secs:

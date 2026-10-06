@@ -66,7 +66,9 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/available-providers",
             get(provider_keys_handler::list_available_providers),
         )
-        // Telnyx webhook (public — Telnyx sends unauthenticated requests)
+        // Telnyx webhook (public — Telnyx sends unauthenticated requests). The credential is the
+        // delivery's own Ed25519 signature, verified by `telnyx_handler::webhook` before any byte of
+        // the event is read (kanban t_0e4ae7b7) — see `crate::security::telnyx_signature`.
         .route("/api/v1/telnyx/webhook", post(telnyx_handler::webhook))
         // Payment webhooks (public — providers send unauthenticated requests)
         .route(

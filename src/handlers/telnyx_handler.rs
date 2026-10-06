@@ -1,5 +1,8 @@
 use axum::{
+    body::Bytes,
     extract::{Extension, Path, State},
+    http::HeaderMap,
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -8,6 +11,7 @@ use uuid::Uuid;
 
 use crate::config::Claims;
 use crate::error::AppError;
+use crate::security::telnyx_signature;
 use crate::state::AppState;
 use crate::validation::check_len;
 
@@ -305,10 +309,77 @@ fn answer_response() -> Json<Value> {
 // ---------------------------------------------------------------------------
 // 1. POST /api/v1/telnyx/webhook — Inbound webhook receiver (public route)
 // ---------------------------------------------------------------------------
+
+/// One log line per refused Telnyx delivery, at ERROR when the refusal is this deployment's own
+/// (a missing/unreadable `TELNYX_PUBLIC_KEY` means inbound voice and delivery events cannot work at
+/// all, and a silent receiver is the failure mode that started this card — t_0e4ae7b7).
+fn log_telnyx_refusal(rejection: &telnyx_signature::TelnyxRejection) {
+    if rejection.is_configuration() {
+        tracing::error!(
+            "Telnyx webhook REFUSED, nothing applied: {} — {}",
+            rejection.reason,
+            rejection.detail
+        );
+    } else {
+        tracing::warn!(
+            "Telnyx webhook refused: {} — {}",
+            rejection.reason,
+            rejection.detail
+        );
+    }
+}
+
+/// `POST /api/v1/telnyx/webhook` — the app's inbound telephony door.
+///
+/// The credential is the delivery's own Ed25519 signature (kanban t_0e4ae7b7): nothing here reads
+/// or applies an event until [`telnyx_signature::verify`] has authenticated the raw bytes against
+/// this deployment's `TELNYX_PUBLIC_KEY`, judged the `telnyx-timestamp` freshness window, and
+/// confirmed the delivery is not a replay of one already processed. The extractor is `Bytes` —
+/// never `Json` — because the signature covers the exact bytes Telnyx sent and re-serialising a
+/// parsed `Value` would change them. A delivery that fails verification is answered `401` (`503`
+/// when this deployment has no key configured at all) and nothing from it is applied.
+///
+/// The route stays on the anonymous allowlist: a webhook cannot present a JWT. The signature IS the
+/// credential — see `crate::auth::route_policy::PUBLIC_ROUTES`.
 pub async fn webhook(
     State(state): State<AppState>,
-    Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let now = telnyx_signature::now_unix();
+    let tolerance = state.config.telnyx_signature_tolerance_secs;
+    let delivery = match telnyx_signature::verify(
+        state.config.telnyx_public_key.as_deref(),
+        &headers,
+        &body,
+        now,
+        tolerance,
+    ) {
+        Ok(delivery) => delivery,
+        Err(rejection) => {
+            log_telnyx_refusal(&rejection);
+            return Ok(rejection.into_response());
+        }
+    };
+    if telnyx_signature::replay_guard().is_replayed(&delivery.signature, now, tolerance) {
+        let rejection = telnyx_signature::replayed_rejection();
+        log_telnyx_refusal(&rejection);
+        return Ok(rejection.into_response());
+    }
+
+    // Only a verified delivery is parsed. An anonymous caller therefore never even gets a JSON
+    // parse verdict out of this route.
+    let payload: Value = serde_json::from_slice(&body)
+        .map_err(|e| AppError::BadRequest(format!("Invalid JSON body: {e}")))?;
+    let response = process_webhook_event(&state, &payload).await?;
+    // Only now — with the effect landed, because any `?` above returned early — is the delivery
+    // remembered, so a delivery whose first attempt failed on the database stays retryable.
+    telnyx_signature::replay_guard().ack(&delivery.signature, now, tolerance);
+    Ok(response.into_response())
+}
+
+/// The receiver's own work, run only after the delivery has been authenticated.
+async fn process_webhook_event(state: &AppState, body: &Value) -> ApiResult<Json<Value>> {
     // -- 1. Parse the Telnyx event
     let event_type = body
         .pointer("/data/event_type")
@@ -352,7 +423,7 @@ pub async fn webhook(
     //        otherwise ack them with empty commands and leave every row frozen at its send-time
     //        status — `delivered_at` NULL forever.
     if event_type.starts_with("message.") {
-        return handle_message_event(&state, &event_type, &body).await;
+        return handle_message_event(state, &event_type, body).await;
     }
 
     // -- 3. Only process inbound calls
@@ -450,7 +521,7 @@ pub async fn webhook(
     //        CoreSwift (BYOK). Shares the one CoreSwift code path
     //        (`coreswift_external::push_lead_to_coreswift`).
     {
-        let st = state.clone();
+        let st = AppState::clone(state);
         let lead_tenant = tenant_id;
         let lead_phone = normalized_caller.clone();
         let called = normalized_called.clone();
@@ -479,7 +550,7 @@ pub async fn webhook(
     //        answer Telnyx is waiting for; what happened lands as a row in the tenant's Messages /
     //        Follow Ups log either way.
     {
-        let st = state.clone();
+        let st = AppState::clone(state);
         let rule_tenant = tenant_id;
         let rule_call = call_id;
         let rule_caller = normalized_caller.clone();
