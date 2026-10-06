@@ -935,6 +935,63 @@ async fn attribute_plan_upgrade(state: &AppState, tenant_id: Uuid, plan_id: Uuid
     .await;
 }
 
+/// Seat `plan_id` as the ACTIVE plan on an EXISTING tenant — the "upgrade-shaped" seat, where the
+/// tenant may already hold a `tenant_plans` row. ONE statement, two callers; `cycle` is the whole
+/// difference between them (kanban t_3c97243d).
+///
+/// The invariant is one plan row per tenant (`tenant_plans_tenant_id_key`), so an upgrade can only be
+/// an UPDATE of that row and an `ON CONFLICT (tenant_id)` upsert is the only correct shape — the
+/// UPDATE arm touches neither `credit_balance` nor `lifetime_credits`, because re-seating a plan must
+/// not reset a balance.
+///
+///   * `Some(c)` — the panel's *Assign plan* action (`admin_assign_plan`): the CALLER names the cycle
+///     and it is written to both arms (the panel asked for exactly that field; the old statement
+///     silently kept the previous cycle, a 2xx that did not change the field the caller asked for).
+///   * `None` — the paid-checkout completion arm for a buyer who ALREADY has an account (kanban
+///     t_3c97243d): **no cycle can be named, so none is manufactured.** The session carries no cycle
+///     (`checkout_sessions` has no such column and its `metadata` is caller-shaped free JSON); this
+///     app's `plans` rows price BOTH terms (`price_monthly` + `price_yearly`, no interval column), so
+///     no value is derivable from what was bought either; and the doors that already write the column
+///     DISAGREE (`'free'` from the signup seat, the caller's value from the panel, `'manual'` from the
+///     billing panel). So the UPDATE arm leaves whatever the row already claims and the INSERT arm
+///     takes the column's own DEFAULT (`'free'`). Recorded as NEEDS-DAVID: before a paid arm can
+///     write a real term, the create path must carry it in the session.
+pub(crate) async fn seat_plan_for_tenant(
+    state: &AppState,
+    tenant_id: Uuid,
+    plan_id: Uuid,
+    cycle: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    match cycle {
+        Some(cycle) => {
+            sqlx::query(
+                r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, status, billing_cycle)
+                   VALUES ($1, $2, $3, 'active', $4)
+                   ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', billing_cycle=$4, updated_at=NOW()"#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(plan_id)
+            .bind(cycle)
+            .execute(&state.pool)
+            .await?;
+        }
+        None => {
+            sqlx::query(
+                r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, status)
+                   VALUES ($1, $2, $3, 'active')
+                   ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', updated_at=NOW()"#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(plan_id)
+            .execute(&state.pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn admin_assign_plan(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -985,22 +1042,10 @@ pub async fn admin_assign_plan(
     // target `(tenant_id)` resolves against `tenant_plans_tenant_id_key`, the unique constraint the
     // live database was missing — without it this statement aborted with Postgres 42P10 and the
     // panel's action answered 500 for every caller (migrations/000020_tenant_plans_one_row_per_tenant.sql
-    // restores it). The UPDATE arm deliberately touches neither `credit_balance` nor
-    // `lifetime_credits`: reassigning a plan must not reset a tenant's balance. `billing_cycle` IS
-    // updated, because the panel sends it and the old statement silently kept the previous cycle
-    // (a 2xx that did not change the field the caller asked for).
-    let tpid = Uuid::new_v4();
-    sqlx::query(
-        r#"INSERT INTO tenant_plans (id, tenant_id, plan_id, status, billing_cycle)
-           VALUES ($1, $2, $3, 'active', $4)
-           ON CONFLICT (tenant_id) DO UPDATE SET plan_id=$3, status='active', billing_cycle=$4, updated_at=NOW()"#,
-    )
-    .bind(tpid)
-    .bind(tenant_id)
-    .bind(plan_id)
-    .bind(billing_cycle)
-    .execute(&state.pool)
-    .await?;
+    // restores it). The statement itself lives in `seat_plan_for_tenant` so this panel action and the
+    // paid-checkout seat (kanban t_3c97243d) cannot drift apart; the panel names the cycle, hence
+    // `Some(billing_cycle)`.
+    seat_plan_for_tenant(&state, tenant_id, plan_id, Some(billing_cycle)).await?;
 
     // Credit the referring affiliate if this is a paid-plan assignment.
     attribute_plan_upgrade(&state, tenant_id, plan_id).await;

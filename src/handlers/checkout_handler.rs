@@ -1343,12 +1343,17 @@ async fn resolve_purchased_plan(
     .await
 }
 
-/// Deliver credentials to the person who just completed a purchase.
+/// Deliver what the customer just paid for, to the person who completed the purchase.
 /// - If no user exists for the address → MINT the account through the ONE writer
 ///   (`auth::signup::create_account`), on the plan the session was opened for, and mail the
 ///   generated password. With no resolvable plan, NOTHING is minted — see the arm below.
-/// - If a user exists WITH a password → send `purchase_confirmed`.
-/// - If a user exists with an EMPTY password → generate one, store it, send the credentials.
+/// - If a user exists → SEAT the plan the session was opened for on that user's own tenant
+///   (kanban t_3c97243d), then: WITH a password send `purchase_confirmed`; with an EMPTY password
+///   generate one, store it, send the credentials. With no resolvable plan nothing is seated (loud).
+///
+/// The one rule both arms obey: a completed payment seats the plan the session was opened for, on
+/// the beneficiary (the delivery address's own account), exactly once — the mint arm seats the tenant
+/// it creates; the existing-user arm seats that user's existing tenant and never the payer's.
 ///
 /// The welcome send uses `template_type = "welcome_credentials"`, NOT `"welcome"`: this is the one
 /// flow where the password is GENERATED for the customer and is unknowable to them, so the email is
@@ -1356,9 +1361,10 @@ async fn resolve_purchased_plan(
 /// default row deliberately carries no password placeholder — the user chose that password two
 /// seconds earlier, and emailing a user-chosen secret only spreads it (card t_46d8d40e).
 ///
-/// `session_account_id` is the tenant that OPENED the session — the payer. It is NOT the minted
-/// account's tenant (the mint keys off the delivery address and mints its own); it is carried here
-/// for the log line that correlates a refusal with the session that caused it.
+/// `session_account_id` is the tenant that OPENED the session — the payer. It is NOT necessarily the
+/// beneficiary's tenant (an address with no user mints its own; an address with a user is seated on
+/// THAT user's tenant); it is carried here for the log lines that correlate a refusal or a seat with
+/// the session that caused it.
 async fn deliver_credentials(
     state: &AppState,
     email: &str,
@@ -1402,6 +1408,54 @@ async fn deliver_credentials(
         let existing_hash: String = user_row.try_get("password_hash")?;
         let existing_name: String = user_row.try_get("name")?;
         let tenant_id: Uuid = user_row.try_get("tenant_id")?;
+
+        // ── Seat the plan the session was opened for on THIS account's own tenant ────────────────
+        // (kanban t_3c97243d.) The third and last place the paid path could drop a purchase. Until
+        // this card, an EXISTING customer who paid for a plan got a receipt and NOTHING else: their
+        // `tenant_plans` row never moved, so they kept the free tier they bought out of. In this app
+        // that is the ONLY upgrade route — the tenant dashboard's "See plans & upgrade" link points at
+        // `coreswiftcrm.com/pricing` and the tenant app has no billing route, while `admin_assign_plan`
+        // is platform-admin only — so nothing else seats what a self-serve buyer paid for.
+        //
+        // The beneficiary is the delivery ADDRESS's own account (`tenant_id`, this user's tenant), the
+        // same rule the mint arm above uses: an existing customer buying for themselves has
+        // `tenant_id == session_account_id`, and an address that has no user is handled by the mint
+        // arm, which seats the plan on the tenant IT creates. Seating both would double-seat.
+        //
+        // No cycle is passed (`None`): the session carries none and this app cannot derive one — see
+        // `plans_handler::seat_plan_for_tenant` for the measured reason. That gap is recorded as
+        // NEEDS-DAVID, deliberately NOT invented here.
+        match purchased_plan {
+            Some((plan_id, plan_slug)) => {
+                crate::handlers::plans_handler::seat_plan_for_tenant(
+                    state, tenant_id, plan_id, None,
+                )
+                .await?;
+                tracing::info!(
+                    tenant = %tenant_id,
+                    user = %user_id,
+                    email = %email,
+                    plan = %plan_slug,
+                    plan_id = %plan_id,
+                    session_tenant = %session_account_id,
+                    "paid checkout seated the plan on the buyer's EXISTING account"
+                );
+            }
+            None => {
+                // Same posture as the mint arm's refusal, one arm over: the payment WAS received, so
+                // the receipt below still goes out, but nothing is seated because the session names no
+                // plan this app can resolve. Loud, with the session's own vocabulary, so the operator
+                // sees a paid session that changed no plan row.
+                tracing::error!(
+                    "PAID CHECKOUT SEAT REFUSED — the session names no plan this app can seat, so the \
+                     EXISTING account's plan row was NOT moved (purchasable_type={:?}, session \
+                     tenant={}, buyer={}): they paid for a plan the app cannot resolve.",
+                    purchasable_type,
+                    session_account_id,
+                    email
+                );
+            }
+        }
 
         if existing_hash.is_empty() || existing_hash.is_empty() {
             // User exists but no password set → generate temp password
