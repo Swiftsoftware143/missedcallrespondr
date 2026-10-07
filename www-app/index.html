@@ -33,12 +33,12 @@ body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;
 .input{border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px;width:100%;font-size:14px;outline:0;box-sizing:border-box;transition:border-color .2s}
 .input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
 .error{background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;font-size:13px;display:none}
-.spinner{animation:spin .6s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.tabs{display:flex;margin-bottom:24px;border-bottom:2px solid #e2e8f0}.tab{flex:1;padding:12px;text-align:center;cursor:pointer;font-size:14px;font-weight:500;color:#94a3b8;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}.tab.active{color:#2563eb;border-bottom-color:#2563eb}.tab-content{display:none}.tab-content.active{display:block}
+.spinner{animation:spin .6s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.tab-content{display:none}.tab-content.active{display:block}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="tabs"><div class="tab active" onclick="switchTab('login')">Sign In</div><div class="tab" onclick="switchTab('register')">Create Account</div></div><div style="text-align:center;margin-bottom:28px">
+  <div style="text-align:center;margin-bottom:28px">
     <h1 style="font-size:24px;font-weight:700;color:#1e293b;margin:0">MissedCall Respondr</h1>
     <p style="color:#64748b;font-size:14px;margin:6px 0 0">Sign in to your account</p>
   </div>
@@ -56,14 +56,7 @@ body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;
     <button type="submit" class="btn" id="submitBtn">Sign In</button>
     <p style="text-align:center;margin:10px 0 0"><a href="/forgot-password.html" style="color:#2563eb;font-size:13px">Forgot password?</a></p>
   </form>  </div>
-  <div class="tab-content" id="registerTab">
-    <form id="registerForm" style="display:flex;flex-direction:column;gap:16px">
-      <div><label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Full Name</label><input type="text" class="input" id="regName" placeholder="John Doe" required autocomplete="name"></div>
-      <div><label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Email</label><input type="email" class="input" id="regEmail" placeholder="you@company.com" required autocomplete="email"></div>
-      <div><label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Password</label><input type="password" class="input" id="regPassword" placeholder="Min 6 characters" required minlength="6" autocomplete="new-password"></div>
-      <button type="submit" class="btn" id="regBtn">Create Free Account</button><p style="text-align:center;font-size:12px;color:#94a3b8;margin:0">No credit card required</p>
-    </form>
-  </div>
+  <p style="text-align:center;margin:14px 0 0"><a href="/register/" style="color:#2563eb;font-size:13px">Create an account</a></p>
   <p style="text-align:center;font-size:12px;color:#94a3b8;margin-top:20px">MissedCall Respondr &copy; 2026 &middot; <a href="/guide.html" target="_blank" rel="noopener" style="color:#2563eb">User Guide</a></p>
 </div>
 
