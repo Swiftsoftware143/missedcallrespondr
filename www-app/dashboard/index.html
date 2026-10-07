@@ -949,6 +949,11 @@ const App = () => {
         ${nav.map(n => html`<div class="nav-item ${S.view===n.id?'active':''}" onClick=${() => { S.view = n.id; renderApp(); }}><span>${n.icon}</span><span class="nav-txt">${n.label}</span></div>`)}
       </div>
       <div class="text-xs text-gray-400 px-3 py-2 truncate">${c.email || ''}</div>
+      <!-- User guide link (kanban t_5af0ddda): the fleet standard puts the user guide at
+           /guide.html on THIS origin and links it from the app shell beside sign-out. Before this
+           the tenant shell linked its own guide nowhere - only the marketing footer did, and it
+           pointed at the other origin. -->
+      <a class="nav-item" id="user-guide-link" href="/guide.html" target="_blank" rel="noopener"><span>📖</span><span class="nav-txt">User Guide</span></a>
       <div class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span>🚪</span><span class="nav-txt">Logout</span></div>
     </div>
     <div class="main">

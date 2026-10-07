@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MissedCall Respondr — Admin Guide</title>
+<style>
+    /* ─── Reset & Base ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      color: #1f2937; background: #f9fafb; line-height: 1.65;
+    }
+    a { color: #e11d48; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; }
+
+    /* ─── Top Bar ─── */
+    .topbar {
+      background: #e11d48; color: #fff; padding: 0.75rem 1.5rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    .topbar h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; }
+    .topbar .badge {
+      margin-left: auto; font-size: .75rem; background: rgba(255,255,255,.2);
+      padding: .25rem .6rem; border-radius: 4px; white-space: nowrap;
+    }
+    .topbar .meta { font-size: .8rem; opacity: .85; }
+
+    /* ─── Layout ─── */
+    .wrapper { display: flex; min-height: calc(100vh - 3.2rem); }
+    nav.sidebar {
+      width: 250px; flex-shrink: 0; background: #fff; border-right: 1px solid #e5e7eb;
+      padding: 1.25rem 0; overflow-y: auto; position: sticky; top: 3.2rem; align-self: flex-start; max-height: calc(100vh - 3.2rem);
+    }
+    nav.sidebar ul { list-style: none; }
+    nav.sidebar li a {
+      display: block; padding: .5rem 1.25rem; font-size: .9rem; color: #374151;
+      border-left: 3px solid transparent; transition: .15s;
+    }
+    nav.sidebar li a:hover, nav.sidebar li a.active {
+      background: #fff1f2; color: #e11d48; border-left-color: #e11d48; text-decoration: none;
+    }
+    nav.sidebar .section-label {
+      padding: .6rem 1.25rem .25rem; font-size: .7rem; text-transform: uppercase;
+      letter-spacing: .06em; color: #9ca3af; font-weight: 600;
+    }
+
+    main.content { flex: 1; padding: 2rem 2.5rem; max-width: 900px; }
+
+    /* ─── Typography ─── */
+    main h2 {
+      font-size: 1.6rem; font-weight: 700; margin: 2rem 0 .75rem; padding-bottom: .4rem;
+      border-bottom: 3px solid #e11d48; color: #111827;
+    }
+    main h2:first-of-type { margin-top: 0; }
+    main h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: #1f2937; }
+    main p, main li { margin-bottom: .65rem; color: #374151; }
+    main ul, main ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+    main ul li::marker { color: #e11d48; }
+
+    /* ─── Callout boxes ─── */
+    .callout {
+      border-radius: 8px; padding: 1rem 1.25rem; margin: 1.25rem 0;
+      border-left: 4px solid; font-size: .92rem;
+    }
+    .callout.info    { background: #ecfdf5; border-color: #10b981; }
+    .callout.warning { background: #fffbeb; border-color: #f59e0b; }
+    .callout.tip     { background: #eff6ff; border-color: #3b82f6; }
+    .callout.danger  { background: #fef2f2; border-color: #e11d48; }
+    .callout strong:first-child { display: block; margin-bottom: .25rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* ─── Code / Inline ─── */
+    code {
+      background: #f3f4f6; padding: .15rem .4rem; border-radius: 4px;
+      font-size: .85em; color: #be123c; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+    pre code {
+      display: block; background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px;
+      overflow-x: auto; font-size: .85rem; margin: 1rem 0;
+    }
+
+    /* ─── Tables ─── */
+    table {
+      width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem;
+    }
+    th, td { padding: .6rem .75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    th { background: #fff1f2; color: #9f1239; font-weight: 600; }
+
+    /* ─── Screenshot placeholder ─── */
+    .screenshot {
+      border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 1.5rem;
+      margin: 1.25rem 0; text-align: center; color: #9ca3af; font-size: .85rem;
+    }
+    .screenshot .icon { font-size: 2rem; margin-bottom: .25rem; }
+
+    /* ─── Feature grid ─── */
+    .feature-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 1rem; margin: 1.25rem 0;
+    }
+    .feature-card {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem;
+      text-align: center; transition: box-shadow .15s;
+    }
+    .feature-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .feature-card .icon { font-size: 1.8rem; margin-bottom: .35rem; }
+    .feature-card strong { display: block; font-size: .95rem; color: #111827; }
+    .feature-card span { font-size: .82rem; color: #6b7280; }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 768px) {
+      .wrapper { flex-direction: column; }
+      nav.sidebar {
+        width: 100%; position: static; max-height: none; border-right: none;
+        border-bottom: 1px solid #e5e7eb; padding: .5rem 0;
+      }
+      nav.sidebar ul { display: flex; flex-wrap: wrap; gap: 0; }
+      nav.sidebar li a { padding: .4rem .8rem; font-size: .82rem; border-left: none; }
+      nav.sidebar .section-label { display: none; }
+      main.content { padding: 1.25rem; }
+      .topbar { padding: .5rem 1rem; }
+      .topbar h1 { font-size: 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Top Bar ─── -->
+<header class="topbar">
+  <h1>📞 MissedCall Respondr</h1>
+  <span class="meta">v1.0 — Admin Guide</span>
+  <span class="badge">admin.missedcallrespondr.com</span>
+</header>
+
+<div class="wrapper">
+
+<!-- ─── Sidebar ─── -->
+<nav class="sidebar">
+  <ul>
+    <li><a href="#system-overview">System Overview</a></li>
+    <li><a href="#quick-reference">Quick Reference</a></li>
+    <li><a href="#email-templates">Email Templates</a></li>
+    <li><a href="#email-provider-system-mail">Email Provider (system mail)</a></li>
+    <li><a href="#provisioning-a-funnelswift-tag-can-create-a-free-account-here">Provisioning: a FunnelSwift tag can create a free account here</a></li>
+    <li><a href="#plans-tiers-and-the-plan-feature-registry">Plans, tiers and the plan feature registry</a></li>
+    <li><a href="#module-handlers">Module Handlers</a></li>
+    <li><a href="#the-served-user-guide-and-the-console-it-must-match">The served user guide (and the console it must match)</a></li>
+    <li><a href="#the-marketing-homepage-www-index-html-half-a-generated-file">The marketing homepage (www/index.html) — half a generated file</a></li>
+    <li><a href="#outbound-sms-the-send-path">Outbound SMS (the send path)</a></li>
+    <li><a href="#response-rules-the-call-path-evaluator">Response Rules (the call-path evaluator)</a></li>
+    <li><a href="#monitoring">Monitoring</a></li>
+    <li><a href="#payments-and-the-paypal-webhook-receiver">Payments and the PayPal webhook receiver</a></li>
+    <li><a href="#deployment">Deployment</a></li>
+  </ul>
+</nav>
+
+<!-- ─── Content ─── -->
+<main class="content">
+
+  <h2 id="system-overview">System Overview</h2>
+  <p>MissedCallRespondr (MCR) handles call tracking, SMS messaging, the response rules that answer a missed call, and the call-back follow-ups those rules queue. All transactional emails use the database-backed template system.</p>
+  <p>There is NO voicemail capability, and as of kanban t_1d4fc956 there is no voicemail SURFACE either: see the Voicemail row of <a href="#module-handlers">Module Handlers</a>. Nothing in the product records, stores, transcribes or plays a voicemail, and no console screen and no guide may claim one.</p>
+  <h2 id="quick-reference">Quick Reference</h2>
+  <ul>
+    <li><strong>Backend:</strong> Rust (Axum) @ port 8088, systemd unit <code>missedcallrespondr</code></li>
+    <li><strong>Database:</strong> PostgreSQL (docker: swift-postgres-1) — <code>missedcallrespondr</code></li>
+    <li><strong>Admin Web App:</strong> Served via app backend on port 8088</li>
+    <li><strong>Repo:</strong> <code>/opt/swift/apps/missedcallrespondr/</code></li>
+  </ul>
+  <h2 id="email-templates">Email Templates</h2>
+  <p>All transactional emails use the <code>email_templates</code> table with <code>{{variable}}</code> placeholder support.</p>
+  <h3>Template Types</h3>
+  <table>
+    <thead><tr><th>Type</th><th>When Sent</th><th>Merge Fields</th></tr></thead>
+    <tbody>
+      <tr><td><code>welcome</code></td><td>New account created</td><td><code>{{name}}</code>, <code>{{email}}</code>, <code>{{password}}</code>, <code>{{app_url}}</code></td></tr>
+      <tr><td><code>purchase_confirmed</code></td><td>Successful payment</td><td><code>{{name}}</code>, <code>{{plan_name}}</code>, <code>{{app_url}}</code></td></tr>
+      <tr><td><code>password_reset</code></td><td>Password reset request</td><td><code>{{name}}</code>, <code>{{token}}</code>, <code>{{app_url}}</code></td></tr>
+    </tbody>
+  </table>
+  <h3>API Endpoints</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/email-templates</code></td><td>List all templates</td></tr>
+      <tr><td>POST</td><td><code>/api/email-templates</code></td><td>Create a template</td></tr>
+      <tr><td>GET</td><td><code>/api/email-templates/:id</code></td><td>Get a template</td></tr>
+      <tr><td>PUT</td><td><code>/api/email-templates/:id</code></td><td>Update a template</td></tr>
+      <tr><td>DELETE</td><td><code>/api/email-templates/:id</code></td><td>Delete a template</td></tr>
+    </tbody>
+  </table>
+  <h3>Template Fields</h3>
+  <ul>
+    <li><strong>name</strong> — display label</li>
+    <li><strong>template_type</strong> — <code>welcome</code> / <code>welcome_credentials</code> / <code>purchase_confirmed</code> / <code>password_reset</code>
+      <ul>
+        <li><code>welcome</code> is the self-serve signup mail: the account owner just chose the password, so this template gets no <code>password</code> value and its default row carries no <code>{password}</code> placeholder.</li>
+        <li><code>welcome_credentials</code> is the welcome mail for flows that GENERATE the password (checkout, where the email is the only place the customer can learn it). This is the one welcome type whose default row contains the <code>{password}</code> block.</li>
+      </ul>
+    </li>
+    <li><strong>subject</strong> — email subject (placeholders are written <code>{variable}</code>, e.g. <code>{app_name}</code>)</li>
+    <li><strong>body</strong> — plain text body</li>
+    <li><strong>html_body</strong> — HTML body</li>
+    <li><strong>is_html</strong> — HTML or plain text delivery</li>
+    <li><strong>is_default</strong> — fallback for this template type</li>
+  </ul>
+  <h3>Delivery Flow</h3>
+  <ol>
+    <li>Triggering event (account created, payment received, reset requested)</li>
+    <li><code>send_template_email()</code> called with template type + variable map</li>
+    <li>DB lookup by type (tenant-scoped → default)</li>
+    <li><code>{variable}</code> placeholders rendered from map</li>
+    <li>Fallback to hardcoded inline if no DB template exists</li>
+    <li>Delivery through the configured provider (see <strong>Email Provider</strong>), which returns the provider's own receipt; a failure is logged at ERROR and recorded on the admin surface</li>
+  </ol>
+  <h3>Default Seeds</h3>
+  <p>Three templates seeded: Welcome Email, Purchase Confirmation, Password Reset.</p>
+  <h2 id="email-provider-system-mail">Email Provider (system mail)</h2>
+  <p>Every transactional email leaves the box through ONE provider config, editable in the admin panel (<strong>Operator Console → 13. Email Provider (system mail)</strong>, <code>admin.missedcallrespondr.com</code>) so it is manageable from a phone.</p>
+  <p><strong>Resolution order:</strong> <code>admin_settings.email</code> (the panel row, key <code>email</code>) <strong>first</strong>, then the <code>EMAIL_API_URL</code> / <code>EMAIL_API_KEY</code> / <code>EMAIL_FROM</code> environment variables (a stopgap; the panel row is the standard). The row's <code>api_key</code> is sealed at rest (<code>enc:v1:</code>), and a masked key returned by GET can be saved back without clobbering the stored credential.</p>
+  <p><strong>Body shape is per provider</strong> — this is not cosmetic: Mailgun takes <code>application/x-www-form-urlencoded</code> (with <code>Authorization: Basic api:&lt;key&gt;</code>), while SendGrid takes JSON <code>{&quot;from&quot;:{&quot;email&quot;:…}}</code> with a Bearer token. Sending JSON to Mailgun authenticates fine and then answers <code>400 {&quot;message&quot;:&quot;from parameter is missing&quot;}</code>; that defect (kanban t_6d575da6) is why the welcome/credentials mail could never be sent. Values are parameter-encoded, so a From or Subject carrying <code>&amp;</code> or <code>=</code> arrives intact.</p>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/v1/admin/email-config</code></td><td>current config (secrets masked), live <code>source</code>, supported providers, last send</td></tr>
+      <tr><td>PUT</td><td><code>/api/v1/admin/email-config</code></td><td>save — <strong>merges</strong> into the stored row, so a blank field is left alone (<code>&quot;&quot;</code> clears it)</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/admin/email-config/test</code></td><td>send a real message to the calling admin's address; returns the provider's true answer</td></tr>
+    </tbody>
+  </table>
+  <p>Providers offered: <code>mailgun</code>, <code>sendgrid</code>, <code>sendiio</code> — exactly the arms the app can deliver through; a save of any other value is rejected rather than stored as a dead setting.</p>
+  <p><code>admin_settings.email_last_send</code> records the outcome of the last <strong>system-mail</strong> send (kind, recipient, provider, receipt) and is shown by the GET above, so "the customer never got the mail" is answerable without reading container logs. A deliberate <em>test</em> send reports its result inline and does not overwrite that row. A failed credential mail is never fatal to account creation — the loud <code>account created but the WELCOME/CREDENTIALS EMAIL FAILED</code> line plus <code>email_last_send</code> are the signal.</p>
+  <h2 id="provisioning-a-funnelswift-tag-can-create-a-free-account-here">Provisioning: a FunnelSwift tag can create a free account here</h2>
+  <p>A lead captured in FunnelSwift can be tagged with <strong>MissedCall Respondr — Free</strong>. When this app's provisioning switch is ON, that tag creates a real, log-in-able free account for the business here: its own workspace, an owner login whose password is emailed to the contact address, and a plan row they can upgrade from inside the app.</p>
+  <p><strong>Where:</strong> the admin panel (<code>admin.missedcallrespondr.com</code>) → <strong>Provisioning</strong> in the left navigation. Two controls:</p>
+  <table>
+    <thead><tr><th>Control</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Create free accounts from tags</strong> (Turn on / Turn off)</td><td>The master switch. Stored as <code>admin_settings.provision_from_tags_enabled</code>. <strong>Ships OFF</strong>, and while it is off every request is refused with <code>403 refused / provisioning_disabled</code> and nothing is created for anyone.</td></tr>
+      <tr><td><strong>Plan for new accounts</strong> (dropdown + Save plan)</td><td>The plan a tagged account starts on, stored as <code>admin_settings.provision_entry_plan_slug</code> (default <code>free</code>). Only this app's own free plans — active, <code>price_monthly = 0</code> AND legacy <code>price = 0</code> — are offered, so a tag can never seat a paying plan.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>The receiver FunnelSwift calls</strong> (it is a machine door, not a page):</p>
+  <pre><code>POST /api/v1/internal/provision-free-account
+Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
+{ &quot;source&quot;:&quot;funnelswift&quot;, &quot;source_tenant_id&quot;:&quot;…&quot;,
+  &quot;tag&quot;:{&quot;name&quot;:&quot;MissedCall Respondr — Free&quot;,&quot;plan_slug&quot;:&quot;free&quot;},
+  &quot;contact&quot;:{&quot;email&quot;:&quot;…&quot;,&quot;first_name&quot;:&quot;…&quot;,&quot;last_name&quot;:&quot;…&quot;,&quot;company&quot;:&quot;…&quot;,&quot;phone&quot;:&quot;…&quot;},
+  &quot;idempotency_key&quot;:&quot;&lt;lead uuid&gt;:missedcallrespondr&quot; }
+
+201 { &quot;status&quot;:&quot;provisioned&quot;,    &quot;account_id&quot;:&quot;…&quot;, &quot;plan_slug&quot;:&quot;free&quot;, &quot;login_email&quot;:&quot;…&quot; }
+200 { &quot;status&quot;:&quot;already_exists&quot;, &quot;account_id&quot;:&quot;…&quot; }
+403 { &quot;status&quot;:&quot;refused&quot;,        &quot;reason&quot;:&quot;provisioning_disabled&quot; }
+422 { &quot;status&quot;:&quot;invalid&quot;,        &quot;reason&quot;:&quot;placeholder_email&quot; | &quot;no_free_plan&quot; }</code></pre>
+  <p>Rules that matter operationally:</p>
+  <ul>
+    <li><strong>The account is the same shape the public signup mints</strong> — one <code>tenants</code> row, one <code>account_owner</code> <code>users</code> row, one <code>tenant_plans</code> row on the entry plan with the free tier's 50 starter credits. Both doors call the one shared writer (<code>src/auth/signup.rs</code>), so they cannot drift, and the tagged business can upgrade in place like any self-serve customer.</li>
+    <li><strong>Idempotent on the email address</strong> (case-insensitive): a second delivery answers <code>200 already_exists</code> and mints nothing, so a retried or duplicated FunnelSwift delivery cannot create a second workspace.</li>
+    <li><strong>No workspace is created for an address that cannot be a mailbox</strong>, and the workspace is named after the contact's company (or a neutral "&lt;name&gt;'s Workspace") — never after the tag or the sending app.</li>
+    <li><strong>The password is generated here and mailed</strong> through the app's <code>welcome_credentials</code> template. A send failure does not fail the request: it is logged loudly as <code>account created but the CREDENTIALS EMAIL FAILED …</code> and recorded in <code>admin_settings.email_last_send</code>.</li>
+    <li><strong>Nothing is deleted when a tag is removed</strong> on the FunnelSwift side. Removing a tag never cancels an account.</li>
+  </ul>
+  <h2 id="plans-tiers-and-the-plan-feature-registry">Plans, tiers and the plan feature registry</h2>
+  <p>Four live tiers: <strong>Enterprise</strong> (the TOP tier), Pro, Pro Monthly and Free. "Top" is established from LIVE data, not from the name — the first ACTIVE row in the panel's own order (<code>sort_order</code>, then <code>price_monthly</code>, then <code>price</code>, then slug). The registry catalogue reports the winner as <code>top_plan</code>.</p>
+  <p><strong>The standing rule (David, 2026-09-23): the top tier gets everything.</strong> Every key the app's feature registry defines must be granted on the top tier. Two keys were granted by no plan at all before this was applied, which meant the gate REFUSED the top tier: <code>has_calendar</code> (the Calendar flag) and <code>bring_your_own_key</code> (Bring Your Own Telnyx Key).</p>
+  <h3>Where the plan × feature controls are</h3>
+  <p>Operator console → <strong>"3b. Plan Feature Registry (every gated feature × every plan)"</strong>. It lists every registry key with its current value for EVERY plan in one table, plus the columns <code>what</code>, <code>kind</code>, <code>if_unset</code> (what a missing value means) and <code>enforced_by</code> (the route that enforces it).</p>
+  <p>Three controls:</p>
+  <table>
+    <thead><tr><th>Control</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Set plan feature</strong></td><td>Writes one registry key on one plan. Fields: <code>plan</code> (slug, e.g. <code>enterprise</code>), <code>feature</code> (a key from the <code>feature</code> column), <code>value</code>. The response echoes the value the gate now resolves.</td></tr>
+      <tr><td><strong>Grant the TOP tier every missing registry key</strong></td><td>Re-applies the standing rule, gap-filling only: a key the top tier already grants is left untouched (a cap you set is never raised to unlimited by pressing it). Safe to press again — a second press grants nothing.</td></tr>
+      <tr><td><strong>Show the raw catalogue (JSON)</strong></td><td>The same data as JSON: <code>registry</code> (the keys), <code>plans</code> (values + <code>sources</code>), <code>grant_matrix</code>, <code>superset_ok</code>/<code>superset_violations</code>.</td></tr>
+    </tbody>
+  </table>
+  <h3>The value vocabulary (identical in the panel, the API and the gate)</h3>
+  <ul>
+    <li><strong><code>-1</code></strong> = unlimited / granted</li>
+    <li><strong><code>0</code></strong> = NOT available on this plan — the gate refuses the action (402)</li>
+    <li><strong><code>N</code> &gt; 0</strong> = a cap of N (the gate refuses once usage reaches N)</li>
+    <li>On/off features (<code>has_calendar</code>, <code>bring_your_own_key</code>): non-zero = on, <code>0</code> = off</li>
+  </ul>
+  <p><strong><code>if_unset</code> matters.</strong> A key with no value at all is NOT a denial: a <em>limit</em> with no row is allowed (the gate is inert), while an <em>on/off</em> feature with no row is REFUSED. That asymmetry is why <code>has_calendar</code> refused every tier: nobody had granted it anywhere.</p>
+  <p>Plan keys are stored in two places and the panel writes the right one for you: <code>feature_limits</code> (one row per plan × key — the panel-managed grant) for most keys, and the plan's own column (<code>max_leads</code>) where the plan model has one. An explicit <code>features.&quot;&lt;key&gt;&quot;</code> override written with "Set plan features (JSON)" resolves BEFORE a column, so if one exists the Set-plan-feature response returns a <code>warning</code> telling you so.</p>
+  <h3>"Set plan features (JSON)" — object-shaped plans only</h3>
+  <p>That action merges raw JSON into <code>plans.features</code>. Enterprise and Pro carry <code>features</code> as a JSON <strong>ARRAY</strong> of marketing tags, and merging an object into an array appends an element no gate can read — so the action now answers <strong>400</strong> instead of pretending to save. Grant registry keys with <strong>Set plan feature</strong> in section 3b.</p>
+  <h3>What the registry does NOT cover</h3>
+  <p>Nothing advertised, as of t_b578b169 + t_ab963d11 + t_66cfccff. Every plan limit that no gate read is resolved:</p>
+  <table>
+    <thead><tr><th>key</th><th>where its value lives</th><th>state</th></tr></thead>
+    <tbody>
+      <tr><td><code>max_tags</code></td><td><code>plans.max_tags</code> column (Free 10 / Pro 50 / Pro Monthly 50 / Enterprise -1)</td><td><strong>enforced</strong> on <code>POST /api/v1/tags</code> — the 11th tag on Free is refused with 402 <code>Tags limit reached (10/10)…</code>. Releasing a tag (DELETE is a hard delete) frees the slot. Set it with <strong>Set plan feature</strong> (storage <code>plans.max_tags</code>).</td></tr>
+      <tr><td><code>max_phone_numbers</code></td><td><code>plans.features</code> (Free 1 / Pro Monthly 5; Pro and Enterprise declare nothing, so unset ⇒ allowed)</td><td><strong>enforced</strong> on <code>POST /api/v1/telnyx/numbers</code>, before the provider is called. Counts ACTIVE numbers only, so a released number frees the slot. Set it with <strong>Set plan feature</strong> (storage <code>feature_limits</code>).</td></tr>
+      <tr><td><code>max_users</code></td><td><code>plans.features-&gt;&gt;&#x27;max_users&#x27;</code> (Free 1 / Pro Monthly 5)</td><td><strong>retired</strong> — the value was removed from the plan data (migration <code>000022</code>). This app has no surface that adds a user to an existing tenant (every signup/provisioning path creates a tenant's FIRST user, before a plan is attached), so a seat cap could never be reached. <code>GET /api/v1/me/usage</code> still reports the live user count; no plan pretends to cap it. If seat-selling is wanted later it needs a team-invite surface first, then a registry key.</td></tr>
+      <tr><td><code>max_api_keys</code></td><td><code>feature_limits</code> row <code>Enterprise = -1</code> (and the <code>api_keys</code> table the key counted)</td><td><strong>retired</strong> — migration <code>000027</code> deletes the row and drops the table. The API-key ROUTES were deleted in t_f06b1710 (no auth path in this crate ever read <code>api_keys</code>, so a minted key authenticated nothing); this closed the DATA and the store behind them. Measured before the change: <code>api_keys</code> held <strong>0 rows</strong>, its only reader was <code>count_usage</code> (removed in the same pass) and it had no inbound FK; <code>plans.features</code> mentioned no api key on any plan. Panel-side, the key had already left <code>src/feature_registry.rs</code>, so the matrix never rendered it and <strong>Set plan feature</strong> answers 400 <code>Unknown feature key &#x27;max_api_keys&#x27;</code> — and the <strong>Grant the TOP tier every missing registry key</strong> button cannot re-seed it (it fills REGISTRY keys only). The row was a limit for a capability with no route: plan DATA, not a control.</td></tr>
+      <tr><td><code>max_workflows</code></td><td><code>feature_limits</code> row <code>Enterprise = -1</code> (and the <code>workflows</code> / <code>workflow_steps</code> tables the key counted)</td><td><strong>retired</strong> — migration <code>000028</code> deletes the row and drops both tables. The <code>workflows</code> module was an <strong>operator-console control over an inert store</strong>: <code>POST|GET /api/v1/workflows</code> + <code>GET|PUT|DELETE /api/v1/workflows/:id</code> + the activate/deactivate arms were plain CRUD and NOTHING in the crate ever evaluated a workflow (no engine, no cron, no webhook arm, no <code>response_rule_eval</code> arm), so the modal's three triggers — <code>missed_call</code>, <code>voicemail</code>, <code>sms</code> — all named events nothing dispatched; <code>voicemail</code> had already been retired by <code>000026</code> and is not a surface this app has. The store held <strong>0 rows</strong> (<code>workflow_steps</code> too), <code>plans.features</code> mentioned it on no plan, and the modal itself could not define a step (<code>{name, trigger_event}</code> only). The app's real automation is <strong>Response Rules</strong>, which IS evaluated on every inbound call (see the Response Rules row). Measured after: the registry lists 17 keys (was 18), the panel's Workflows screen is gone, and <strong>Set plan feature</strong> answers 400 <code>Unknown feature key &#x27;max_workflows&#x27;</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>A plan value no gate reads is a setting, not a control — if you add a limit to the plan model, add it to <code>src/feature_registry.rs</code> and call the gate on the route that ADDS the counted row, or the two anti-drift tests in that file will fail the build (that is deliberate). The registry is also the only thing the console can render or grant: a <code>feature_limits</code> row whose key is not in the registry is invisible in the plan matrix and refused by every write path, i.e. dead data — which is exactly how the <code>max_api_keys</code> row survived one card longer than the route it described.</p>
+  <h2 id="module-handlers">Module Handlers</h2>
+  <table>
+    <thead><tr><th>Module</th><th>Handler</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td>API Keys</td><td><strong>DELETED (kanban t_f06b1710), retired to the data (kanban t_ab963d11)</strong></td><td>The handler, its module, <code>models/api_key.rs</code> and <code>POST|GET /api/v1/api-keys</code> + <code>PUT|DELETE /api/v1/api-keys/:id</code> are GONE. Measurement: NO auth path in this crate read <code>api_keys</code> (no <code>x-api-key</code> anywhere, no key-checking middleware; the only reader was <code>features::count_usage</code> for the plan quota), so a key minted by that route authenticated nothing anywhere — a credential no endpoint would accept. The residue t_f06b1710 carded is CLOSED: migration <code>000027_retire_api_keys.sql</code> deletes the last <code>feature_limits</code> row that sold <code>max_api_keys</code> (Enterprise -1) and DROPs the <code>api_keys</code> table (it held 0 rows, so "keep it for history" preserved nothing); <code>migrations/000002_api_keys.sql</code>, its only creator, is deleted and unregistered from the boot runner, so a fresh install never builds it either. <code>count_usage</code>'s api arm went with it.</td></tr>
+      <tr><td>Call Logs</td><td><code>call_log_handler</code></td><td><code>GET /api/v1/call-logs</code> still reads <code>call_logs</code> (the billing log with cost — its <code>recorded</code> column was dropped with the voicemail surface, kanban t_1d4fc956). <code>GET /api/v1/call-logs/export</code> now reads <strong><code>inbound_calls</code></strong> — the table the console's Calls screen lists — and emits that screen's own columns, so the CSV cannot disagree with the rows on screen (kanban t_f06b1710: it used to serve <code>call_logs</code> while the screen rendered <code>inbound_calls</code>; the webhook writes the two 1:1, but <code>POST /api/v1/calls</code> can add rows only the screen's table has)</td></tr>
+      <tr><td>Contacts</td><td><code>contact_handler</code></td><td>Contact management. The console's Contacts screen now creates (<code>POST /api/v1/contacts</code> — the only caller of the <code>max_contacts</code> gate), edits (<code>PUT /api/v1/contacts/:id</code>) and deletes (<code>DELETE /api/v1/contacts/:id</code>) rows (kanban t_f06b1710)</td></tr>
+      <tr><td>Custom Fields</td><td><code>contact_custom_field_handler</code></td><td>Custom contact fields</td></tr>
+      <tr><td>Dashboard</td><td><code>dashboard_handler</code></td><td>Stats and overview</td></tr>
+      <tr><td>Follow-ups</td><td><code>follow_up_handler</code></td><td>The call-back queue (<code>follow_ups</code>). Rows are written by <code>POST /api/v1/calls/:id/respond</code> and by a <code>callback</code> response rule, and the console's Follow-ups screen now also creates (<code>POST /api/v1/follow-ups</code> — the only caller of the <code>max_follow_ups</code> gate), closes (<code>PUT /api/v1/follow-ups/:id</code>, status <code>completed</code> + <code>completed_at</code>) and deletes (<code>DELETE /api/v1/follow-ups/:id</code>) rows. Its first column resolves <code>f.call_id</code> against <code>GET /api/v1/calls</code>; it used to read <code>f.contact_name || f.contact_id</code>, NEITHER of which exists on <code>FollowUp</code>, so every row painted <code>-</code> (kanban t_f06b1710)</td></tr>
+      <tr><td>Integrations</td><td><code>integration_handler</code></td><td>Third-party integrations</td></tr>
+      <tr><td>Messages</td><td><code>message_handler</code></td><td>SMS sending (Telnyx transport) + the message log</td></tr>
+      <tr><td>Message Templates</td><td><code>message_template_handler</code></td><td>Saved message texts (a library — nothing sends one; no <code>type</code> column exists)</td></tr>
+      <tr><td>Plans</td><td><code>plans_handler</code></td><td>Plan tier management</td></tr>
+      <tr><td>Portfolio</td><td><code>portfolio_handler</code></td><td>Multi-account management</td></tr>
+      <tr><td>Provider Keys</td><td><code>provider_keys_handler</code></td><td>Telnyx/etc provider keys</td></tr>
+      <tr><td>Response Rules</td><td><code>response_rule_handler</code> (store) + <code>response_rule_eval</code> (the evaluator)</td><td>What the service does automatically on an inbound call</td></tr>
+      <tr><td>Settings</td><td><strong>DELETED (kanban t_f06b1710)</strong></td><td>The handler, its module, <code>models/setting.rs</code> and the routes <code>GET</code>/<code>PUT /api/v1/settings</code> are GONE. Measurement: <code>tenant_settings</code> had exactly one reader (the handler's own GET) and no writer outside the handler, so a Settings panel could only have saved keys nothing reads — a decorative control. The console's Profile screen is unchanged and writes <code>/api/v1/auth/profile</code> + <code>/api/v1/auth/password</code></td></tr>
+      <tr><td>Telnyx</td><td><code>telnyx_handler</code></td><td>Telnyx API bridge + the number inventory: <code>GET /api/v1/telnyx/numbers</code> (ACTIVE rows only), <code>POST /api/v1/telnyx/numbers</code> (the <code>max_phone_numbers</code> gate; buys on the platform credential, or registers a number the tenant already owns when BYOK is on) and <code>DELETE /api/v1/telnyx/numbers/:id</code> (soft delete = release, frees the plan slot). The console's Phone Numbers screen now adds and releases (kanban t_f06b1710); BYOK itself is Pro/Enterprise-only, so on Free every add goes through the platform credential — with none saved the route answers 500 <code>Telnyx not configured by admin</code> and adds nothing</td></tr>
+      <tr><td>Triggers</td><td><code>triggers_handler</code></td><td>Trigger automation rules</td></tr>
+      <tr><td>Voicemail</td><td><strong>REMOVED (kanban t_1d4fc956 — the dead surface t_b4cbe8bc measured)</strong></td><td>The <code>voicemail_handler</code>, <code>models/voicemail.rs</code>, the <code>voicemails</code> table and all three routes (<code>GET /api/v1/voicemails</code>, <code>GET|PUT /api/v1/voicemails/:id</code>, <code>GET /api/v1/calls/:id/voicemail</code>) are GONE; migration <code>000026_retire_voicemails.sql</code> drops the table and its orphan columns on live. Why retire rather than wire: <code>INSERT INTO voicemails</code> = 0 hits anywhere, <code>SELECT count(*) FROM voicemails</code> = 0, the webhook handled ONLY <code>call_received</code>/<code>call_initiated</code> (so the Telnyx <code>record_start</code> on the handled arm was never captured — that command is retired too), there is NO speech-to-text integration in this crate, and no served screen ever read the table. Wiring would mean inventing an STT provider, a transcription-status vocabulary and a console screen for a surface no tenant can currently reach. The orphan writers went with it: <code>inbound_calls.recording_url</code>, <code>inbound_calls.voicemail_url</code> and <code>call_logs.recorded</code> (whose only writer hardcoded <code>false</code>). <code>POST|PUT /api/v1/calls</code> no longer accepts those body fields (unknown fields are ignored)</td></tr>
+      <tr><td>Workflows</td><td><strong>RETIRED (kanban t_66cfccff)</strong></td><td>The <code>workflows_handler</code>, <code>models/workflow.rs</code>, the <code>workflows</code> / <code>workflow_steps</code> tables and every route (<code>GET|POST /api/v1/workflows</code>, <code>GET|PUT|DELETE /api/v1/workflows/:id</code>, <code>POST /api/v1/workflows/:id/activate</code>, <code>POST /api/v1/workflows/:id/deactivate</code>) are GONE, and the operator console's <strong>Workflows</strong> screen went with them. Migration <code>000028_retire_workflows.sql</code> drops both tables and deletes the <code>max_workflows</code> plan row; <code>migrations/000011_schema_fix.sql</code> no longer creates them, so a fresh install never builds them either. Why retire rather than wire: the store was plain CRUD with <strong>no evaluator anywhere in the crate</strong> (no engine, no cron, no webhook action, no <code>response_rule_eval</code> arm), so all three trigger options the modal offered (<code>missed_call</code>, <code>voicemail</code>, <code>sms</code>) named events nothing dispatched; <code>SELECT count(*)</code> = 0 for both tables; and the modal could not define a step at all (it posted <code>{name, trigger_event}</code> only, so every creatable workflow had zero steps). The product's real automation is <strong>Response Rules</strong> — <code>handlers/response_rule_eval.rs</code> walks a tenant's active rules in priority order on every inbound call and fires the first match (<code>sms</code> / <code>callback</code>) — and it is untouched by this retirement. <code>GET /api/v1/me/usage</code> no longer reports a <code>workflows</code> count, and <code>features::count_usage</code>'s <code>workflows</code> arm is gone with the tables</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Affiliates are not a module of this app (kanban t_5deebeb1).</strong> The affiliate system lives in FunnelSwift; this app only <em>connects</em> to it, over two outbound <code>x-internal-key</code> wires, with no local affiliate store involved: <code>plans_handler::notify_funnelswift_upgrade</code> POSTs <code>{FUNNELSWIFT_URL}/api/v1/internal/affiliate/upgrade-event</code> when a tenant moves to a PAID plan, and <code>checkout_handler</code> POSTs <code>{FUNNELSWIFT_URL}/api/v1/webhooks/conversion</code> when a checkout completes with referral metadata. The former in-app <code>affiliates_handler</code> CRUD (and its <code>/api/v1/affiliates</code> routes and admin-console panel actions) is retired.</p>
+  <h2 id="the-served-user-guide-and-the-console-it-must-match">The served user guide (and the console it must match)</h2>
+  <p><code>www/guide.html</code> is a SERVED artifact, not just documentation: <code>bin/publish-missedcallrespondr-frontend.sh</code> installs the repo copy byte-for-byte into the served roots, and the app's own marketing footer links it:</p>
+  <table>
+    <thead><tr><th>repo source</th><th>served destination(s)</th></tr></thead>
+    <tbody>
+      <tr><td><code>www/guide.html</code></td><td><code>/opt/swift/nginx/www/missedcall/guide.html</code> (missedcallrespondr.com/guide) <strong>and</strong> <code>/opt/swift/nginx/www-app/missedcall/guide.html</code> (app.missedcallrespondr.com/guide)</td></tr>
+    </tbody>
+  </table>
+  <p><strong>The console is the spec.</strong> Every screen claim in the guide must be checkable against the served tenant shell <code>www-app/dashboard/index.html</code>, whose nav is exactly <code>Overview / Calls / Phone Numbers / Response Rules / Templates / Messages / Follow-ups / Contacts / Tickets / Integrations / Profile</code>. A guide step that names a control that shell does not render is a defect in the guide (kanban t_b4cbe8bc: the whole Call Log filter/detail section and the whole Voicemails section did exactly that, and were retired).</p>
+  <p>Screens with write controls, so the guide may promise them (kanban t_f06b1710): <strong>Calls</strong> (table + Refresh + <strong>Export CSV</strong> + per-row Respond), <strong>Phone Numbers</strong> (+ Add Number, per-row Release), <strong>Response Rules</strong> (add/edit/delete), <strong>Templates</strong> (add/edit/delete), <strong>Messages</strong> (Send), <strong>Follow-ups</strong> (+ New Follow-up, Mark done, Delete), <strong>Contacts</strong> (+ New Contact, per-row Fields / Edit / Delete, custom-field definitions), <strong>Tickets</strong> (+ New Ticket, Edit), <strong>Integrations</strong> (connect/disconnect/test), <strong>Profile</strong> (Save profile, Update password).</p>
+  <p>Still read-only by design: <strong>Overview</strong> (counters + credits) and the <strong>Calls</strong> row detail — there is no search box, no status filter, no date range and no call detail panel on Calls.</p>
+  <h2 id="the-marketing-homepage-www-index-html-half-a-generated-file">The marketing homepage (<code>www/index.html</code>) — half a generated file</h2>
+  <p><code>www/index.html</code> (served at missedcallrespondr.com) is the one served page on this app with TWO owners, and they do not overlap:</p>
+  <table>
+    <thead><tr><th>part</th><th>owner</th><th>how to change it</th></tr></thead>
+    <tbody>
+      <tr><td><code>&lt;head&gt;</code> — title, description, keywords, OG, canonical, favicon, schema, GA/GTM, head/body scripts</td><td>the <code>admin_settings.missedcallrespondr_site</code> row</td><td><code>UPDATE</code> the row, then run <code>/opt/swift/bin/mcr-site-apply.sh</code> (cron <code>4-59/5</code>). An edit to the head <strong>in the file</strong> is reverted within one tick.</td></tr>
+      <tr><td>the authored <code>&lt;body&gt;</code> — hero, feature cards, "How It Works", pricing</td><td>the file itself</td><td>edit the SERVED file and the repo mirror identically, then commit both and <code>--record</code> the frontends copy. The applier preserves the body and re-injects only the head, so <code>mcr-site-apply.sh --check</code> stays <code>unchanged</code>.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>The selling copy is a claim surface and is censused exactly like the guide is</strong> (kanban t_a31e61d8). Every feature card, "How It Works" step and pricing tier must be checkable against the console nav above, a mounted route, or a live catalogue row:</p>
+  <ul>
+    <li>pricing tiers are asserted <strong>bidirectionally against <code>plans</code> + <code>feature_limits</code> + the plan's own <code>features</code> JSON</strong>, read over the app's <code>DATABASE_URL</code>. The live catalogue is <code>Free</code> (50 included credits, <code>max_phone_numbers</code> 1), <code>Pro Monthly</code> ($49.00/mo, 5,000 included credits, <code>max_phone_numbers</code> 5) and <code>Enterprise</code> (unlimited, <code>white_label</code> + <code>priority_support</code>). There is no <code>Starter</code> plan and no $29 tier: a tier name or a number that is not in those rows is a defect.</li>
+    <li>a claim about the integration catalogue must exist in <code>available_providers</code> (10 rows: coreswift, deepseek, mailgun, nexweave, openai, sam_gov, sendgrid, sendiio, telnyx, twilio). There is no Webhook, Zapier or Slack entry, and there is no public API-key surface (<code>x-api-key</code> auth was retired in t_f06b1710).</li>
+    <li>there is no scheduler and no drip: response rules act <strong>once</strong>, on the inbound call, so no page may promise a follow-up "in 24 hours".</li>
+  </ul>
+  <p>Retired from the body in t_a31e61d8, each replaced by the real screen it was standing in front of: "Smart Lead Routing" (business hours / area-code / keyword routing) → <strong>Call-Back Queue</strong>; "Call Analytics Dashboard" (charts, conversion rate) → <strong>Call Log &amp; CSV Export</strong>; "Auto-Replies &amp; Follow-Ups" (reply sequences) → <strong>Phone Numbers on Telnyx</strong>; "Integrates With Your Tools" (Webhooks/Zapier/Slack) → <strong>Connect Your Own Providers</strong>. <code>www/index.html.marketing</code>, an unreferenced served duplicate of the same page, was deleted from both repos with a <code>location = /index.html.marketing { return 404; }</code> rule.</p>
+  <h2 id="outbound-sms-the-send-path">Outbound SMS (the send path)</h2>
+  <p><code>POST /api/v1/messages</code> (kanban t_2ed95642) is the tenant console's Send Message form and the only writer of <code>messages</code> rows. It now transmits: an <code>outbound</code> message calls <code>POST https://api.telnyx.com/v2/messages</code> with the stored <code>telnyx_config.api_key</code> + <code>messaging_profile_id</code> and the caller's own ACTIVE <code>phone_numbers</code> number as <code>from</code>.</p>
+  <ul>
+    <li><strong>Configuration.</strong> Admin console -&gt; <em>Telnyx Config &amp; Numbers</em> -&gt; <em>Save Telnyx config</em> (<code>PUT /api/v1/admin/telnyx-config</code>, fields <code>api_key</code>, <code>profile_id</code>, <code>messaging_profile_id</code>). With no <code>api_key</code> or no <code>messaging_profile_id</code> the route answers <code>503</code> (<code>Text delivery is not configured: …</code>) and writes <strong>no</strong> row — nothing was attempted, so there is nothing to record.</li>
+    <li><strong>The stored status is the provider's answer, never the request.</strong> <code>queued</code> on an accepted send; <code>sent</code> / <code>delivered</code> only when Telnyx's own <code>to[].status</code> says so; <code>failed</code> on a refusal. <code>sent_at</code> is NULL until the provider reports a hand-off and <code>delivered_at</code> stays NULL until a delivery event says otherwise. A word this app has not seen is stored as <code>queued</code> (accepted, nothing claimed).</li>
+    <li><strong>A refusal is stored before the caller is told.</strong> A non-2xx answer (or a failure status inside a 2xx) becomes a <code>failed</code> row carrying Telnyx's own words, and the caller gets <strong>424</strong> with that reason; the console shows it and reloads the log. <code>provider_message_id</code> holds Telnyx's message id. (424 Failed Dependency, not 502: Cloudflare replaces an origin <strong>502/504</strong> with its own error page — measured on this host 2026-10-02 — so a 502 would hand the operator a JavaScript parse error instead of Telnyx's sentence. 4xx bodies pass through the edge verbatim.)</li>
+    <li><strong>Delivery events.</strong> <code>POST /api/v1/telnyx/webhook</code> (public) applies the MESSAGE events — <code>message.sent</code> moves a row to <code>sent</code>, <code>message.finalized</code> to <code>delivered</code> (setting <code>delivered_at</code>) or <code>failed</code> — matched by <code>provider_message_id</code>. A <code>delivered</code> row is terminal; an event whose id matches no row changes nothing (including every <code>message.received</code>, which this app does not store).</li>
+    <li><strong>Every delivery is verified before a byte of it is read</strong> (kanban t_0e4ae7b7). The receiver is anonymous because Telnyx cannot present a session — its credential is the delivery's own Ed25519 signature: base64 <code>telnyx-signature-ed25519</code> over the raw bytes <code>&lt;telnyx-timestamp&gt;|&lt;body&gt;</code>, against the account public key from Telnyx Mission Control, with a 5-minute freshness window and a replay guard. A delivery that fails any arm is answered <strong>401</strong> (missing / mismatched signature, tampered body, stale or unreadable stamp, replay) and <strong>nothing is applied</strong>. There is no universal Telnyx key, so the receiver is configured per deployment: set <strong><code>TELNYX_PUBLIC_KEY</code></strong> (base64, 32 bytes) in the deploy env. <strong>It fails CLOSED</strong> — while that key is unset every delivery, correctly signed or not, is refused <code>503 telnyx_verification_not_configured</code> and logged at ERROR; <code>TELNYX_SIGNATURE_TOLERANCE_SECS</code> (clamped 30..86400, default 300) widens the freshness window without a rebuild. The boot log names the posture.</li>
+    <li><strong><code>TELNYX_API_BASE</code></strong> overrides the API host (default <code>https://api.telnyx.com</code>), exactly as <code>PAYPAL_API_BASE</code> does for the PayPal verify call. It exists for acceptance runs against a stub server; unset behaviour is byte-identical to the production host.</li>
+    <li><strong>Inbound</strong> is a recording arm, not a transport: a hand-recorded <code>direction=inbound</code> row is stored <code>logged</code> with <code>sent_at</code> NULL and nothing is transmitted.</li>
+  </ul>
+  <h2 id="response-rules-the-call-path-evaluator">Response Rules (the call-path evaluator)</h2>
+  <p><code>response_rules</code> (kanban t_31f9cf38) is <strong>evaluated</strong>, not just stored. Before this change it was CRUD-only: the consoles offered the screen and both guides promised "the rule is evaluated on every inbound call", while no inbound-call path read the table — no rule had ever fired.</p>
+  <ul>
+    <li><strong>Where it runs.</strong> <code>POST /api/v1/telnyx/webhook</code> (<code>telnyx_handler::webhook</code>), on <code>call_received</code>/<code>call_initiated</code>, after the tenant is resolved by the CALLED number, the credit is taken and <code>inbound_calls</code> / <code>call_logs</code> are written. The evaluation is SPAWNED (like the CoreSwift lead push), so a slow provider call can never delay the call-control answer Telnyx is waiting for. The Ed25519 check above runs BEFORE any of that: an unverified delivery never reaches this arm.</li>
+    <li><strong>The call-control reply is <code>{&quot;commands&quot;:[{&quot;type&quot;:&quot;answer&quot;}]}</code></strong> (kanban t_6e679d39). The handled arm answers the call and asks Telnyx for nothing else; the <code>gather_using_audio</code> command it used to carry is retired, judged by measurement: (a) nothing consumed the digits — the receiver matches only <code>call_received</code>/<code>call_initiated</code>, so the <code>call.gather.ended</code> event Telnyx sends when a key is pressed (the Telnyx OpenAPI spec: its payload carries <code>digits</code> and a <code>status</code> of valid|invalid|call_hangup|cancelled|cancelled_amd|timeout) was acked with <code>{&quot;commands&quot;:[]}</code> and the digit reached no route, task or row; (b) there was nothing to press it for — a gather with neither <code>audio_url</code> nor <code>media_name</code> plays no prompt, so the caller hears silence and is never told to press anything, and a census of every served root plus the <code>www*</code> assets for gather/DTMF/IVR/keypad/press-a-digit found no promise anywhere; (c) the command was not the provider's shape — the spec defines no <code>options</code> key (0 occurrences in the OpenAPI document) and the option names sent (<code>max_digits</code>, <code>inter_digit_timeout_ms</code>) do not exist in it (the documented keys are <code>maximum_digits</code> / <code>inter_digit_timeout_millis</code>), while <code>invalid_audio_url</code> held the literal <code>&quot;default&quot;</code>, not a URL of a WAV/MP3 file; (d) this app has never taken a call (<code>phone_numbers</code> = 0, <code>telnyx_config</code> = 0, <code>inbound_calls</code> = 0). Answering is unchanged, so the credit, the <code>inbound_calls</code>/<code>call_logs</code> rows and the spawned CoreSwift push / rule evaluation are exactly as before, and every other event — <code>call.gather.ended</code> included — is still acked with empty commands.</li>
+    <li><strong>Order.</strong> <code>SELECT … WHERE tenant_id = $1 AND is_active = true ORDER BY priority ASC, created_at ASC</code>. The FIRST rule whose trigger matches fires and the rest are skipped for that call; no match means no action. <code>priority</code> was added by migration 000025 (<code>INTEGER NOT NULL DEFAULT 100</code>); the console's list is ordered the same way, so the screen shows the evaluation order.</li>
+    <li><strong>Triggers</strong> (<code>trigger_condition</code>): <code>all_missed_calls</code> (every inbound call — this service records every ring as missed, then answers the call and asks nothing more of it; see the call-control reply above and the Voicemail row of Module Handlers, kanban t_1d4fc956), <code>specific_numbers</code> (<code>schedule.numbers</code>, matched on digits with a &gt;= 7-digit floor so a 10-digit local form matches the E.164 caller), <code>time_of_day</code> (<code>schedule.window.start/end</code>, "HH:MM", a window may cross midnight), <code>day_of_week</code> (<code>schedule.days</code>, <code>mon</code>…<code>sun</code>, UTC — the clock the store uses).</li>
+    <li><strong>Actions</strong> (<code>response_type</code>): <code>sms</code> texts the caller from the number they dialed, through the SAME transport as the manual send (<code>message_handler::send_rule_sms</code> → <code>deliver_outbound</code>), so the row in <code>messages</code> carries the provider's own status/timestamps. <code>callback</code> inserts a <code>follow_ups</code> row (<code>follow_type=&#x27;call_back&#x27;</code>, due in an hour, <code>pending</code>) — the same record <code>POST /api/v1/calls/:id/respond</code> writes, listed on the console's Follow-ups screen. Nothing dials by itself.</li>
+    <li><strong><code>email</code> and <code>voice</code> are refused</strong> (<code>400</code>, naming the field): an inbound call carries no email address to reply to, and this service has no outbound-call transport. The consoles no longer offer them; <code>CREATE</code>/<code>UPDATE</code> validate the whole stored shape (<code>response_rule_eval::validate_rule</code>), so a rule that could never fire cannot be stored (an empty SMS body included).</li>
+    <li><strong>What a text needs.</strong> The same <code>telnyx_config</code> credential as the manual send. With it missing the rule still fires and is logged, but no row is written — nothing was attempted. The console's Response Rules screen and the user guide both say so.</li>
+    <li><strong>Plan limit.</strong> <code>max_rules</code> is counted from this table and enforced on <code>POST /api/v1/response-rules</code>. The automatic reply itself is NOT run through <code>max_messages</code>: dropping a missed-call reply mid-ring would break the product's one promise with nothing to show for it, and the row still counts towards the tenant's total.</li>
+    <li><strong>Templates are not involved.</strong> <code>message_templates</code> is a library of saved text; a rule holds its own <code>response_content.text</code> and no placeholder is substituted anywhere in the sent message.</li>
+  </ul>
+  <h2 id="monitoring">Monitoring</h2>
+  <ul>
+    <li>Logs: <code>journalctl -u missedcallrespondr -n 100 --no-pager</code></li>
+    <li>Health: <code>curl http://localhost:8088/api/health</code></li>
+    <li>DB: <code>docker exec -it swift-postgres-1 psql -U swift -d missedcallrespondr</code></li>
+  </ul>
+  <h2 id="payments-and-the-paypal-webhook-receiver">Payments and the PayPal webhook receiver</h2>
+  <ul>
+    <li>Checkout sessions: <code>/api/v1/checkout/create</code>, <code>/api/v1/checkout/sessions</code>; providers are configured via <code>/api/v1/payment-providers</code> (admin console -&gt; Payment providers).</li>
+    <li><code>POST /api/v1/webhooks/paypal</code> is <strong>signature-verified before anything is written or dispatched</strong> (kanban t_5cf44e1b). The four <code>paypal-transmission-*</code> headers are required and the signature is checked against PayPal's <code>verify-webhook-signature</code> API, authenticated with the REST <code>client_id:client_secret</code> and verified against <code>PAYPAL_WEBHOOK_ID</code> (or the <code>webhook_secret</code> of the active <code>paypal</code> provider row — no redeploy needed). Fail-closed replies, in order: <code>401 missing_paypal_signature_headers</code>, <code>503 paypal_not_configured</code> (no webhook id or no credential: PayPal is <strong>not</strong> called and nothing is written), <code>401 paypal_verification_api_error</code> / <code>401 paypal_verification_unreachable</code> (the verdict itself could not be obtained), <code>401 signature_verification_failed</code> (a real FAILURE verdict). Only a verified event reaches <code>payment_webhook_events</code> and fulfilment.</li>
+  </ul>
+  <h2 id="deployment">Deployment</h2>
+  <p>The binary is IMAGE-BAKED (no bind mount), so <code>systemctl restart</code> / <code>docker restart</code> re-runs the OLD binary and is <strong>not</strong> a deploy:</p>
+  <pre><code>/opt/swift/bin/deploy-missedcallrespondr.sh        # rebuilds image, recreates the container,
+                                                   # proves sha256(repo) == sha256(container)
+/opt/swift/bin/deploy-missedcallrespondr.sh --verify   # parity + health only</code></pre>
+
+  <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid #e5e7eb;">
+  <p style="text-align:center; color:#9ca3af; font-size:.82rem;">
+    MissedCall Respondr &mdash; Admin Guide &mdash; Built by SwiftSoftware<br>
+    © 2026 SwiftSoftware. All rights reserved.
+  </p>
+
+</main>
+</div>
+
+</body>
+</html>

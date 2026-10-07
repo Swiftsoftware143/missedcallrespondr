@@ -1934,6 +1934,13 @@ const App = () => {
           <span>${n.icon}</span><span class="nav-text">${n.label}</span>
         </div>`)}
       </div>
+      <!-- Admin guide (kanban t_5af0ddda): fleet standard - the console links its own guide on its
+           OWN origin at /admin-guide.html. Served from this root by
+           bin/publish-missedcallrespondr-frontend.sh; the source of record is
+           www-admin/admin-guide.html in the app repo. -->
+      <a class="nav-item" id="admin-guide-link" href="/admin-guide.html" target="_blank" rel="noopener">
+        <span>📖</span><span class="nav-text">Admin Guide</span>
+      </a>
       <div class="nav-item text-red-500 mt-auto" onClick=${() => { API.logout(); S.view = 'dashboard'; renderApp(); }}>
         <span>🚪</span><span class="nav-text">Logout</span>
       </div>
