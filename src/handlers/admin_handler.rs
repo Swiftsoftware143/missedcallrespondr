@@ -66,17 +66,40 @@ pub async fn portfolio_sync(
         )));
     }
 
-    // Create tenant
+    // Create tenant.
+    //
+    // `tenants.slug` carries UNIQUE `tenants_slug_key`, and this door used to derive the slug from
+    // the raw caller-supplied company name (`name.to_lowercase().replace(' ', "_")`) and insert it
+    // plainly — so a SECOND `portfolio-sync` push naming a company that already exists answered
+    // `500 Database error` straight from the index. Derive it through the app's own account-slug
+    // helper instead, the single rule every account door follows (kanban t_1a26f923), and let
+    // `ON CONFLICT (slug) DO NOTHING` turn the residual derive/insert race into a retry
+    // (kanban t_ff66fbe3). The derived value is `base<=24 + '_' + 8 hex`, far under the limit, and
+    // is also what lands in `portfolio_companies.slug`; no response field carries it.
     let tenant_id = uuid::Uuid::new_v4();
-    let tenant_slug = name.to_lowercase().replace(' ', "_");
-    check_len("slug", &tenant_slug, max::PORTFOLIO_COMPANIES_SLUG)?;
-
-    sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
+    let mut tenant_slug: Option<String> = None;
+    for _ in 0..4 {
+        let candidate = crate::auth::signup::unique_account_slug(&state.pool, &name).await?;
+        let inserted = sqlx::query(
+            "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) ON CONFLICT (slug) DO NOTHING",
+        )
         .bind(tenant_id)
         .bind(&name)
-        .bind(&tenant_slug)
+        .bind(&candidate)
         .execute(&state.pool)
         .await?;
+        if inserted.rows_affected() == 1 {
+            tenant_slug = Some(candidate);
+            break;
+        }
+    }
+    let tenant_slug = tenant_slug.ok_or_else(|| {
+        AppError::Internal(format!(
+            "portfolio_sync: no free tenants.slug for company '{}'",
+            name
+        ))
+    })?;
+    check_len("slug", &tenant_slug, max::PORTFOLIO_COMPANIES_SLUG)?;
 
     // Create user
     let user_id = uuid::Uuid::new_v4();

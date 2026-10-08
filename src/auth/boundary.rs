@@ -118,9 +118,16 @@ pub async fn require_credential(
     // anonymous caller and these handlers was the author's own key check. The key is now demanded
     // HERE too, so a route added under this prefix without an entry is an ordinary private route.
     //
-    // A recognised session credential is accepted on this arm as well, because
-    // `/api/v1/admin/portfolio-sync` (the panel-driven sibling of the same receiver) is posted with
-    // a token; the handler still demands the key, and the boundary never widens a caller's reach.
+    // A recognised session credential is accepted on this arm as well, because a machine receiver
+    // may legitimately be driven from the panel with a token; the boundary never widens a caller's
+    // reach.
+    //
+    // `/api/v1/admin/portfolio-sync` is NOT on this arm: it is absent from `INTERNAL_ROUTES` and
+    // sits under the platform-admin prefix, so the session arm below plus the role gate in
+    // `auth_middleware` is what admits it, and its handler reads no key. Measured 2026-10-08 on the
+    // live app (kanban t_ff66fbe3): anonymous POST -> 401, the internal key sent as a bearer token
+    // -> 401, a platform-admin session token -> 200, an `account_owner` session token -> 403. An
+    // earlier version of this comment claimed the handler still demanded the key; it never did.
     if route_policy::is_internal_route(&path) {
         return if presents_internal_key(&state, &req) || presents_session_credential(&state, &req) {
             next.run(req).await
