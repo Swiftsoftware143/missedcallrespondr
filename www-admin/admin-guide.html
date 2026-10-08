@@ -164,9 +164,9 @@
   <p>There is NO voicemail capability, and as of kanban t_1d4fc956 there is no voicemail SURFACE either: see the Voicemail row of <a href="#module-handlers">Module Handlers</a>. Nothing in the product records, stores, transcribes or plays a voicemail, and no console screen and no guide may claim one.</p>
   <h2 id="quick-reference">Quick Reference</h2>
   <ul>
-    <li><strong>Backend:</strong> Rust (Axum) @ port 8088, systemd unit <code>missedcallrespondr</code></li>
-    <li><strong>Database:</strong> PostgreSQL (docker: swift-postgres-1) — <code>missedcallrespondr</code></li>
-    <li><strong>Admin Web App:</strong> Served via app backend on port 8088</li>
+    <li><strong>Backend:</strong> Rust (Axum) @ port 8088, Docker container <code>missedcallrespondr</code></li>
+    <li><strong>Database:</strong> PostgreSQL (docker: <code>swift-postgres</code>) — <code>missedcallrespondr</code></li>
+    <li><strong>Admin Web App:</strong> <code>/opt/swift/nginx/www-admin/missedcall/</code> served by nginx on <code>admin.missedcallrespondr.com</code></li>
     <li><strong>Repo:</strong> <code>/opt/swift/apps/missedcallrespondr/</code></li>
   </ul>
   <h2 id="email-templates">Email Templates</h2>
@@ -377,9 +377,9 @@ Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
   </ul>
   <h2 id="monitoring">Monitoring</h2>
   <ul>
-    <li>Logs: <code>journalctl -u missedcallrespondr -n 100 --no-pager</code></li>
+    <li>Logs: <code>docker logs missedcallrespondr --since 10m</code></li>
     <li>Health: <code>curl http://localhost:8088/api/health</code></li>
-    <li>DB: <code>docker exec -it swift-postgres-1 psql -U swift -d missedcallrespondr</code></li>
+    <li>DB: <code>docker exec -it swift-postgres psql -U swift -d missedcallrespondr</code></li>
   </ul>
   <h2 id="payments-and-the-paypal-webhook-receiver">Payments and the PayPal webhook receiver</h2>
   <ul>
