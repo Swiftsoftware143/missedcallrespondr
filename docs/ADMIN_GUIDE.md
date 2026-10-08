@@ -113,7 +113,7 @@ Two controls:
 
 | Control | What it does |
 |---|---|
-| **Create free accounts from tags** (Turn on / Turn off) | The master switch. Stored as `admin_settings.provision_from_tags_enabled`. **Ships OFF**, and while it is off every request is refused with `403 refused / provisioning_disabled` and nothing is created for anyone. |
+| **Create free accounts from tags** (Turn on / Turn off) | The master switch. Stored as `admin_settings.provision_from_tags_enabled`. **Ships ON** (code default — a fresh install has the door open), so a tagged lead gets an account immediately; turn it off here and every request is refused with `403 refused / provisioning_disabled` and nothing is created for anyone. |
 | **Plan for new accounts** (dropdown + Save plan) | The plan a tagged account starts on, stored as `admin_settings.provision_entry_plan_slug` (default `free`). Only this app's own free plans — active, `price_monthly = 0` AND legacy `price = 0` — are offered, so a tag can never seat a paying plan. |
 
 **The receiver FunnelSwift calls** (it is a machine door, not a page):

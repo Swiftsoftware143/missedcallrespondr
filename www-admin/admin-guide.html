@@ -237,7 +237,7 @@
   <table>
     <thead><tr><th>Control</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><strong>Create free accounts from tags</strong> (Turn on / Turn off)</td><td>The master switch. Stored as <code>admin_settings.provision_from_tags_enabled</code>. <strong>Ships OFF</strong>, and while it is off every request is refused with <code>403 refused / provisioning_disabled</code> and nothing is created for anyone.</td></tr>
+      <tr><td><strong>Create free accounts from tags</strong> (Turn on / Turn off)</td><td>The master switch. Stored as <code>admin_settings.provision_from_tags_enabled</code>. <strong>Ships ON</strong> (code default — a fresh install has the door open), so a tagged lead gets an account immediately; turn it off here and every request is refused with <code>403 refused / provisioning_disabled</code> and nothing is created for anyone.</td></tr>
       <tr><td><strong>Plan for new accounts</strong> (dropdown + Save plan)</td><td>The plan a tagged account starts on, stored as <code>admin_settings.provision_entry_plan_slug</code> (default <code>free</code>). Only this app's own free plans — active, <code>price_monthly = 0</code> AND legacy <code>price = 0</code> — are offered, so a tag can never seat a paying plan.</td></tr>
     </tbody>
   </table>
