@@ -184,8 +184,13 @@ pub struct Claims {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterRequest {
     pub email: String,
+    /// OPTIONAL: the signup page collects NAME + EMAIL only (David's model), so a missing
+    /// `password` deserialises to `""`; the server then mints one and emails it.
+    #[serde(default)]
     pub password: String,
     pub name: String,
+    /// OPTIONAL: with no workspace-name field the handler derives `"<name>'s Workspace"`.
+    #[serde(default)]
     pub account_name: String,
 }
 

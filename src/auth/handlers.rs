@@ -37,25 +37,43 @@ pub async fn register(
         ));
     }
 
-    let password_hash =
-        hash_password(&req.password).map_err(|e| AppError::Internal(e.to_string()))?;
+    // David's signup model (as IncentiveSwift/FunnelSwift ship): the page collects NAME + EMAIL
+    // only, so `password` may arrive empty. The server then mints one and mails it; the user
+    // confirms their address by signing in with it. A caller that still supplies one is honoured.
+    let password = if req.password.is_empty() {
+        super::signup::generate_temp_password()
+    } else {
+        req.password.clone()
+    };
+
+    let password_hash = hash_password(&password).map_err(|e| AppError::Internal(e.to_string()))?;
 
     // ── The mint, through the ONE shared writer (kanban t_1d08bd9a, design §3.1 rule 4) ─────────
     // `auth::signup::create_account` is the same function the fleet-internal tag door
     // (`POST /api/v1/internal/provision-free-account`) calls, so the account this public signup
     // mints and the account a FunnelSwift tag mints cannot drift: one `tenants` row, one
     // `account_owner` `users` row, one `tenant_plans` row on `free` with 50 starter credits.
-    // `account_slug: None` keeps the derivation this handler has always used, and
-    // `password_plain: None` keeps its welcome mail password-less and off the response's critical
-    // path — i.e. this door's observable behaviour is unchanged.
+    // `account_slug: None` keeps the derivation this handler has always used; `password_plain` now
+    // carries the server-minted first password so the `welcome_credentials` mail can deliver it.
+    // No workspace-name field on the page: derive "<name>'s Workspace" when none was supplied.
+    let account_name = {
+        let a = req.account_name.trim();
+        if a.is_empty() {
+            format!("{}'s Workspace", req.name)
+        } else {
+            a.to_string()
+        }
+    };
     let ids = super::signup::create_account(
         &state,
         super::signup::NewAccount {
             email: &email,
             name: &req.name,
             password_hash: &password_hash,
-            password_plain: None,
-            account_name: &req.account_name,
+            // The server-minted plaintext is the ONLY delivery of that password, so the
+            // `welcome_credentials` template carries it (the tag door's existing posture).
+            password_plain: Some(&password),
+            account_name: &account_name,
             account_slug: None,
             plan_slug: "free",
             role: "account_owner",
