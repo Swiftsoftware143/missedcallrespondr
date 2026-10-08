@@ -191,6 +191,7 @@ fn looks_like_placeholder(email: &str) -> bool {
     email.contains("placeholder")
         || email.starts_with("fs-provision")
         || email.ends_with(".invalid")
+        || crate::security::email_addr::is_reserved_address(email)
 }
 
 /// The entry plan this app will seat a tag-provisioned account on, resolved IN-APP (design §3.1
@@ -484,7 +485,15 @@ mod tests {
         assert!(looks_like_placeholder("fs-provision-x@example.com"));
         assert!(looks_like_placeholder("someone@probe.invalid"));
         assert!(looks_like_placeholder("placeholder@example.com"));
-        assert!(!looks_like_placeholder("owner@acme.example.com"));
+        // t_a8bd2860: an RFC 2606 reserved documentation domain is equally undeliverable.
+        assert!(looks_like_placeholder("someone@example.com"));
+        assert!(looks_like_placeholder("someone@example.net"));
+        assert!(looks_like_placeholder("someone@example.org"));
+        assert!(looks_like_placeholder("a@sub.example.com"));
+        assert!(looks_like_placeholder("x@foo.test"));
+        assert!(looks_like_placeholder("x@host.local"));
+        // A routable domain whose LABEL merely looks reserved stays allowed.
+        assert!(!looks_like_placeholder("owner@acme.test.swiftsoftware.net"));
         assert!(!looks_like_placeholder("david@swiftsoftware.dev"));
     }
 }
