@@ -1,15 +1,19 @@
 use axum::{
-    extract::{Extension, State},
+    body::{Body, Bytes},
+    extract::{Extension, Path, State},
+    http::header,
+    response::Response,
     Json,
 };
 
 use serde_json::Value;
+use sqlx::Row;
 
 use super::models::{create_token, hash_password, verify_password};
 use crate::{
     config::{
         AuthResponse, ChangePasswordRequest, Claims, ForgotPasswordRequest, LoginRequest,
-        RegisterRequest, ResetPasswordRequest, TeamMember, TeamMemberResponse,
+        MeResponse, RegisterRequest, ResetPasswordRequest, TeamMember, TeamMemberResponse,
     },
     error::AppError,
     security::email_addr,
@@ -155,17 +159,70 @@ pub async fn login(
     }))
 }
 
+/// The real plan tier name for a tenant (programme t_2cb77960, card t_9cd2c8f2).
+///
+/// `tenant_plans` holds at most one row per tenant (000020) and joins `plans` for the display name.
+/// A tenant with no row — or a tournament of rows where none is active — falls back to "Free", the
+/// same default the console's own Free posture already uses: a label the account can always read,
+/// never a blank and never the literal word "User". A database hiccup is NOT fatal here (this is a
+/// display field, not an authorization decision), so it degrades to the default rather than 500-ing
+/// the whole account screen.
+async fn plan_name_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> String {
+    sqlx::query_scalar::<_, String>(
+        "SELECT p.name FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id \
+         WHERE tp.tenant_id = $1 AND tp.status = 'active' \
+         ORDER BY tp.created_at DESC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "Free".to_string())
+}
+
+/// `GET /api/v1/auth/me` — the signed-in account, INCLUDING the real plan tier (card t_9cd2c8f2).
+///
+/// Before this card the route answered the raw `TeamMemberResponse`, which names no tier, so the
+/// console could only print a guess for the level label (the FunnelSwift defect: it printed the
+/// role word "User"). This answer carries `plan_name` from `tenant_plans`, the optional `company`
+/// and `username` the profile screen edits, and `avatar_url` when a picture exists.
 pub async fn me(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-) -> Result<Json<TeamMemberResponse>, AppError> {
-    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE id = $1")
-        .bind(claims.sub)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+) -> Result<Json<MeResponse>, AppError> {
+    let row = sqlx::query(
+        "SELECT id, email, name, username, company, tenant_id, role FROM users WHERE id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("User not found".into()))?;
 
-    Ok(Json(user.into()))
+    let tenant_id: uuid::Uuid = row.try_get("tenant_id")?;
+    let plan_name = plan_name_for(&state.pool, tenant_id).await;
+
+    let has_avatar: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_avatars WHERE user_id = $1)")
+            .bind(claims.sub)
+            .fetch_one(&state.pool)
+            .await?;
+
+    Ok(Json(MeResponse {
+        id: row.try_get("id")?,
+        email: row.try_get("email")?,
+        name: row.try_get("name")?,
+        username: row.try_get("username")?,
+        company: row.try_get("company")?,
+        tenant_id,
+        role: row.try_get("role")?,
+        plan_name,
+        avatar_url: if has_avatar {
+            Some(format!("/api/v1/auth/avatar/{}", claims.sub))
+        } else {
+            None
+        },
+    }))
 }
 
 pub async fn change_password(
@@ -207,29 +264,172 @@ pub async fn change_password(
     ))
 }
 
+/// `PUT /api/v1/auth/profile` — `{name?, username?, company?}` (programme t_2cb77960, card
+/// t_9cd2c8f2).
+///
+/// The rules, in the words the console depends on. An ABSENT key leaves the stored value untouched,
+/// so a save that only sends `name` cannot blank a company the account already set. `name`, when
+/// present, must be non-blank (400) — it is the account's display name. `username` and `company`
+/// may be CLEARED by sending an empty string, because both columns are nullable. Over-long values
+/// are a 400, never a 500. Answers `{"status":"ok"}` — the shape the fleet profile contract names.
 pub async fn update_profile(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let name = req
-        .get("name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AppError::BadRequest("name is required".into()))?;
+    /// Longest value any of the three columns accepts from the form. Over-long is a 400, never a 500.
+    const MAX_FIELD: usize = 200;
 
-    if name.trim().is_empty() {
-        return Err(AppError::BadRequest("name cannot be empty".into()));
+    let name = req.get("name").and_then(|v| v.as_str());
+    let username = req.get("username").and_then(|v| v.as_str());
+    let company = req.get("company").and_then(|v| v.as_str());
+
+    if let Some(n) = name {
+        if n.trim().is_empty() {
+            return Err(AppError::BadRequest("name cannot be empty".into()));
+        }
+    }
+    for (label, v) in [("name", name), ("username", username), ("company", company)] {
+        if let Some(v) = v {
+            if v.chars().count() > MAX_FIELD {
+                return Err(AppError::BadRequest(format!("{label} is too long")));
+            }
+        }
     }
 
-    sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
-        .bind(name)
-        .bind(claims.sub)
-        .execute(&state.pool)
-        .await?;
+    if let Some(n) = name {
+        sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
+            .bind(n.trim())
+            .bind(claims.sub)
+            .execute(&state.pool)
+            .await?;
+    }
+    if let Some(u) = username {
+        let val: Option<&str> = if u.trim().is_empty() {
+            None
+        } else {
+            Some(u.trim())
+        };
+        sqlx::query("UPDATE users SET username = $1, updated_at = NOW() WHERE id = $2")
+            .bind(val)
+            .bind(claims.sub)
+            .execute(&state.pool)
+            .await?;
+    }
+    if let Some(c) = company {
+        let val: Option<&str> = if c.trim().is_empty() {
+            None
+        } else {
+            Some(c.trim())
+        };
+        sqlx::query("UPDATE users SET company = $1, updated_at = NOW() WHERE id = $2")
+            .bind(val)
+            .bind(claims.sub)
+            .execute(&state.pool)
+            .await?;
+    }
 
-    Ok(Json(
-        serde_json::json!({"message": "Profile updated", "name": name}),
-    ))
+    Ok(Json(serde_json::json!({"status": "ok"})))
+}
+
+/// Largest profile picture this route accepts. The contract says 2 MB; the route's
+/// `DefaultBodyLimit` is a byte or two above this so a body that is OVER the cap is refused by
+/// `upload_avatar` with this app's JSON 400, not by axum with an unreadable text/plain 413.
+pub const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
+
+/// Identify an image by its MAGIC BYTES, never by a caller-supplied content type or filename
+/// (FunnelSwift t_ff948669's decision, reused here). Returns the content type to store, or `None`
+/// for anything that is not one of the four accepted formats.
+fn sniff_image(b: &[u8]) -> Option<&'static str> {
+    if b.len() >= 8 && b.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Some("image/png");
+    }
+    if b.len() >= 3 && b.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("image/jpeg");
+    }
+    if b.len() >= 6 && (b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a")) {
+        return Some("image/gif");
+    }
+    if b.len() >= 12 && b.starts_with(b"RIFF") && &b[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    None
+}
+
+/// `POST /api/v1/auth/avatar` — the raw image bytes, per user (card t_9cd2c8f2).
+///
+/// The body IS the picture: no multipart envelope, no filename, no caller-declared content type is
+/// trusted. The format is decided by the bytes, a non-image and an empty body are refused 400, and a
+/// body over [`MAX_AVATAR_BYTES`] is refused 400 as well. One row per user (upsert), so re-uploading
+/// replaces the picture rather than accumulating rows. Private: the caller must present their session.
+pub async fn upload_avatar(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if body.is_empty() {
+        return Err(AppError::BadRequest("No picture data received".into()));
+    }
+    if body.len() > MAX_AVATAR_BYTES {
+        return Err(AppError::BadRequest(
+            "Profile picture must be 2 MB or smaller".into(),
+        ));
+    }
+    let content_type = sniff_image(&body).ok_or_else(|| {
+        AppError::BadRequest("Unsupported picture — use a PNG, JPEG, GIF or WebP image".into())
+    })?;
+
+    sqlx::query(
+        "INSERT INTO user_avatars (user_id, bytes, content_type, updated_at) VALUES ($1, $2, $3, NOW()) \
+         ON CONFLICT (user_id) DO UPDATE SET bytes = EXCLUDED.bytes, \
+         content_type = EXCLUDED.content_type, updated_at = NOW()",
+    )
+    .bind(claims.sub)
+    .bind(body.as_ref())
+    .bind(content_type)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "avatar_url": format!("/api/v1/auth/avatar/{}", claims.sub),
+    })))
+}
+
+/// `GET /api/v1/auth/avatar/:user_id` — serve the stored picture (card t_9cd2c8f2).
+///
+/// ANONYMOUS BY CONSTRUCTION and narrow by design: an `<img src>` cannot carry a bearer token, so
+/// the route is on `route_policy::PUBLIC_ROUTES`. It returns one thing — the bytes one user
+/// uploaded, keyed by an unguessable uuid, under the content type sniffed at upload time. No tenant
+/// column, no credential, no row of user data; a user with no picture answers 404. The authenticated
+/// upload twin stays private.
+pub async fn get_avatar(
+    State(state): State<AppState>,
+    Path(user_id): Path<uuid::Uuid>,
+) -> Result<Response, AppError> {
+    let row = sqlx::query("SELECT bytes, content_type FROM user_avatars WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("No picture for this account".into()))?;
+
+    let bytes: Vec<u8> = row.try_get("bytes")?;
+    let content_type: String = row.try_get("content_type")?;
+
+    let mut resp = Response::new(Body::from(bytes));
+    let ct = header::HeaderValue::from_str(&content_type)
+        .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream"));
+    resp.headers_mut().insert(header::CONTENT_TYPE, ct);
+    // NOT cached (kanban t_9cd2c8f2). The URL is stable per user, so ANY max-age would keep serving
+    // the PREVIOUS face after a re-upload — measured live: a plain fetch of this path right after an
+    // upload returned the old bytes (browser HTTP cache), which is exactly the "byte-identical"
+    // promise the account screen depends on. The console adds its own cache-buster to the <img>; the
+    // endpoint itself must always answer with the CURRENT bytes.
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    Ok(resp)
 }
 
 pub async fn forgot_password(

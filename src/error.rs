@@ -90,19 +90,26 @@ impl From<anyhow::Error> for AppError {
 // axum extractor rejections → this app's own error shape
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Server refusals that axum's `Json` extractor produces with a **`text/plain`** body:
+/// Server refusals that axum's own extractors produce with a **`text/plain`** body:
 /// 415 (wrong content type), 400 (body is not JSON at all), 422 (JSON that does not
-/// deserialize into the target type).
+/// deserialize into the target type), and 413 (a body over axum's `DefaultBodyLimit`).
 ///
 /// `www-admin/index.html`'s fetch helper is
 /// `const handle = async (r) => { const d = await r.json(); if (!r.ok) throw ... }` —
 /// `await r.json()` runs *before* the `!r.ok` check, so a plain-text body throws a
 /// `SyntaxError` and the caller's generic `catch (e) { console.error(e) }` swallows it.
 /// The admin then sees **nothing at all** for a plain client-side mistake.
-const REJECTION_STATUSES: [StatusCode; 3] = [
+///
+/// 413 was added for the profile-picture upload (kanban t_9cd2c8f2): the body IS the image, and a
+/// picture over axum's own 2 MiB limit is refused by the body-read deadline middleware (which
+/// buffers through the same `Bytes` extractor) BEFORE any handler runs — text/plain, unreadable by
+/// the console. Rewriting it here is what makes "your picture is too big" a sentence the account
+/// screen can show.
+const REJECTION_STATUSES: [StatusCode; 4] = [
     StatusCode::BAD_REQUEST,
     StatusCode::UNSUPPORTED_MEDIA_TYPE,
     StatusCode::UNPROCESSABLE_ENTITY,
+    StatusCode::PAYLOAD_TOO_LARGE,
 ];
 
 /// Framing axum puts around the part the caller actually needs (the offending field, and
@@ -120,7 +127,7 @@ const REJECTION_BODY_LIMIT: usize = 64 * 1024;
 ///
 /// One layer on the shared router, so all handlers (and every future one) inherit it and
 /// nothing per-handler has to remember. Two deliberate choices:
-///  * **400 for all three statuses.** A 422 is not produced by any handler in this repo —
+///  * **400 for every listed status.** A 422 is not produced by any handler in this repo —
 ///    it is the extractor's, and this app's bad-request convention is
 ///    `400 {"error": "<field> is required"}` (see `handlers/email_templates_handler.rs`).
 ///    Collapsing 415/422 onto 400 gives the whole API one readable bad-request shape.

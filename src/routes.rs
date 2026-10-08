@@ -37,6 +37,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/auth/reset-password",
             post(auth_handlers::reset_password),
         )
+        // The profile picture READ (kanban t_9cd2c8f2). An `<img src>` cannot carry a bearer token,
+        // so this ONE route is anonymous and is named in `crate::auth::route_policy::PUBLIC_ROUTES`.
+        // It returns only the bytes one uuid-keyed user uploaded, under the content type sniffed at
+        // upload time; a user with no picture answers 404. The authenticated POST twin below stays
+        // on the gated router — the read is public, the write is not.
+        .route(
+            "/api/v1/auth/avatar/:user_id",
+            get(auth_handlers::get_avatar),
+        )
         .route(
             "/api/v1/internal/portfolio-companies",
             post(portfolio_handler::internal_create_portfolio_company),
@@ -117,6 +126,15 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/me/usage", get(auth_handlers::get_usage))
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
+        // The profile picture UPLOAD (kanban t_9cd2c8f2): the body IS the raw image. The effective
+        // cap is axum's own `DefaultBodyLimit` (2 MiB), enforced upstream by the body-read deadline
+        // middleware — which buffers through the same `Bytes` extractor and therefore refuses an
+        // over-size body (as a 413) BEFORE any handler runs. `error::rejection_as_json` now rewrites
+        // that 413 into this app's JSON error shape, so the console can read the refusal instead of
+        // choking on text/plain. A non-image, an empty body and (defensively) an over-size body are
+        // 400s from the handler; only the format is sniffed, and only from the bytes. The anonymous
+        // GET twin lives on the public router above.
+        .route("/api/v1/auth/avatar", post(auth_handlers::upload_avatar))
         // Calls
         .route(
             "/api/v1/calls",

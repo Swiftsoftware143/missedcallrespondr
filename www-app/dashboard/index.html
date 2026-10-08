@@ -52,11 +52,14 @@ window.appGuidePages = {
   followups:    { title: "Follow-ups", desc: "Messages scheduled to go out later, so a lead is not forgotten after the first reply.", actions: ["See what is queued", "Check what has already sent"] },
   contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list.", actions: ["Search your contacts", "Open a contact's history"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
-  integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
-  profile:      { title: "Profile", desc: "Your account details and sign-in for this workspace.", actions: ["Update your name and password"] }
+  integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] }
+  // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
+  // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
+  // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
+  // Profile, so the widget hides its toggle and closes — nothing covers the form.
 };
 </script>
-<script src="/inline-guide-widget.js"></script>
+<script src="/inline-guide-widget.js?v=20261008c"></script>
 <script type="module">
 // preact + htm, exactly the fleet pattern the other shells use (www-admin, WorkflowSwift).
 // The shipped tag loaded cdn.jsdelivr.net/npm/lit-html@2.8.0/lit-html.min.js in a CLASSIC
@@ -86,6 +89,18 @@ const API = (() => {
     get token() { return token; },
     get user() { return user; },
     setAuth(t, u) { token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
+    // Re-read the account row from the server (kanban t_9cd2c8f2). The login answer carries no plan
+    // tier and no picture, so the console signs in against /auth/login and then refreshes from
+    // GET /auth/me — which is where the REAL plan_name, company, username and avatar_url come from.
+    // Never throws: a failed refresh leaves the session usable and the label falls back.
+    refreshMe() {
+      if (!token) return Promise.resolve(null);
+      return get('/auth/me').then(function (me) {
+        user = Object.assign({}, user || {}, me);
+        sessionStorage.setItem('mc_user', JSON.stringify(user));
+        return user;
+      }).catch(function () { return null; });
+    },
     logout() { token = null; user = null; sessionStorage.removeItem('mc_token'); sessionStorage.removeItem('mc_user'); }
   };
 })();
@@ -100,7 +115,7 @@ const LoginView = () => {
   // so the old `let email = '', pw = ''` blanked BOTH fields on every attempt.
   const f = viewState('login_form', { email: '', pw: '' });
   const submit = async (e) => { e.preventDefault(); S.loading = true; S.error = null; renderApp();
-    try { const r = await API.post('/auth/login', { email: f.email, password: f.pw }); API.setAuth(r.token, r.team_member || r.user || r); f.email = ''; f.pw = ''; S.view = 'overview'; } catch (err) { S.error = err.message; }
+    try { const r = await API.post('/auth/login', { email: f.email, password: f.pw }); API.setAuth(r.token, r.team_member || r.user || r); S.meLoaded = false; f.email = ''; f.pw = ''; S.view = 'overview'; } catch (err) { S.error = err.message; }
     S.loading = false; renderApp();
   };
   return html`<div class="flex items-center justify-center min-h-screen w-full">
@@ -123,6 +138,14 @@ const LoginView = () => {
 };
 
 // ===== OVERVIEW =====
+// kanban t_9cd2c8f2 — this screen used to render FOUR tiles that could never show a number: it read
+// `st.total_rules` / `total_templates` / `total_contacts` / `total_responses`, while
+// `GET /dashboard/stats` answers `total_calls` / `missed_calls` / `answered_calls` /
+// `follow_ups_pending` / `response_rate` — so every tile sat on "..." forever (measured in real
+// Chromium), and the "Credits" card read `usage.available_credits` from a payload that carries
+// `contacts/leads/deals/phone_numbers/rules/users`, so it sat on "Loading…" forever. A dashboard of
+// eternal placeholders IS the "dead/placeholder panel" the card refuses. Every value below is one
+// the API really returns, and a missing one shows an em dash rather than a fake zero.
 const Overview = () => {
   const st = viewState('overview', {});
   if (!st._loaded) { st._loaded = true;
@@ -130,18 +153,26 @@ const Overview = () => {
     API.get('/me/usage').then(u => { st.usage = u; renderApp(); }).catch(() => {});
   }
   const c = API.user || {};
+  const u = st.usage || {};
+  const num = (v) => (v === undefined || v === null) ? '—' : v;
+  const totalCalls = st.total_calls;
+  const rate = (st.response_rate === undefined || st.response_rate === null) ? null : Math.round(st.response_rate * 100);
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Overview</h2>
-    <div class="card"><p class="text-sm text-gray-600">Welcome back, <b>${c.email || c.name || 'there'}</b>. Here's what's happening with your auto-response setup.</p></div>
+    <div class="card"><p class="text-sm text-gray-600">Welcome back, <b>${c.name || c.email || 'there'}</b>. Here's what's happening with your auto-response setup.</p></div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-      <div class="stat-card"><div class="stat-value">${st.total_rules ?? '...'}</div><div class="stat-label">Response Rules</div></div>
-      <div class="stat-card"><div class="stat-value">${st.total_templates ?? '...'}</div><div class="stat-label">Templates</div></div>
-      <div class="stat-card"><div class="stat-value">${st.total_contacts ?? '...'}</div><div class="stat-label">Contacts</div></div>
-      <div class="stat-card"><div class="stat-value">${st.total_responses ?? '...'}</div><div class="stat-label">Auto-Responses</div></div>
+      <div class="stat-card"><div class="stat-value">${num(st.total_calls)}</div><div class="stat-label">Calls received</div></div>
+      <div class="stat-card"><div class="stat-value">${num(st.missed_calls)}</div><div class="stat-label">Missed calls</div></div>
+      <div class="stat-card"><div class="stat-value">${num(st.answered_calls)}</div><div class="stat-label">Answered</div></div>
+      <div class="stat-card"><div class="stat-value">${num(st.follow_ups_pending)}</div><div class="stat-label">Follow-ups pending</div></div>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="card"><h3 class="font-semibold mb-2">Credits</h3><p class="text-sm text-gray-600">${st.usage && st.usage.available_credits !== undefined ? st.usage.available_credits + ' credits available' : 'Loading…'}</p></div>
-      <div class="card"><h3 class="font-semibold mb-2">Phone Numbers</h3><p class="text-sm text-gray-600">Manage your numbers in the <b>Phone Numbers</b> tab.</p></div>
+      <div class="card"><h3 class="font-semibold mb-2">Response rate</h3>
+        <p class="text-sm text-gray-600">${totalCalls === 0 ? 'No calls yet — your response rate shows here once calls land.'
+          : (rate === null ? 'Not measured yet' : rate + '% of calls answered or sent an automatic reply')}</p></div>
+      <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
+        <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || 'Free'}</span></p>
+        <p class="text-sm text-gray-600 mt-2">${num(u.rules)} response rules · ${num(u.phone_numbers)} phone numbers · ${num(u.contacts)} contacts</p></div>
     </div>
   </div>`;
 };
@@ -279,50 +310,120 @@ const Calls = () => {
   </div>`;
 };
 
-// ===== PROFILE (PUT /auth/profile + PUT /auth/password) =====
+// ===== PROFILE (kanban t_9cd2c8f2) =====
+// The fleet account screen: picture + Name + Company + Level, and a Change Password block whose
+// fields are NEW password, CONFIRM new password, then the CURRENT password as the VERIFICATION
+// field underneath, then Save. Every field is seeded from GET /auth/me (via API.user), and every
+// Save re-reads /auth/me so what the screen shows is the server's answer, not a local guess.
 const Profile = () => {
   const c = API.user || {};
-  const st = viewState('profile', { name: null, notice: null, error: null, busy: false, cur: '', next: '' });
+  const st = viewState('profile', {
+    name: null, company: null, username: null, picture: null,
+    notice: null, error: null, busy: false, bust: null,
+    cur: '', next: '', confirm: ''
+  });
+  // Seed the drafts ONCE from the account row (never on every render — that is what wiped typed
+  // values in the sibling consoles).
   if (st.name === null) st.name = c.name || '';
+  if (st.company === null) st.company = c.company || '';
+  if (st.username === null) st.username = c.username || '';
+  const pictureUrl = () => (c.avatar_url ? c.avatar_url + (st.bust ? '?t=' + st.bust : '') : null);
+
+  const refresh = async () => {
+    const me = await API.refreshMe();
+    if (me) API.setAuth(API.token, Object.assign({}, c, me));
+  };
+
   const save = async () => {
+    if (!(st.name || '').trim()) { st.error = 'Name cannot be empty'; st.notice = null; renderApp(); return; }
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
-      const r = await API.put('/auth/profile', { name: st.name });
-      API.setAuth(API.token, Object.assign({}, c, { name: r.name || st.name }));
-      st.notice = r.message || 'Profile updated';
+      await API.put('/auth/profile', { name: st.name, company: st.company, username: st.username });
+      await refresh();
+      st.notice = 'Saved';
     } catch (e) { st.error = 'Save failed: ' + e.message; }
     st.busy = false; renderApp();
   };
-  const changePw = async () => {
+
+  // The picture is POSTed as the RAW bytes of the chosen file (no multipart envelope): the server
+  // sniffs the magic bytes and refuses anything that is not a PNG/JPEG/GIF/WebP under 2 MB.
+  const upload = async (e) => {
+    const file = (e.target.files || [])[0];
+    if (!file) return;
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
-      const r = await API.put('/auth/password', { current_password: st.cur, new_password: st.next });
-      st.notice = r.message || 'Password updated'; st.cur = ''; st.next = '';
+      const bytes = await file.arrayBuffer();
+      const r = await fetch(window.location.origin + '/api/v1/auth/avatar', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + API.token, 'Content-Type': file.type || 'application/octet-stream' },
+        body: bytes
+      });
+      let d = {}; try { d = await r.json(); } catch (e2) { /* non-JSON */ }
+      if (!r.ok) throw new Error(d.error || d.message || ('Upload failed (' + r.status + ')'));
+      // Change the cache-buster so the <img> repaints with the NEW bytes this render, not the
+      // 5-minute-cached previous picture.
+      st.bust = Date.now(); S.avatarBust = st.bust;
+      await refresh();
+      st.notice = 'Picture updated';
+      if (e.target) e.target.value = '';
+    } catch (err) { st.error = 'Upload failed: ' + err.message; }
+    st.busy = false; renderApp();
+  };
+
+  const changePw = async () => {
+    st.notice = null; st.error = null;
+    if (!st.next || st.next.length < 8) { st.error = 'New password must be at least 8 characters'; renderApp(); return; }
+    if (st.next !== st.confirm) { st.error = 'The two new passwords do not match'; renderApp(); return; }
+    st.busy = true; renderApp();
+    try {
+      await API.put('/auth/password', { current_password: st.cur, new_password: st.next });
+      st.notice = 'Password updated'; st.cur = ''; st.next = ''; st.confirm = '';
     } catch (e) { st.error = 'Password change failed: ' + e.message; }
     st.busy = false; renderApp();
   };
+
+  const pic = pictureUrl();
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Profile</h2>
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
     <div class="card">
       <h3 class="font-semibold mb-3">Your details</h3>
-      <div class="space-y-3" style="max-width:420px">
-        <div><label class="text-sm font-medium block mb-1">Email</label>
-          <input class="input" value=${c.email || ''} disabled /></div>
-        <div><label class="text-sm font-medium block mb-1">Name</label>
-          <input class="input" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} /></div>
-        <button class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save profile</button>
+      <div class="flex items-start gap-5">
+        <div class="text-center">
+          ${pic
+            ? html`<img id="profile-picture" src=${pic} alt="Profile picture" class="w-24 h-24 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
+            : html`<div id="profile-picture" class="w-24 h-24 rounded-full flex items-center justify-center text-3xl" style="background:#f1f5f9;border:1px solid #e2e8f0">👤</div>`}
+          <label class="btn btn-sm btn-outline" style="display:inline-block;margin-top:8px;cursor:pointer">
+            ${pic ? 'Change picture' : 'Upload picture'}
+            <input id="picture-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onChange=${upload} />
+          </label>
+          <p class="text-xs text-gray-400 mt-2">PNG, JPEG, GIF or WebP · up to 2 MB</p>
+        </div>
+        <div class="space-y-3" style="flex:1;max-width:420px">
+          <div><label class="text-sm font-medium block mb-1">Email</label>
+            <input id="profile-email" class="input" value=${c.email || ''} disabled /></div>
+          <div><label class="text-sm font-medium block mb-1">Name</label>
+            <input id="profile-name" class="input" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium block mb-1">Company</label>
+            <input id="profile-company" class="input" value=${st.company || ''} onInput=${e => { st.company = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium block mb-1">Level</label>
+            <div style="padding:8px 0"><span id="profile-level" class="badge badge-blue">${c.plan_name || 'Free'}</span></div></div>
+          <button id="save-profile" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save changes</button>
+        </div>
       </div>
     </div>
     <div class="card">
       <h3 class="font-semibold mb-3">Change password</h3>
       <div class="space-y-3" style="max-width:420px">
-        <div><label class="text-sm font-medium block mb-1">Current password</label>
-          <input class="input" type="password" value=${st.cur} onInput=${e => { st.cur = e.target.value; }} /></div>
         <div><label class="text-sm font-medium block mb-1">New password (min 8)</label>
-          <input class="input" type="password" value=${st.next} onInput=${e => { st.next = e.target.value; }} /></div>
-        <button class="btn btn-sm" disabled=${st.busy} onClick=${changePw}>Update password</button>
+          <input id="pw-new" class="input" type="password" value=${st.next} onInput=${e => { st.next = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Confirm new password</label>
+          <input id="pw-confirm" class="input" type="password" value=${st.confirm} onInput=${e => { st.confirm = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Current password</label>
+          <input id="pw-current" class="input" type="password" value=${st.cur} onInput=${e => { st.cur = e.target.value; }} /></div>
+        <p class="text-xs text-gray-500">Your current password confirms the change — we ask for it underneath the new one.</p>
+        <button id="save-password" class="btn btn-sm" disabled=${st.busy} onClick=${changePw}>Save password</button>
       </div>
     </div>
   </div>`;
@@ -938,6 +1039,11 @@ const Integrations = () => {
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
+  // One-shot: re-read the account row from the server so the level label and the header picture are
+  // the SERVER's answer (kanban t_9cd2c8f2). The login response carries no plan tier, so without
+  // this the label could only be guessed. Guarded by S.meLoaded so the refresh's own render cannot
+  // loop it, and cleared on sign-in so every session re-reads.
+  if (!S.meLoaded) { S.meLoaded = true; API.refreshMe().then(() => renderApp()); }
   // kanban t_25b8c662 — an impersonated session belongs to the CUSTOMER's tenant, but the token
   // keeps the OPERATOR's `sub` (admin_handler::impersonate switches `aid` only). So PUT
   // /auth/profile and PUT /auth/password would write to the OPERATOR's own user row: the Profile
@@ -962,13 +1068,19 @@ const App = () => {
   return html`<div class="flex">
     <div class="sidebar">
       <div class="flex items-center gap-2 px-3 py-4 mb-2">
-        <span class="text-2xl">📞</span>
+        ${c.avatar_url
+          ? html`<img id="header-avatar" src=${c.avatar_url + (S.avatarBust ? '?t=' + S.avatarBust : '')} alt="Profile" class="w-8 h-8 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
+          : html`<span class="text-2xl">📞</span>`}
         <span class="nav-txt font-bold text-gray-800">MissedCall</span>
       </div>
       <div class="flex-1 space-y-1">
         ${nav.map(n => html`<div class="nav-item ${S.view===n.id?'active':''}" onClick=${() => { S.view = n.id; renderApp(); }}><span>${n.icon}</span><span class="nav-txt">${n.label}</span></div>`)}
       </div>
       <div class="text-xs text-gray-400 px-3 py-2 truncate">${c.email || ''}</div>
+      <!-- The account LEVEL (kanban t_9cd2c8f2): the REAL plan tier from GET /auth/me, never the
+           literal word "User" (the FunnelSwift defect). Falls back to "Free" only when the server
+           has not answered yet. -->
+      <div class="px-3 pb-2"><span id="level-label" class="badge badge-blue">${c.plan_name || 'Free'}</span></div>
       <!-- User guide link (kanban t_5af0ddda): the fleet standard puts the user guide at
            /guide.html on THIS origin and links it from the app shell beside sign-out. Before this
            the tenant shell linked its own guide nowhere - only the marketing footer did, and it

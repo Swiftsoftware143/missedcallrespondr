@@ -245,6 +245,19 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000031_payment_providers_secrets_encrypted_at_rest",
             include_str!("../migrations/000031_payment_providers_secrets_encrypted_at_rest.sql"),
         ),
+        // 000032 adds the fleet account/profile surface (programme t_2cb77960, card t_9cd2c8f2):
+        // `users.username` + `users.company` (both nullable) and the one-row-per-user `user_avatars`
+        // table that holds an uploaded picture's bytes and its sniffed content type. Additive and
+        // fully idempotent (ADD COLUMN IF NOT EXISTS / CREATE TABLE IF NOT EXISTS / a pg_constraint-
+        // guarded CHECK), so the boot-time runner re-executing it on live is a no-op after the first
+        // pass. Registering it here is also what makes the rebuild pick the file up: `include_str!`
+        // of a BRAND-NEW file is not a dependency of the previous build, so without an edit to this
+        // crate's own sources the new .sql would never reach the embedded set (skill note: "a new
+        // migration file does not trigger a rebuild").
+        (
+            "000032_user_profile_company_and_avatars",
+            include_str!("../migrations/000032_user_profile_company_and_avatars.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

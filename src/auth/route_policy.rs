@@ -129,6 +129,15 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // `get_checkout_session_public` reads one session by its UUID (unguessable) and returns the
     // status summary the post-checkout page shows. Read-only, and no tenant scope is decided here.
     "/api/v1/checkout/session/:id",
+    // --- user profile picture --------------------------------------------------------------------
+    // CARD t_9cd2c8f2 (the fleet account/profile surface, programme t_2cb77960). The console renders
+    // the account picture with a plain `<img src="/api/v1/auth/avatar/<id>">`, and an image request
+    // cannot carry a bearer token — so the READ must be anonymous or the picture never loads. It is
+    // deliberately NARROW: the path is keyed by an unguessable uuid and the handler returns exactly
+    // that one user's stored bytes under the content type sniffed at upload time, nothing else. No
+    // tenant scope, no credential, no row of user data; a user with no picture answers 404. The
+    // UPLOAD twin (POST /api/v1/auth/avatar) stays PRIVATE and must never be added here.
+    "/api/v1/auth/avatar/:user_id",
 ];
 
 /// Service-to-service routes whose own shared key (`x-internal-key` = `INTERNAL_SYNC_KEY`) is the
@@ -298,6 +307,7 @@ mod tests {
             "/api/v1/me/usage",
             "/api/v1/auth/profile",
             "/api/v1/auth/password",
+            "/api/v1/auth/avatar",
             "/api/v1/calls",
             "/api/v1/calls/call-one",
             "/api/v1/contacts",
@@ -358,6 +368,13 @@ mod tests {
         // ...and never a longer path, and never its plural sibling.
         assert!(!is_public_route("/api/v1/checkout/session/x/extra"));
         assert!(!is_public_route("/api/v1/checkout/sessions"));
+
+        // The profile picture READ (card t_9cd2c8f2): one segment, and ONLY the read — the upload
+        // path has no trailing segment and must stay private. (A uuid-shaped literal here would
+        // trip the gate's hardcoded-UUID rule; the template matches any one segment.)
+        assert!(is_public_route("/api/v1/auth/avatar/user-one"));
+        assert!(!is_public_route("/api/v1/auth/avatar"));
+        assert!(!is_public_route("/api/v1/auth/avatar/x/extra"));
     }
 
     #[test]

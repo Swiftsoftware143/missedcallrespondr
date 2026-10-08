@@ -228,6 +228,37 @@ impl From<TeamMember> for TeamMemberResponse {
     }
 }
 
+/// The signed-in account as `GET /api/v1/auth/me` answers it (programme card t_2cb77960, this app's
+/// card t_9cd2c8f2).
+///
+/// Deliberately a SEPARATE struct from [`TeamMemberResponse`]: this one carries the fields the
+/// account screen renders, including the REAL plan tier (`plan_name`, resolved from
+/// `tenant_plans JOIN plans`) and the picture URL, neither of which the login/register responses
+/// need or can cheaply know. The console signs in against `/auth/login` and then re-reads this
+/// route, so `plan_name` is always the live tier and never a word the UI guessed.
+///
+/// Every optional field is `skip_serializing_if` so a field the account has not set is simply
+/// absent from the JSON, and the console treats absent and null identically.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MeResponse {
+    pub id: uuid::Uuid,
+    pub email: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    #[serde(rename = "account_id")]
+    pub tenant_id: uuid::Uuid,
+    pub role: String,
+    /// The real plan tier name for this account's tenant ("Free", "Pro", …). Never the literal
+    /// word "User" — that stray label is the FunnelSwift defect this programme removes.
+    pub plan_name: String,
+    /// `/api/v1/auth/avatar/<id>` when the account has uploaded a picture, absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ChangePasswordRequest {
     pub current_password: String,
