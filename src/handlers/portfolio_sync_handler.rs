@@ -53,12 +53,47 @@ pub async fn portfolio_sync_internal(
     match action {
         "create" => {
             if let (Some(pid), Some(tid)) = (portfolio_id, tenant_id) {
+                // `tenants.slug` carries UNIQUE `tenants_slug_key`, and the slug on this arm is
+                // CALLER-SUPPLIED (`body.slug`), so a slug that already belongs to any tenant made the
+                // tenants INSERT raise 23505 — and `.ok()` DISCARDED it. The next statement then wrote
+                // a `portfolio_companies` row whose `tenant_id` had no parent, so the FK
+                // (`portfolio_companies_tenant_id_fkey`) raised and the caller got an opaque
+                // `500 {"error":"Database error"}` naming nothing (kanban t_4bccea82, reproduced live
+                // 2026-10-08T17:22:22Z). The two statements now run in ONE transaction and the error is
+                // PROPAGATED: a caller-supplied slug is honoured when it is actually free and refused
+                // with a 409 that names it when it is taken — never silently replaced, because the
+                // hub's contract is that `body.slug` is what lands in both rows. A create that supplies
+                // NO slug is derived by the app's own rule, the one every account door uses
+                // (kanban t_1a26f923 / t_ff66fbe3).
+                let tenant_slug = if slug.trim().is_empty() {
+                    crate::auth::signup::unique_account_slug(&state.pool, &name).await?
+                } else {
+                    slug.clone()
+                };
+
+                let mut tx = state.pool.begin().await?;
                 sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING")
-                    .bind(tid).bind(&name).bind(&slug)
-                    .execute(&state.pool).await.ok();
+                    .bind(tid).bind(&name).bind(&tenant_slug)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| match e {
+                        // The only unique guard this statement can trip which its arbiter does not
+                        // absorb is `tenants_slug_key`: a PK conflict is the ON CONFLICT target.
+                        // Matched on the SQLSTATE, not on a constraint name (write-validation-parity).
+                        sqlx::Error::Database(db)
+                            if db.code().as_deref() == Some("23505") =>
+                        {
+                            AppError::Conflict(format!(
+                                "slug '{}' is already in use by another account",
+                                tenant_slug
+                            ))
+                        }
+                        other => other.into(),
+                    })?;
                 sqlx::query("INSERT INTO portfolio_companies (id, tenant_id, name, slug) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, updated_at = NOW()")
-                    .bind(pid).bind(tid).bind(&name).bind(&slug)
-                    .execute(&state.pool).await?;
+                    .bind(pid).bind(tid).bind(&name).bind(&tenant_slug)
+                    .execute(&mut *tx).await?;
+                tx.commit().await?;
             }
         }
         "update" => {
