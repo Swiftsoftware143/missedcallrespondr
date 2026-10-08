@@ -37,6 +37,26 @@
 </head>
 <body>
 <div id="app"></div>
+<script>
+/* Inline guide content (fleet standard; the app-ui counterpart of the /guide.html page). One entry
+   per console screen. This console is a preact SPA that switches views in JS WITHOUT touching the
+   path or the hash, so it tells the widget which screen is open via window.inlineGuidePage(viewId)
+   on every render (see renderApp below). */
+window.appGuidePages = {
+  overview:     { title: "Overview", desc: "Your response numbers at a glance \u2014 calls received, messages sent, and what still needs a reply.", actions: ["Scan today's calls", "Use the sidebar to move between screens"] },
+  calls:        { title: "Calls", desc: "Every call that reached your numbers, with the caller and what happened to it.", actions: ["See which calls were missed", "Open a call to review it"] },
+  phoneNumbers: { title: "Phone Numbers", desc: "The numbers connected to this account. A call to any of these is handled by your response rules.", actions: ["Add a number", "Check the status of each number"] },
+  rules:        { title: "Response Rules", desc: "What happens when a call is missed \u2014 for example an automatic text back. Each rule decides the action taken.", actions: ["Create a rule", "Choose which calls it applies to"] },
+  templates:    { title: "Templates", desc: "The message wording your automatic replies use. Edit a template here and every rule that uses it follows.", actions: ["Add a template", "Edit the wording"] },
+  messages:     { title: "Messages", desc: "Every text sent and received on this account, in one thread list.", actions: ["Read a conversation", "Reply to a customer"] },
+  followups:    { title: "Follow-ups", desc: "Messages scheduled to go out later, so a lead is not forgotten after the first reply.", actions: ["See what is queued", "Check what has already sent"] },
+  contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list.", actions: ["Search your contacts", "Open a contact's history"] },
+  tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
+  integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
+  profile:      { title: "Profile", desc: "Your account details and sign-in for this workspace.", actions: ["Update your name and password"] }
+};
+</script>
+<script src="/inline-guide-widget.js"></script>
 <script type="module">
 // preact + htm, exactly the fleet pattern the other shells use (www-admin, WorkflowSwift).
 // The shipped tag loaded cdn.jsdelivr.net/npm/lit-html@2.8.0/lit-html.min.js in a CLASSIC
@@ -966,7 +986,13 @@ const App = () => {
   </div>`;
 };
 
-const renderApp = () => render(html`<${App} />`, document.getElementById('app'));
+const renderApp = () => {
+  render(html`<${App} />`, document.getElementById('app'));
+  // Keep the inline guide on the screen the tenant is looking at. The widget cannot follow a preact
+  // SPA by path/hash, so it is told the view id on every render — only when a session exists, so the
+  // sign-in screen never shows a screen's guide.
+  if (API.token && window.inlineGuidePage) window.inlineGuidePage(S.view);
+};
 renderApp();
 </script>
 </body>
