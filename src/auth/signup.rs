@@ -66,10 +66,12 @@ pub struct NewAccount<'a> {
     pub password_plain: Option<&'a str>,
     /// The workspace label (`tenants.name`).
     pub account_name: &'a str,
-    /// The workspace slug (`tenants.slug`, UNIQUE). `None` derives it from `account_name` the way
-    /// `register` always has (`lower().replace(' ', "_")`); a caller that passes one owns the
-    /// uniqueness of that value (the tag door does — two leads of one company would otherwise
-    /// collide on this UNIQUE constraint and 500 the caller).
+    /// The workspace slug (`tenants.slug`, UNIQUE). `None` derives a NOT-taken one through
+    /// [`unique_account_slug`] (base `account_name.to_lowercase().replace(' ', "_")` plus a short
+    /// random suffix) instead of the raw name: two visitors with the same name are ordinary input,
+    /// so the derivation must never be allowed to collide (kanban t_1a26f923). A caller that passes
+    /// one is honoured first; if it is already taken, [`create_account`] re-derives rather than
+    /// answering 500.
     pub account_slug: Option<&'a str>,
     /// The plan to seat, resolved IN-APP by the caller (design §3.1 rule 1). `plans.slug` is this
     /// app's plan identity: `register` passes `"free"`, the tag door passes the entry plan its own
@@ -154,17 +156,42 @@ pub async fn create_account(
     }
 
     let account_id = Uuid::new_v4();
-    let account_slug = a
-        .account_slug
-        .map(str::to_string)
-        .unwrap_or_else(|| a.account_name.to_lowercase().replace(' ', "_"));
 
-    sqlx::query("INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)")
+    // The workspace slug (`tenants.slug`) is UNIQUE (`tenants_slug_key`) and the public signup has
+    // no workspace field at all — `account_name` is "<name>'s Workspace" — so two visitors of the
+    // same name are ordinary input and BOTH must get an account. Derive the slug through
+    // [`unique_account_slug`] (base + short random suffix) instead of the raw name, and let
+    // `ON CONFLICT (slug) DO NOTHING` turn the residual derive/insert race into a retry: before
+    // this, the second signup answered `500 Database error` straight from the UNIQUE index
+    // (kanban t_1a26f923).
+    let mut account_slug: Option<String> = None;
+    for attempt in 0..4 {
+        // Honour a caller-supplied slug on the first pass (the tag and paid-checkout doors derive
+        // one with the same helper); every pass after a loss re-derives, so a taken candidate is
+        // never retried verbatim.
+        let candidate = match a.account_slug {
+            Some(s) if attempt == 0 => s.to_string(),
+            _ => unique_account_slug(db, a.account_name).await?,
+        };
+        let inserted = sqlx::query(
+            "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) ON CONFLICT (slug) DO NOTHING",
+        )
         .bind(account_id)
         .bind(a.account_name)
-        .bind(&account_slug)
+        .bind(&candidate)
         .execute(db)
         .await?;
+        if inserted.rows_affected() == 1 {
+            account_slug = Some(candidate);
+            break;
+        }
+    }
+    let account_slug = account_slug.ok_or_else(|| {
+        AppError::Internal(format!(
+            "create_account: no free tenants.slug for account '{}'",
+            a.account_name
+        ))
+    })?;
 
     let user_id = Uuid::new_v4();
     let now = Utc::now().naive_utc();

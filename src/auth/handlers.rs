@@ -53,7 +53,9 @@ pub async fn register(
     // (`POST /api/v1/internal/provision-free-account`) calls, so the account this public signup
     // mints and the account a FunnelSwift tag mints cannot drift: one `tenants` row, one
     // `account_owner` `users` row, one `tenant_plans` row on `free` with 50 starter credits.
-    // `account_slug: None` keeps the derivation this handler has always used; `password_plain` now
+    // `account_slug: None` makes `create_account` DERIVE a not-taken slug through
+    // `signup::unique_account_slug` (kanban t_1a26f923 — the raw name derivation used to collide on
+    // `tenants_slug_key` and 500 the second visitor of the same name); `password_plain` now
     // carries the server-minted first password so the `welcome_credentials` mail can deliver it.
     // No workspace-name field on the page: derive "<name>'s Workspace" when none was supplied.
     let account_name = {
