@@ -245,10 +245,14 @@ mod tests {
     }
 
     #[test]
-    fn only_the_three_extractor_statuses_are_candidates() {
+    fn only_the_listed_extractor_statuses_are_candidates() {
         for status in REJECTION_STATUSES {
-            assert!([400, 415, 422].contains(&status.as_u16()), "{status}");
+            assert!([400, 413, 415, 422].contains(&status.as_u16()), "{status}");
         }
+        // 413 is deliberate (kanban t_9cd2c8f2): the profile-picture upload's body IS the image, and
+        // axum refuses one over `DefaultBodyLimit` as text/plain before any handler runs — rewriting
+        // it here is what makes "your picture is too big" a sentence the console can read.
+        assert!(REJECTION_STATUSES.contains(&StatusCode::PAYLOAD_TOO_LARGE));
         assert!(!REJECTION_STATUSES.contains(&StatusCode::NOT_FOUND));
         assert!(!REJECTION_STATUSES.contains(&StatusCode::UNAUTHORIZED));
         assert!(!REJECTION_STATUSES.contains(&StatusCode::METHOD_NOT_ALLOWED));

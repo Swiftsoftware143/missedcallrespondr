@@ -10,15 +10,16 @@
 //! only this module. Nothing else decides whether a route may be reached anonymously.
 //!
 //! # The census (measured 2026-10-06 from `src/routes.rs`, then verified live with an anonymous
-//! probe against 127.0.0.1:8088)
+//! probe against 127.0.0.1:8088; re-measured 2026-10-08 after the account/profile card t_9cd2c8f2
+//! added the two avatar routes)
 //!
 //! ```text
-//!   113 mounted `.route(..)` entries in the one routing file, 113 distinct paths (every path is
+//!   115 mounted `.route(..)` entries in the one routing file, 115 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   100 entries reach `protected_routes`, which carries `auth_middleware`
-//!    13 entries reach the ANONYMOUS `public_routes`:
-//!        10 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   101 entries reach `protected_routes`, which carries `auth_middleware`
+//!    14 entries reach the ANONYMOUS `public_routes`:
+//!        11 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -48,10 +49,10 @@
 //!    is what refuses an anonymous caller. The refusal is distinguishable: the boundary's body is
 //!    `{"error":"Authentication required","status":401}` and never `auth_middleware`'s
 //!    `{"error":"Missing authorization header"}`.
-//! 3. **Two accidental-anonymous routes were looked for and NOT found.** All 99 routes on the gated
+//! 3. **Two accidental-anonymous routes were looked for and NOT found.** All 101 routes on the gated
 //!    router take a credential, and both anonymous machine receivers check the shared key themselves
 //!    — each fails CLOSED (`internal_sync_key.is_empty() || key != internal_sync_key`), so an
-//!    unconfigured key refuses instead of admitting. The 10 deliberate public routes are named with
+//!    unconfigured key refuses instead of admitting. The 11 deliberate public routes are named with
 //!    their reason below. This app's census is a TIGHTENING (a committed list + a boundary + the
 //!    fallback closure), not a repair of anonymous handlers — the same honest finding the three
 //!    apps before it reached.
@@ -272,7 +273,7 @@ mod tests {
         }
         // the scan really sees the mounts (a silent zero would make the test vacuous)
         assert!(
-            route_literals().len() >= 113,
+            route_literals().len() >= 115,
             "route literal scan found too few: {}",
             route_literals().len()
         );
@@ -454,20 +455,21 @@ mod tests {
     /// from the code without a test failing.
     #[test]
     fn the_census_shape_is_what_the_docs_say() {
-        assert_eq!(super::PUBLIC_ROUTES.len(), 10, "PUBLIC_ROUTES size");
+        assert_eq!(super::PUBLIC_ROUTES.len(), 11, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
-        // The 13 anonymous mounts the census found: 10 deliberate + 3 key receivers.
+        // The 14 anonymous mounts the census found: 11 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            13
+            14
         );
-        // 113 entries / 113 distinct paths, and the two lists are disjoint.
+        // 115 entries / 115 distinct paths (the avatar read + its private upload twin joined on
+        // 2026-10-08, card t_9cd2c8f2), and the two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 113, "mounted .route entries");
+        assert_eq!(lits.len(), 115, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 113, "distinct mounted paths");
+        assert_eq!(uniq.len(), 115, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
