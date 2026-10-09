@@ -429,6 +429,111 @@ const Profile = () => {
   </div>`;
 };
 
+// ===== EMAIL BRANDING =====
+// kanban t_feab8aff (app 5 of the per-tenant email-branding port). The account sets a logo, a
+// display name and a colour; every transactional mail this app sends for that account then opens
+// with that branding (the server's ONE render funnel adds it). Additive: an account with none gets
+// byte-identical mail to before. The logo is POSTed as the RAW file bytes (this app's avatar idiom,
+// no multipart envelope) to /api/v1/settings/branding/logo.
+const Branding = () => {
+  const st = viewState('branding', {
+    loaded: false, brand_name: '', brand_color: '', logo_url: '',
+    notice: null, error: null, busy: false, bust: null
+  });
+  if (!st.loaded && !st.busy) {
+    st.busy = true;
+    API.get('/settings/branding').then(d => {
+      st.brand_name = d.brand_name || '';
+      st.brand_color = d.brand_color || '';
+      st.logo_url = d.logo_url || '';
+      st.loaded = true; st.busy = false; renderApp();
+    }).catch(e => {
+      st.error = 'Could not load branding: ' + e.message;
+      st.loaded = true; st.busy = false; renderApp();
+    });
+  }
+  const logoUrl = () => {
+    if (!st.logo_url) return null;
+    if (!st.bust) return st.logo_url;
+    return st.logo_url + (st.logo_url.includes('?') ? '&' : '?') + 't=' + st.bust;
+  };
+
+  const save = async () => {
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      const d = await API.put('/settings/branding', { brand_name: st.brand_name, brand_color: st.brand_color });
+      if (d.brand_name !== undefined) st.brand_name = d.brand_name || '';
+      if (d.brand_color !== undefined) st.brand_color = d.brand_color || '';
+      if (d.logo_url !== undefined) st.logo_url = d.logo_url || '';
+      st.notice = 'Branding saved';
+    } catch (e) { st.error = 'Save failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+
+  const upload = async (e) => {
+    const file = (e.target.files || [])[0];
+    if (!file) return;
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      const bytes = await file.arrayBuffer();
+      const r = await fetch(window.location.origin + '/api/v1/settings/branding/logo', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + API.token, 'Content-Type': file.type || 'application/octet-stream' },
+        body: bytes
+      });
+      let d = {}; try { d = await r.json(); } catch (e2) { /* non-JSON refusal */ }
+      if (!r.ok) throw new Error(d.error || d.message || ('Upload failed (' + r.status + ')'));
+      st.logo_url = d.logo_url || st.logo_url;
+      st.bust = Date.now();
+      st.notice = 'Logo uploaded';
+      if (e.target) e.target.value = '';
+    } catch (err) { st.error = 'Upload failed: ' + err.message; }
+    st.busy = false; renderApp();
+  };
+
+  const removeLogo = async () => {
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      await API.del('/settings/branding/logo');
+      st.logo_url = ''; st.bust = Date.now(); st.notice = 'Logo removed.';
+    } catch (e) { st.error = 'Remove failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+
+  const logo = logoUrl();
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">Email Branding</h2>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    <div class="card">
+      <h3 class="font-semibold mb-3">Your logo</h3>
+      <div class="flex items-start gap-5">
+        <div class="text-center">
+          ${logo
+            ? html`<img id="brand-logo-preview" src=${logo} alt="Brand logo" style="max-height:72px;max-width:200px;border:1px solid #e2e8f0;border-radius:8px;padding:6px;background:#fff" />`
+            : html`<div id="brand-logo-preview" class="w-24 h-24 rounded flex items-center justify-center text-3xl" style="background:#f1f5f9;border:1px solid #e2e8f0">🎨</div>`}
+          <div class="mt-2 space-x-2">
+            <label class="btn btn-sm btn-outline" id="brand-upload-btn" style="display:inline-block;cursor:pointer">
+              ${logo ? 'Change logo' : 'Upload logo'}
+              <input id="brand-logo-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onChange=${upload} />
+            </label>
+            ${logo && html`<button id="brand-remove-btn" class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${removeLogo}>Remove</button>`}
+          </div>
+          <p class="text-xs text-gray-400 mt-2">PNG, JPEG, GIF or WebP · up to 2 MB</p>
+        </div>
+        <div class="space-y-3" style="flex:1;max-width:420px">
+          <div><label class="text-sm font-medium block mb-1">Brand display name</label>
+            <input id="brand-name-input" class="input" maxlength="60" placeholder="Your business name" value=${st.brand_name || ''} onInput=${e => { st.brand_name = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium block mb-1">Brand colour</label>
+            <input id="brand-color-input" class="input" placeholder="#4f46e5" value=${st.brand_color || ''} onInput=${e => { st.brand_color = e.target.value; }} /></div>
+          <button id="brand-save-btn" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save branding</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mt-3">Your logo and business name open every transactional email we send for your account (welcome, password reset, receipts). Leave them blank to keep our default look.</p>
+    </div>
+  </div>`;
+};
+
 // ===== RESPONSE RULES =====
 // kanban t_31f9cf38 — these rules used to be stored and never read: the screen was CRUD-only and no
 // inbound-call path touched `response_rules`. They now run (src/handlers/response_rule_eval.rs), so
@@ -1060,9 +1165,10 @@ const App = () => {
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
+    { id: 'branding', label: 'Email Branding', icon: '🎨' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, branding: Branding, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
