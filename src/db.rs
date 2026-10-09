@@ -267,6 +267,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000033_tenant_email_branding",
             include_str!("../migrations/000033_tenant_email_branding.sql"),
         ),
+        // 000034 corrects the SYSTEM sender display name (programme item b, card t_68d95177 /
+        // t_9cd2c8f2): the panel row carried the domain spelling "MissedCallRespondr Help Desk"
+        // while the app's brand is "MissedCall Respondr". Tightly scoped to the exact wrong literal,
+        // idempotent (a re-run matches nothing), so an operator's own sender is never clobbered.
+        (
+            "000034_system_sender_display_name",
+            include_str!("../migrations/000034_system_sender_display_name.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
