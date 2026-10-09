@@ -443,7 +443,7 @@ async fn send_email_request(
     // bounce (measured 2026-10-09 on mail.missedcallrespondr.com: `accepted` then `bounced` 552), and
     // every such send burns a delivery on the domain's sending reputation. This function is the choke
     // point BOTH the template arm and the inline fallbacks pass through, so the guard covers every
-    // transactional type. The RFC-2606 class (.local/.test/.invalid/example.*) is deliberately NOT
+    // transactional type. The RFC-2606 class is now ALSO suppressed (changed 2026-10-09 after measuring real provider attempts) (.local/.test/.invalid/example.*) is deliberately NOT
     // suppressed — content harnesses point the provider at a local sink and read the message off the
     // wire, so silencing it would delete proof.
     if let Some(domain) = crate::security::probe_addr::harness_domain(to) {
