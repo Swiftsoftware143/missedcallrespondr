@@ -258,6 +258,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000032_user_profile_company_and_avatars",
             include_str!("../migrations/000032_user_profile_company_and_avatars.sql"),
         ),
+        // 000033 adds the per-account email-branding logo store (kanban t_feab8aff, app 5 of the
+        // port). `tenant_settings` already holds the text half; `tenant_logos` holds the logo bytes.
+        // Idempotent (CREATE TABLE IF NOT EXISTS), and registering it here is also what forces the
+        // rebuild to embed the brand-new .sql (`include_str!` of a new file is not a dependency of
+        // the previous build).
+        (
+            "000033_tenant_email_branding",
+            include_str!("../migrations/000033_tenant_email_branding.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

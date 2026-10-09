@@ -14,12 +14,12 @@
 //! added the two avatar routes)
 //!
 //! ```text
-//!   115 mounted `.route(..)` entries in the one routing file, 115 distinct paths (every path is
+//!   118 mounted `.route(..)` entries in the one routing file, 118 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   101 entries reach `protected_routes`, which carries `auth_middleware`
-//!    14 entries reach the ANONYMOUS `public_routes`:
-//!        11 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   103 entries reach `protected_routes`, which carries `auth_middleware`
+//!    15 entries reach the ANONYMOUS `public_routes`:
+//!        12 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -139,6 +139,14 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // tenant scope, no credential, no row of user data; a user with no picture answers 404. The
     // UPLOAD twin (POST /api/v1/auth/avatar) stays PRIVATE and must never be added here.
     "/api/v1/auth/avatar/:user_id",
+    // --- per-account email-branding logo (kanban t_feab8aff) --------------------------------------
+    // The logo is embedded in a transactional email's HTML (`<img src="https://app.../api/v1/
+    // branding/logo/<id>?v=…">`), and a mail client fetches it with NO credential — a token-gated
+    // logo would simply never render. Deliberately NARROW: keyed by an unguessable uuid, it returns
+    // exactly that one account's stored bytes under the content type sniffed at upload time, and an
+    // account with no logo answers 404. The authenticated write twins
+    // (POST|DELETE /api/v1/settings/branding/logo) stay PRIVATE and must never be added here.
+    "/api/v1/branding/logo/:tenant_id",
 ];
 
 /// Service-to-service routes whose own shared key (`x-internal-key` = `INTERNAL_SYNC_KEY`) is the
@@ -309,6 +317,8 @@ mod tests {
             "/api/v1/auth/profile",
             "/api/v1/auth/password",
             "/api/v1/auth/avatar",
+            "/api/v1/settings/branding",
+            "/api/v1/settings/branding/logo",
             "/api/v1/calls",
             "/api/v1/calls/call-one",
             "/api/v1/contacts",
@@ -376,6 +386,13 @@ mod tests {
         assert!(is_public_route("/api/v1/auth/avatar/user-one"));
         assert!(!is_public_route("/api/v1/auth/avatar"));
         assert!(!is_public_route("/api/v1/auth/avatar/x/extra"));
+
+        // The per-account email-branding logo READ (kanban t_feab8aff): one segment, and ONLY the
+        // read — the write twins have no trailing segment and must stay private.
+        assert!(is_public_route("/api/v1/branding/logo/account-one"));
+        assert!(!is_public_route("/api/v1/settings/branding"));
+        assert!(!is_public_route("/api/v1/settings/branding/logo"));
+        assert!(!is_public_route("/api/v1/branding/logo/x/extra"));
     }
 
     #[test]
@@ -455,21 +472,22 @@ mod tests {
     /// from the code without a test failing.
     #[test]
     fn the_census_shape_is_what_the_docs_say() {
-        assert_eq!(super::PUBLIC_ROUTES.len(), 11, "PUBLIC_ROUTES size");
+        assert_eq!(super::PUBLIC_ROUTES.len(), 12, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
-        // The 14 anonymous mounts the census found: 11 deliberate + 3 key receivers.
+        // The 15 anonymous mounts the census found: 12 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            14
+            15
         );
-        // 115 entries / 115 distinct paths (the avatar read + its private upload twin joined on
-        // 2026-10-08, card t_9cd2c8f2), and the two lists are disjoint.
+        // 118 entries / 118 distinct paths (the avatar read + its private upload twin joined on
+        // 2026-10-08, card t_9cd2c8f2; the email-branding logo read + its two private write twins
+        // joined on 2026-10-09, card t_feab8aff), and the two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 115, "mounted .route entries");
+        assert_eq!(lits.len(), 118, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 115, "distinct mounted paths");
+        assert_eq!(uniq.len(), 118, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

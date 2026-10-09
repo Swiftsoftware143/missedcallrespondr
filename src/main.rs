@@ -1,5 +1,6 @@
 mod auth;
 mod body_deadline;
+mod branding;
 mod config;
 mod db;
 mod email;

@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use crate::email_provider;
 
+use crate::branding;
+
 /// Render a template string by substituting the placeholders that ARE keys of `vars`.
 ///
 /// Two brace conventions are accepted because both are live: every shipped row — and anything an
@@ -59,6 +61,57 @@ fn with_app_vars(vars: &serde_json::Value, app_name: &str, app_url: &str) -> ser
     serde_json::Value::Object(merged)
 }
 
+/// Bind the two branding merge fields into a render's variable map (kanban t_feab8aff).
+///
+/// They are PER-ACCOUNT, so they cannot live in a `&'static` default map: the account's own values
+/// when it has branding, the app's identity otherwise — so an admin-authored `{brand_name}` never
+/// reaches a recipient as literal text. Every other key of the map is left alone.
+fn bind_branding(vars: &mut serde_json::Value, branding: Option<&branding::Branding>) {
+    if !vars.is_object() {
+        *vars = json!({});
+    }
+    let (name, logo) = match branding {
+        Some(b) => (
+            b.brand_name.clone(),
+            b.resolve_logo_url(branding::APP_URL).unwrap_or_default(),
+        ),
+        None => (branding::APP_NAME.to_string(), String::new()),
+    };
+    if let Some(obj) = vars.as_object_mut() {
+        obj.insert("brand_name".to_string(), json!(name));
+        obj.insert("logo_url".to_string(), json!(logo));
+    }
+}
+
+/// Put the account's branding at the TOP of a rendered message (kanban t_feab8aff).
+///
+/// The HTML part gains the header block (logo + name + colour rule); the text part gains the brand
+/// name as a one-line header (a text part cannot carry an image). When the account HAS branding but
+/// the message carries no HTML part — the inline fallbacks return text only — one is built from the
+/// ESCAPED text so a branded mail still shows the logo. A no-op for an account with no branding,
+/// which is what makes the change additive: those renders are byte-identical to before.
+fn apply_branding(
+    branding: Option<&branding::Branding>,
+    text: &str,
+    html: &str,
+) -> (String, String) {
+    let Some(b) = branding else {
+        return (text.to_string(), html.to_string());
+    };
+    let logo = b.resolve_logo_url(branding::APP_URL);
+    let header = b.header_html(logo.as_deref());
+    let html_out = if html.is_empty() {
+        format!(
+            "{header}<div style=\"white-space:pre-wrap;font:14px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827\">{}</div>",
+            branding::escape_html(text)
+        )
+    } else {
+        format!("{header}{html}")
+    };
+    let text_out = format!("{}{}", b.text_header(), text);
+    (text_out, html_out)
+}
+
 /// Send a templated email using database-stored templates.
 /// Falls back to old inline methods when no template found.
 pub async fn send_template_email(
@@ -73,7 +126,12 @@ pub async fn send_template_email(
 
     // A template must render against the SAME values no matter which entry point triggered the
     // send, so the app-level facts are merged in here rather than left to each call site.
-    let vars = with_app_vars(vars, app_name, app_url);
+    let mut vars = with_app_vars(vars, app_name, app_url);
+    // Per-account branding merge fields (kanban t_feab8aff), loaded at the ONE funnel so a template
+    // added later inherits them for free. The header block is applied to the rendered parts in
+    // `send_email_request`, the choke point both this arm and the inline fallbacks pass through.
+    let branding = branding::load(pool, tenant_id).await;
+    bind_branding(&mut vars, branding.as_ref());
 
     // Load template from DB. A lookup FAILURE is no longer swallowed: `lookup_db_template`
     // logs it with this function's name and the error, then the caller falls back to the
@@ -103,6 +161,7 @@ pub async fn send_template_email(
 
             send_email_request(
                 pool,
+                tenant_id,
                 template_type,
                 to,
                 &subject,
@@ -115,7 +174,7 @@ pub async fn send_template_email(
             tracing::info!(
                 "email.send_template_email: no usable db template for template_type={template_type} (tenant {tenant_id}) — sending the inline body"
             );
-            send_inline(pool, to, template_type, &vars, app_name, app_url).await
+            send_inline(pool, tenant_id, to, template_type, &vars, app_name, app_url).await
         }
     }
 }
@@ -171,6 +230,7 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
 
 async fn send_inline(
     pool: &PgPool,
+    tenant_id: Uuid,
     to: &str,
     template_type: &str,
     vars: &serde_json::Value,
@@ -199,6 +259,7 @@ async fn send_inline(
             );
             send_email_request(
                 pool,
+                tenant_id,
                 template_type,
                 to,
                 &format!("Welcome to {}!", app_name),
@@ -214,6 +275,7 @@ async fn send_inline(
             );
             send_email_request(
                 pool,
+                tenant_id,
                 template_type,
                 to,
                 "Payment Received - Thank You!",
@@ -227,12 +289,22 @@ async fn send_inline(
                 "Your password reset code is: {}\n\nThis code expires in 1 hour.\n\nIf you did not request this password reset, please ignore this email.\n\n- SwiftSoftware",
                 token
             );
-            send_email_request(pool, template_type, to, "Password Reset Request", &body, "").await
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                "Password Reset Request",
+                &body,
+                "",
+            )
+            .await
         }
         _ => {
             let body = format!("{} Notification:\n\n{}", app_name, vars);
             send_email_request(
                 pool,
+                tenant_id,
                 template_type,
                 to,
                 &format!("{} Notification", app_name),
@@ -358,12 +430,18 @@ async fn record_last_send(
 /// "password_reset", …) so a failure is attributable on the admin surface.
 async fn send_email_request(
     pool: &PgPool,
+    tenant_id: Uuid,
     kind: &str,
     to: &str,
     subject: &str,
     text_body: &str,
     html_body: &str,
 ) -> Result<(), String> {
+    // The account's branding opens both parts of the message (kanban t_feab8aff); a no-op for an
+    // account with no branding, so those sends are byte-identical to before.
+    let branding = branding::load(pool, tenant_id).await;
+    let (text_body, html_body) = apply_branding(branding.as_ref(), text_body, html_body);
+
     let cfg = email_provider::resolve(pool).await.ok_or_else(|| {
         "no email provider configured — save the admin panel's Email Provider \
          (admin_settings.email) or set EMAIL_API_URL/EMAIL_API_KEY/EMAIL_FROM"
@@ -373,9 +451,9 @@ async fn send_email_request(
     let html = if html_body.is_empty() {
         None
     } else {
-        Some(html_body)
+        Some(html_body.as_str())
     };
-    let outcome = email_provider::deliver(&cfg, to, subject, text_body, html).await;
+    let outcome = email_provider::deliver(&cfg, to, subject, &text_body, html).await;
 
     // The provider's own receipt on success (`{"id":"<…>","message":"Queued. Thank you."}`) is the
     // only proof the message left the box; on failure the status + body is what distinguishes a

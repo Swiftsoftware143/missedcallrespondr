@@ -340,7 +340,7 @@ pub const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
 /// Identify an image by its MAGIC BYTES, never by a caller-supplied content type or filename
 /// (FunnelSwift t_ff948669's decision, reused here). Returns the content type to store, or `None`
 /// for anything that is not one of the four accepted formats.
-fn sniff_image(b: &[u8]) -> Option<&'static str> {
+pub(crate) fn sniff_image(b: &[u8]) -> Option<&'static str> {
     if b.len() >= 8 && b.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
         return Some("image/png");
     }

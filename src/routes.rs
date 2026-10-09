@@ -46,6 +46,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/auth/avatar/:user_id",
             get(auth_handlers::get_avatar),
         )
+        // The per-account email-branding logo READ (kanban t_feab8aff). An `<img src>` in a mail
+        // client cannot carry a bearer token, so this ONE route is anonymous and is named in
+        // `crate::auth::route_policy::PUBLIC_ROUTES`. It returns only the bytes one uuid-keyed
+        // account uploaded, under the content type sniffed at upload time; an account with no logo
+        // answers 404. The authenticated write twins below stay on the gated router.
+        .route(
+            "/api/v1/branding/logo/:tenant_id",
+            get(crate::handlers::branding_handler::get_logo),
+        )
         .route(
             "/api/v1/internal/portfolio-companies",
             post(portfolio_handler::internal_create_portfolio_company),
@@ -135,6 +144,19 @@ pub fn create_router(state: AppState) -> Router {
         // 400s from the handler; only the format is sniffed, and only from the bytes. The anonymous
         // GET twin lives on the public router above.
         .route("/api/v1/auth/avatar", post(auth_handlers::upload_avatar))
+        // Per-account email branding (kanban t_feab8aff). GET/PUT the text half (name + colour,
+        // with the stored logo preserved on a PUT that omits it) and POST/DELETE the logo bytes.
+        // The logo POST takes the body as the raw image, exactly like the avatar upload above.
+        .route(
+            "/api/v1/settings/branding",
+            get(crate::handlers::branding_handler::get_branding)
+                .put(crate::handlers::branding_handler::put_branding),
+        )
+        .route(
+            "/api/v1/settings/branding/logo",
+            post(crate::handlers::branding_handler::upload_logo)
+                .delete(crate::handlers::branding_handler::delete_logo),
+        )
         // Calls
         .route(
             "/api/v1/calls",
