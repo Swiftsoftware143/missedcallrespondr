@@ -213,5 +213,11 @@ pub async fn get_logo(
         header::CACHE_CONTROL,
         header::HeaderValue::from_static("no-store"),
     );
+    // The stored type is pinned and the browser is told not to sniff, so a mislabelled upload can
+    // never be served back as something executable.
+    resp.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::HeaderValue::from_static("nosniff"),
+    );
     Ok(resp)
 }

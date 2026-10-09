@@ -470,9 +470,13 @@ pub async fn forgot_password(
             "token": token,
             "app_url": "https://app.missedcallrespondr.com",
         });
+        // kanban t_feab8aff: the mail is the ACCOUNT's (the user belongs to `user.tenant_id`), so
+        // the tenant id is passed through — the per-tenant email branding (and any tenant template
+        // override) is resolved from it. It used to be `Uuid::nil()`, which made every reset mail
+        // fall back to the system default and silently ignored the account's own identity.
         match crate::email::send_template_email(
             &state.pool,
-            uuid::Uuid::nil(),
+            user.tenant_id,
             &user.email,
             "password_reset",
             &vars,
