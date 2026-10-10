@@ -152,6 +152,7 @@
     <li><a href="#messages">Messages</a></li>
     <li><a href="#integrations">Integrations</a></li>
     <li><a href="#settings">Profile &amp; Account</a></li>
+    <li><a href="#email-branding">Email Branding</a></li>
     <li><a href="#faq">FAQ</a></li>
     <li><a href="#affiliates">🔗 Referrals &amp; Affiliates</a></li>
     <li><a href="#provisioning">Provisioning &mdash; a FunnelSwift tag can create a free account here</a></li>
@@ -695,13 +696,36 @@
 
   <div class="callout warning">
     <strong>There is no Settings page</strong>
-    Phone, timezone, company profile, logo, notification preferences and business hours are not part
+    Phone, timezone, company profile, notification preferences and business hours are not part
     of the console, and the account-settings and API-key routes were removed from the API — nothing
-    read a stored tenant setting, so those screens were deliberately not built. No response rule
+    read a stored tenant setting, so those screens were deliberately not built. The one branding
+    control that <em>does</em> exist is the <a href="#email-branding">Email Branding</a> tab (your
+    logo, display name and colour on the emails this app sends). No response rule
     references business hours either: a rule's trigger is
     <em>All missed calls</em>, <em>Specific numbers</em>, <em>Time of day</em> or <em>Day of week</em>
     (see <a href="#response-rules">Response Rules</a>).
   </div>
+
+  <!-- EMAIL BRANDING -->
+  <h2 id="email-branding">Email Branding</h2>
+  <p>
+    Your account can put its own logo, display name and colour at the top of every transactional email
+    this app sends &mdash; the welcome / login-credentials mail, purchase confirmations and password
+    resets. Open the <strong>🎨 Email Branding</strong> tab in the console (it sits beside
+    <strong>Site Config</strong>) and set:
+  </p>
+  <ul>
+    <li><strong>Brand display name</strong> — up to 60 characters, printed above the message.</li>
+    <li><strong>Brand colour</strong> — a hex colour such as <code>#4f46e5</code>; it draws the rule under your logo.</li>
+    <li><strong>Logo</strong> — upload a PNG, JPEG, WebP or GIF up to 2 MB. Once one is set the upload
+      button becomes <strong>Replace logo</strong> and a <strong>Remove logo</strong> button appears.</li>
+  </ul>
+  <p>
+    Click <strong>Save branding</strong>. The logo is served from your account's own public URL
+    (<code>GET /api/v1/branding/logo/{tenant_id}</code>), which is what lets the recipient's mail app
+    display it. Until you set a name or a logo nothing changes &mdash; every message keeps the
+    MissedCall look, because branding is per account, not per app.
+  </p>
 
   <!-- FAQ -->
   <h2 id="faq">Frequently Asked Questions</h2>
