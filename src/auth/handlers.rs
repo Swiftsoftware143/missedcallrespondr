@@ -1,7 +1,7 @@
 use axum::{
     body::{Body, Bytes},
-    extract::{Extension, Path, State},
-    http::header,
+    extract::{Extension, FromRequest, Multipart, Path, Request, State},
+    http::{header, HeaderMap},
     response::Response,
     Json,
 };
@@ -356,17 +356,56 @@ pub(crate) fn sniff_image(b: &[u8]) -> Option<&'static str> {
     None
 }
 
-/// `POST /api/v1/auth/avatar` — the raw image bytes, per user (card t_9cd2c8f2).
+/// `POST /api/v1/auth/avatar` — the image bytes, per user (card t_9cd2c8f2).
 ///
-/// The body IS the picture: no multipart envelope, no filename, no caller-declared content type is
-/// trusted. The format is decided by the bytes, a non-image and an empty body are refused 400, and a
-/// body over [`MAX_AVATAR_BYTES`] is refused 400 as well. One row per user (upsert), so re-uploading
-/// replaces the picture rather than accumulating rows. Private: the caller must present their session.
+/// TWO body shapes, ONE handler (fleet-normalised 2026-10-10). The other five apps submit a profile
+/// picture as `multipart/form-data`; this app historically took it as the RAW body, so the fleet's
+/// form idiom got a 400 "Unsupported picture" here. The handler now reads BOTH: `multipart/form-data`
+/// takes the first file part, anything else is the body verbatim. Either way the format is decided by
+/// the bytes (never a caller-declared content type), a non-image and an empty body are refused 400,
+/// and a body over [`MAX_AVATAR_BYTES`] is refused 400 as well. One row per user (upsert), so
+/// re-uploading replaces the picture rather than accumulating rows. Private: caller must be signed in.
 pub async fn upload_avatar(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-    body: Bytes,
+    headers: HeaderMap,
+    request: Request,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    let content_type_header = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let body: Bytes = if content_type_header.starts_with("multipart/form-data") {
+        let mut multipart = Multipart::from_request(request, &state)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Invalid multipart body: {e}")))?;
+        let mut picked: Option<Bytes> = None;
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Invalid multipart body: {e}")))?
+        {
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Could not read the picture: {e}")))?;
+            if !data.is_empty() {
+                picked = Some(data);
+                break;
+            }
+        }
+        picked.ok_or_else(|| AppError::BadRequest("No picture data received".into()))?
+    } else {
+        Bytes::from(
+            axum::body::to_bytes(request.into_body(), MAX_AVATAR_BYTES + 1)
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Could not read the picture: {e}")))?
+                .to_vec(),
+        )
+    };
+
     if body.is_empty() {
         return Err(AppError::BadRequest("No picture data received".into()));
     }
