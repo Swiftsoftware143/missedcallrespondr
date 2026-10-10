@@ -345,18 +345,19 @@ const Profile = () => {
     st.busy = false; renderApp();
   };
 
-  // The picture is POSTed as the RAW bytes of the chosen file (no multipart envelope): the server
-  // sniffs the magic bytes and refuses anything that is not a PNG/JPEG/GIF/WebP under 2 MB.
+  // The picture is POSTed as `multipart/form-data` (field `file`) — the fleet-wide upload
+  // convention; the server takes the first non-empty part and sniffs its magic bytes, so the part
+  // name is not significant. (This used to send the RAW bytes; kanban t_9cd2c8f2 normalised it.)
   const upload = async (e) => {
     const file = (e.target.files || [])[0];
     if (!file) return;
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
-      const bytes = await file.arrayBuffer();
+      const fd = new FormData(); fd.append('file', file, file.name || 'avatar');
       const r = await fetch(window.location.origin + '/api/v1/auth/avatar', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + API.token, 'Content-Type': file.type || 'application/octet-stream' },
-        body: bytes
+        headers: { 'Authorization': 'Bearer ' + API.token },
+        body: fd
       });
       let d = {}; try { d = await r.json(); } catch (e2) { /* non-JSON */ }
       if (!r.ok) throw new Error(d.error || d.message || ('Upload failed (' + r.status + ')'));
@@ -433,8 +434,9 @@ const Profile = () => {
 // kanban t_feab8aff (app 5 of the per-tenant email-branding port). The account sets a logo, a
 // display name and a colour; every transactional mail this app sends for that account then opens
 // with that branding (the server's ONE render funnel adds it). Additive: an account with none gets
-// byte-identical mail to before. The logo is POSTed as the RAW file bytes (this app's avatar idiom,
-// no multipart envelope) to /api/v1/settings/branding/logo.
+// byte-identical mail to before. The logo is POSTed as `multipart/form-data` (field `file`) — the
+// fleet-wide upload convention, matching the avatar upload in this same file — to
+// /api/v1/settings/branding/logo.
 const Branding = () => {
   const st = viewState('branding', {
     loaded: false, brand_name: '', brand_color: '', logo_url: '',
@@ -475,11 +477,11 @@ const Branding = () => {
     if (!file) return;
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
-      const bytes = await file.arrayBuffer();
+      const fd = new FormData(); fd.append('file', file, file.name || 'logo');
       const r = await fetch(window.location.origin + '/api/v1/settings/branding/logo', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + API.token, 'Content-Type': file.type || 'application/octet-stream' },
-        body: bytes
+        headers: { 'Authorization': 'Bearer ' + API.token },
+        body: fd
       });
       let d = {}; try { d = await r.json(); } catch (e2) { /* non-JSON refusal */ }
       if (!r.ok) throw new Error(d.error || d.message || ('Upload failed (' + r.status + ')'));

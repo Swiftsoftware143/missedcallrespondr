@@ -118,8 +118,8 @@ const LoginView = () => {
 // ---- EMAIL BRANDING (per-account identity on transactional email) ----
 // The per-account email-branding backend (kanban t_feab8aff) shipped with NO screen in this
 // console: GET|PUT /api/v1/settings/branding carry brand_name/brand_color, the logo BYTES go to
-// POST|DELETE /api/v1/settings/branding/logo as the RAW image body (this app's avatar convention
-// — no multipart), and the public GET /api/v1/branding/logo/:tenant_id streams it back for a mail
+// POST|DELETE /api/v1/settings/branding/logo as `multipart/form-data` (field `file`), the fleet-wide
+// upload convention, and the public GET /api/v1/branding/logo/:tenant_id streams it back for a mail
 // client's <img src>. A backend route with no UI is a defect.
 const Branding = () => {
   const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null });
