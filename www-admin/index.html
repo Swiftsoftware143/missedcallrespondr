@@ -143,10 +143,11 @@ const Branding = () => {
     if (file.size > 2 * 1024 * 1024) { st.msg = { ok: false, text: 'That image is larger than 2 MB' }; renderApp(); return; }
     st.busy = true; st.msg = null; renderApp();
     try {
+      const fd = new FormData(); fd.append('file', file, file.name || 'logo');
       const r = await fetch(window.location.origin + '/api/v1/settings/branding/logo', {
         method: 'POST',
-        headers: Object.assign({ 'Content-Type': file.type || 'application/octet-stream' }, API.token ? { 'Authorization': 'Bearer ' + API.token } : {}),
-        body: file });
+        headers: API.token ? { 'Authorization': 'Bearer ' + API.token } : {},
+        body: fd });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || j.error || ('Error ' + r.status));
       st.logo_url = j.logo_url || st.logo_url; st.msg = { ok: true, text: 'Logo uploaded.' };
