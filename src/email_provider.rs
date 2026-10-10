@@ -320,6 +320,21 @@ pub async fn deliver(
     text: &str,
     html: Option<&str>,
 ) -> Result<String, String> {
+    // ── HARNESS / RESERVED RECIPIENTS NEVER REACH A RELAY (kanban t_36b55ed2) ───────────────────
+    // The suppression guard lived only in `email.rs`, but `deliver` is called DIRECTLY by the admin
+    // "Send test email" route — so that path bypassed it and handed a fleet-dev / RFC-2606 address
+    // to the real relay, which can only bounce or land in a fleet mailbox (and burns the domain's
+    // sending reputation). The guard now lives at the transport chokepoint so every caller inherits
+    // it. `*.local` / `localhost` stay OPEN: content harnesses point the provider at a local SMTP
+    // sink and `harness_domain` returns None for that class.
+    if let Some(domain) = crate::security::probe_addr::harness_domain(to) {
+        tracing::info!(
+            to = %to,
+            domain = %domain,
+            "email suppressed: recipient is a fleet harness/reserved address (no send attempted)"
+        );
+        return Ok("suppressed: harness/reserved recipient".to_string());
+    }
     if !cfg.is_configured() {
         return Err(format!(
             "email provider '{}' is not configured (api_key and from_address are required)",
