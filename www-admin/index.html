@@ -22,6 +22,34 @@
 <body class="min-h-screen">
 <div id="app" class="flex min-h-screen"></div>
 
+<script>
+// Inline guide (fleet standard). Keyed by the console's OWN view ids (S.view) — this console
+// switches views in JS without touching the path or hash, so renderApp() below forces the key.
+window.appGuidePages = {
+  "ops": { title: "Operator Console", desc: "Direct operator controls for the admin actions that have no screen of their own. Every control calls this app's own API with your session.", actions: ["Impersonate a workspace to see its data", "Run an admin action from the panel list"] },
+  "plans": { title: "Plans & Features", desc: "The subscription plans this install sells and the features each one grants. A plan is a set of permissions that decides what a workspace can use.", actions: ["Create or edit a plan", "Turn a feature on or off per plan", "Assign a workspace to a plan"] },
+  "provisioning": { title: "Provisioning", desc: "The switch that lets a tag in another SwiftSoftware app create a free account here. While it is off the incoming request is refused and no account is made.", actions: ["Turn tag-driven provisioning on or off", "Choose the free plan a provisioned account starts on"] },
+  "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data.", actions: ["Search for a workspace", "Select rows and delete the selected workspaces"] },
+  "dashboard": { title: "Dashboard", desc: "Your workspace at a glance: contacts, activity and how the responses are doing. The numbers come from your own data.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list"] },
+  "portfolio": { title: "Portfolio Companies", desc: "The businesses and brands this workspace lists.", actions: ["Add or edit a portfolio company", "Open a company's record"] },
+  "rules": { title: "Response Rules", desc: "What should happen automatically when a call is missed or a message arrives — the routing and reply rules that run without anyone watching.", actions: ["Create a rule", "Choose the trigger", "Enable or disable a rule"] },
+  "templates": { title: "Message Templates", desc: "The message and email templates used to reply to a caller. Edit the wording without touching code.", actions: ["Preview a template", "Edit the subject and body", "Enable or disable a template"] },
+  "contacts": { title: "Contacts", desc: "Everyone this workspace knows about — each person with their numbers and history.", actions: ["Search or filter contacts", "Open a contact's detail", "Add a contact"] },
+  "leads": { title: "Leads", desc: "People who have shown interest but are not yet a customer, with the tag and stage they are on.", actions: ["Filter leads by tag or stage", "Open a lead", "Move a lead on"] },
+  "deals": { title: "Deals", desc: "The opportunities in play, with their value and the stage they have reached.", actions: ["Add a deal", "Move a deal to the next stage"] },
+  "campaigns": { title: "Campaigns", desc: "Outbound callbacks and messages sent to a set of contacts. Choose the audience and watch how it performs.", actions: ["Create a campaign", "Pick the audience", "Send or schedule it"] },
+  "lists": { title: "Lists", desc: "Named groups of contacts that a campaign or a rule can target as one.", actions: ["Create a list", "Add or remove members"] },
+  "core": { title: "CoreSwift Integration", desc: "The link to CoreSwift: the status of the connection, and the personal API key that turns it on. Leads pushed here land in your CoreSwift contact pool.", actions: ["Check the connection status", "Add a CoreSwift API key under Settings, then Integrations"] },
+  "tickets": { title: "Tickets", desc: "Support requests raised on this workspace, with the status of each.", actions: ["Open a ticket", "Update its status"] },
+  "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
+  "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
+  "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
+  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] }
+};
+</script>
+<script src="/inline-guide-widget.js"></script>
+
+
 <script type="module">
 import { h, render } from 'https://esm.sh/preact@10.26.4';
 import { useState, useEffect } from 'https://esm.sh/preact@10.26.4/hooks';
@@ -2113,7 +2141,7 @@ const App = () => {
   </div>`;
 };
 
-const renderApp = () => render(html`<${App} />`, document.getElementById('app'));
+const renderApp = () => { render(html`<${App} />`, document.getElementById('app')); if (window.inlineGuidePage) window.inlineGuidePage(API.token ? S.view : ''); };
 renderApp();
 </script>
 </body>
