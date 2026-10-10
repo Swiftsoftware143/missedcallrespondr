@@ -11,13 +11,14 @@
 //!
 //! # The census (measured 2026-10-06 from `src/routes.rs`, then verified live with an anonymous
 //! probe against 127.0.0.1:8088; re-measured 2026-10-08 after the account/profile card t_9cd2c8f2
-//! added the two avatar routes)
+//! added the two avatar routes; re-measured 2026-10-10 after the admin bulk-retire arm joined,
+//! card t_31951eca)
 //!
 //! ```text
-//!   118 mounted `.route(..)` entries in the one routing file, 118 distinct paths (every path is
+//!   119 mounted `.route(..)` entries in the one routing file, 119 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   103 entries reach `protected_routes`, which carries `auth_middleware`
+//!   104 entries reach `protected_routes`, which carries `auth_middleware`
 //!    15 entries reach the ANONYMOUS `public_routes`:
 //!        12 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
@@ -479,15 +480,16 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             15
         );
-        // 118 entries / 118 distinct paths (the avatar read + its private upload twin joined on
+        // 119 entries / 119 distinct paths (the avatar read + its private upload twin joined on
         // 2026-10-08, card t_9cd2c8f2; the email-branding logo read + its two private write twins
-        // joined on 2026-10-09, card t_feab8aff), and the two lists are disjoint.
+        // joined on 2026-10-09, card t_feab8aff; the admin bulk-retire arm joined on 2026-10-10,
+        // card t_31951eca), and the two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 118, "mounted .route entries");
+        assert_eq!(lits.len(), 119, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 118, "distinct mounted paths");
+        assert_eq!(uniq.len(), 119, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
