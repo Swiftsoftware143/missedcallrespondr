@@ -165,9 +165,9 @@
   <h2 id="quick-reference">Quick Reference</h2>
   <ul>
     <li><strong>Backend:</strong> Rust (Axum) @ port 8088, Docker container <code>missedcallrespondr</code></li>
-    <li><strong>Database:</strong> PostgreSQL (docker: <code>swift-postgres</code>) — <code>missedcallrespondr</code></li>
-    <li><strong>Admin Web App:</strong> <code>/opt/swift/nginx/www-admin/missedcall/</code> served by nginx on <code>admin.missedcallrespondr.com</code></li>
-    <li><strong>Repo:</strong> <code>/opt/swift/apps/missedcallrespondr/</code></li>
+    <li><strong>Database:</strong> PostgreSQL — <code>missedcallrespondr</code></li>
+    <li><strong>Admin Web App:</strong> served by nginx on <code>admin.missedcallrespondr.com</code></li>
+    <li><strong>Repo:</strong> the MissedCall Respondr source tree</li>
   </ul>
   <h2 id="email-templates">Email Templates</h2>
   <p>All transactional emails use the <code>email_templates</code> table with <code>{{variable}}</code> placeholder support.</p>
@@ -333,11 +333,11 @@ Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
   </table>
   <p><strong>Affiliates are not a module of this app (kanban t_5deebeb1).</strong> The affiliate system lives in FunnelSwift; this app only <em>connects</em> to it, over two outbound <code>x-internal-key</code> wires, with no local affiliate store involved: <code>plans_handler::notify_funnelswift_upgrade</code> POSTs <code>{FUNNELSWIFT_URL}/api/v1/internal/affiliate/upgrade-event</code> when a tenant moves to a PAID plan, and <code>checkout_handler</code> POSTs <code>{FUNNELSWIFT_URL}/api/v1/webhooks/conversion</code> when a checkout completes with referral metadata. The former in-app <code>affiliates_handler</code> CRUD (and its <code>/api/v1/affiliates</code> routes and admin-console panel actions) is retired.</p>
   <h2 id="the-served-user-guide-and-the-console-it-must-match">The served user guide (and the console it must match)</h2>
-  <p><code>www/guide.html</code> is a SERVED artifact, not just documentation: <code>bin/publish-missedcallrespondr-frontend.sh</code> installs the repo copy byte-for-byte into the served roots, and the app's own marketing footer links it:</p>
+  <p><code>www/guide.html</code> is a SERVED artifact, not just documentation: <code>the frontend publish script</code> installs the repo copy byte-for-byte into the served roots, and the app's own marketing footer links it:</p>
   <table>
     <thead><tr><th>repo source</th><th>served destination(s)</th></tr></thead>
     <tbody>
-      <tr><td><code>www/guide.html</code></td><td><code>/opt/swift/nginx/www/missedcall/guide.html</code> (missedcallrespondr.com/guide) <strong>and</strong> <code>/opt/swift/nginx/www-app/missedcall/guide.html</code> (app.missedcallrespondr.com/guide)</td></tr>
+      <tr><td><code>www/guide.html</code></td><td>the marketing root's <code>guide.html</code> (missedcallrespondr.com/guide) <strong>and</strong> the app root's <code>guide.html</code> (app.missedcallrespondr.com/guide)</td></tr>
     </tbody>
   </table>
   <p><strong>The console is the spec.</strong> Every screen claim in the guide must be checkable against the served tenant shell <code>www-app/dashboard/index.html</code>, whose nav is exactly <code>Overview / Calls / Phone Numbers / Response Rules / Templates / Messages / Follow-ups / Contacts / Tickets / Integrations / Profile</code>. A guide step that names a control that shell does not render is a defect in the guide (kanban t_b4cbe8bc: the whole Call Log filter/detail section and the whole Voicemails section did exactly that, and were retired).</p>
@@ -348,8 +348,8 @@ Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
   <table>
     <thead><tr><th>part</th><th>owner</th><th>how to change it</th></tr></thead>
     <tbody>
-      <tr><td><code>&lt;head&gt;</code> — title, description, keywords, OG, canonical, favicon, schema, GA/GTM, head/body scripts</td><td>the <code>admin_settings.missedcallrespondr_site</code> row</td><td><code>UPDATE</code> the row, then run <code>/opt/swift/bin/mcr-site-apply.sh</code> (cron <code>4-59/5</code>). An edit to the head <strong>in the file</strong> is reverted within one tick.</td></tr>
-      <tr><td>the authored <code>&lt;body&gt;</code> — hero, feature cards, "How It Works", pricing</td><td>the file itself</td><td>edit the SERVED file and the repo mirror identically, then commit both and <code>--record</code> the frontends copy. The applier preserves the body and re-injects only the head, so <code>mcr-site-apply.sh --check</code> stays <code>unchanged</code>.</td></tr>
+      <tr><td><code>&lt;head&gt;</code> — title, description, keywords, OG, canonical, favicon, schema, GA/GTM, head/body scripts</td><td>the <code>admin_settings.missedcallrespondr_site</code> row</td><td><code>UPDATE</code> the row, then run the site-applier script (cron <code>4-59/5</code>). An edit to the head <strong>in the file</strong> is reverted within one tick.</td></tr>
+      <tr><td>the authored <code>&lt;body&gt;</code> — hero, feature cards, "How It Works", pricing</td><td>the file itself</td><td>edit the SERVED file and the repo mirror identically, then commit both and <code>--record</code> the frontends copy. The applier preserves the body and re-injects only the head, so <code>the site-applier script --check</code> stays <code>unchanged</code>.</td></tr>
     </tbody>
   </table>
   <p><strong>The selling copy is a claim surface and is censused exactly like the guide is</strong> (kanban t_a31e61d8). Every feature card, "How It Works" step and pricing tier must be checkable against the console nav above, a mounted route, or a live catalogue row:</p>
@@ -387,7 +387,7 @@ Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
   <ul>
     <li>Logs: <code>docker logs missedcallrespondr --since 10m</code></li>
     <li>Health: <code>curl http://localhost:8088/api/health</code></li>
-    <li>DB: <code>docker exec -it swift-postgres psql -U swift -d missedcallrespondr</code></li>
+    <li>DB: a psql session on the MissedCall Respondr database</li>
   </ul>
   <h2 id="payments-and-the-paypal-webhook-receiver">Payments and the PayPal webhook receiver</h2>
   <ul>
@@ -396,9 +396,9 @@ Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
   </ul>
   <h2 id="deployment">Deployment</h2>
   <p>The binary is IMAGE-BAKED (no bind mount), so <code>systemctl restart</code> / <code>docker restart</code> re-runs the OLD binary and is <strong>not</strong> a deploy:</p>
-  <pre><code>/opt/swift/bin/deploy-missedcallrespondr.sh        # rebuilds image, recreates the container,
+  <pre><code>the MissedCall Respondr deploy script        # rebuilds image, recreates the container,
                                                    # proves sha256(repo) == sha256(container)
-/opt/swift/bin/deploy-missedcallrespondr.sh --verify   # parity + health only</code></pre>
+the MissedCall Respondr deploy script --verify   # parity + health only</code></pre>
 
   <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid #e5e7eb;">
   <p style="text-align:center; color:#9ca3af; font-size:.82rem;">

@@ -13,9 +13,9 @@ transcribes or plays a voicemail, and no console screen and no guide may claim o
 ## Quick Reference
 
 - **Backend:** Rust (Axum) @ port 8088, systemd unit `missedcallrespondr`
-- **Database:** PostgreSQL (docker: swift-postgres-1) — `missedcallrespondr`
+- **Database:** PostgreSQL — `missedcallrespondr`
 - **Admin Web App:** Served via app backend on port 8088
-- **Repo:** `/opt/swift/apps/missedcallrespondr/`
+- **Repo:** the MissedCall Respondr source tree
 
 ## Email Templates
 
@@ -252,12 +252,12 @@ routes and admin-console panel actions) is retired.
 
 ## The served user guide (and the console it must match)
 
-`www/guide.html` is a SERVED artifact, not just documentation: `bin/publish-missedcallrespondr-frontend.sh`
+`www/guide.html` is a SERVED artifact, not just documentation: the frontend publish script
 installs the repo copy byte-for-byte into the served roots, and the app's own marketing footer links it:
 
 | repo source | served destination(s) |
 |---|---|
-| `www/guide.html` | `/opt/swift/nginx/www/missedcall/guide.html` (missedcallrespondr.com/guide) **and** `/opt/swift/nginx/www-app/missedcall/guide.html` (app.missedcallrespondr.com/guide) |
+| `www/guide.html` | the marketing root's `guide.html` (missedcallrespondr.com/guide) **and** the app root's `guide.html` (app.missedcallrespondr.com/guide) |
 
 **The console is the spec.** Every screen claim in the guide must be checkable against the served
 tenant shell `www-app/dashboard/index.html`, whose nav is exactly
@@ -283,8 +283,8 @@ owners, and they do not overlap:
 
 | part | owner | how to change it |
 |---|---|---|
-| `<head>` — title, description, keywords, OG, canonical, favicon, schema, GA/GTM, head/body scripts | the `admin_settings.missedcallrespondr_site` row | `UPDATE` the row, then run `/opt/swift/bin/mcr-site-apply.sh` (cron `4-59/5`). An edit to the head **in the file** is reverted within one tick. |
-| the authored `<body>` — hero, feature cards, "How It Works", pricing | the file itself | edit the SERVED file and the repo mirror identically, then commit both and `--record` the frontends copy. The applier preserves the body and re-injects only the head, so `mcr-site-apply.sh --check` stays `unchanged`. |
+| `<head>` — title, description, keywords, OG, canonical, favicon, schema, GA/GTM, head/body scripts | the `admin_settings.missedcallrespondr_site` row | `UPDATE` the row, then run the site-applier script (cron `4-59/5`). An edit to the head **in the file** is reverted within one tick. |
+| the authored `<body>` — hero, feature cards, "How It Works", pricing | the file itself | edit the SERVED file and the repo mirror identically, then commit both and `--record` the frontends copy. The applier preserves the body and re-injects only the head, so `the site-applier script --check` stays `unchanged`. |
 
 **The selling copy is a claim surface and is censused exactly like the guide is** (kanban
 t_a31e61d8). Every feature card, "How It Works" step and pricing tier must be checkable against the
@@ -417,7 +417,7 @@ inbound call", while no inbound-call path read the table — no rule had ever fi
 
 - Logs: `journalctl -u missedcallrespondr -n 100 --no-pager`
 - Health: `curl http://localhost:8088/api/health`
-- DB: `docker exec -it swift-postgres-1 psql -U swift -d missedcallrespondr`
+- DB: a psql session on the MissedCall Respondr database
 
 ## Payments and the PayPal webhook receiver
 
@@ -440,7 +440,7 @@ The binary is IMAGE-BAKED (no bind mount), so `systemctl restart` / `docker rest
 OLD binary and is **not** a deploy:
 
 ```bash
-/opt/swift/bin/deploy-missedcallrespondr.sh        # rebuilds image, recreates the container,
+the MissedCall Respondr deploy script        # rebuilds image, recreates the container,
                                                    # proves sha256(repo) == sha256(container)
-/opt/swift/bin/deploy-missedcallrespondr.sh --verify   # parity + health only
+the MissedCall Respondr deploy script --verify   # parity + health only
 ```
