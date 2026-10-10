@@ -115,6 +115,90 @@ const LoginView = () => {
 };
 
 // ---- DASHBOARD ----
+// ---- EMAIL BRANDING (per-account identity on transactional email) ----
+// The per-account email-branding backend (kanban t_feab8aff) shipped with NO screen in this
+// console: GET|PUT /api/v1/settings/branding carry brand_name/brand_color, the logo BYTES go to
+// POST|DELETE /api/v1/settings/branding/logo as the RAW image body (this app's avatar convention
+// — no multipart), and the public GET /api/v1/branding/logo/:tenant_id streams it back for a mail
+// client's <img src>. A backend route with no UI is a defect.
+const Branding = () => {
+  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null });
+  if (!st._loaded) { st._loaded = true;
+    API.get('/settings/branding').then(b => {
+      b = b && typeof b === 'object' ? b : {};
+      st.brand_name = b.brand_name || ''; st.brand_color = b.brand_color || '#4f46e5'; st.logo_url = b.logo_url || '';
+      renderApp();
+    }).catch(() => { st._loaded = false; });
+  }
+  const save = async () => {
+    st.busy = true; st.msg = null; renderApp();
+    try {
+      const r = await API.put('/settings/branding', { brand_name: st.brand_name, brand_color: st.brand_color });
+      st.logo_url = (r && r.logo_url) || st.logo_url;
+      st.msg = { ok: true, text: 'Email branding saved.' };
+    } catch(e) { st.msg = { ok: false, text: e.message }; }
+    st.busy = false; renderApp();
+  };
+  const upload = async (file) => {
+    if (file.size > 2 * 1024 * 1024) { st.msg = { ok: false, text: 'That image is larger than 2 MB' }; renderApp(); return; }
+    st.busy = true; st.msg = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/settings/branding/logo', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': file.type || 'application/octet-stream' }, API.token ? { 'Authorization': 'Bearer ' + API.token } : {}),
+        body: file });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || j.error || ('Error ' + r.status));
+      st.logo_url = j.logo_url || st.logo_url; st.msg = { ok: true, text: 'Logo uploaded.' };
+    } catch(e) { st.msg = { ok: false, text: 'Upload failed: ' + e.message }; }
+    st.busy = false; renderApp();
+  };
+  const removeLogo = async () => {
+    if (!confirm('Remove your email logo?')) return;
+    st.busy = true; st.msg = null; renderApp();
+    try { await API.del('/settings/branding/logo'); st.logo_url = ''; st.msg = { ok: true, text: 'Logo removed.' }; }
+    catch(e) { st.msg = { ok: false, text: 'Remove failed: ' + e.message }; }
+    st.busy = false; renderApp();
+  };
+  const branded = !!(st.brand_name || st.logo_url);
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">&#127912; Email Branding</h2>
+    <div class="card">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="font-semibold">Your branding on transactional email</div>
+        <span class="badge ${branded ? 'badge-green' : 'badge-yellow'}">${branded ? 'branded' : 'not branded'}</span>
+      </div>
+      <p class="text-sm text-gray-500 mb-4">This is what your callers see at the top of the missed-call reply, invite and password emails sent for your account. Leave it empty to send with MissedCall's own identity.</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="md:col-span-2 space-y-3">
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Brand display name</label>
+            <input class="input" maxlength="60" value=${st.brand_name} placeholder="e.g. Acme Plumbing" onInput=${e => { st.brand_name = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Brand colour</label>
+            <div class="flex items-center gap-2">
+              <input type="color" value=${st.brand_color} style="width:44px;height:34px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;background:#fff" onInput=${e => { st.brand_color = e.target.value; }} />
+              <input class="input" value=${st.brand_color} placeholder="#4f46e5" onInput=${e => { st.brand_color = e.target.value; }} />
+            </div>
+            <div class="text-xs text-gray-400 mt-1">A hex colour such as #4f46e5. It draws the rule under your logo.</div></div>
+          <div><button class="btn" disabled=${st.busy} onClick=${save}>Save branding</button></div>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-gray-600 block mb-1">Logo</label>
+          <div style="border:1px dashed #cbd5e1;border-radius:10px;height:110px;display:flex;align-items:center;justify-content:center;background:#f8fafc;overflow:hidden">
+            ${st.logo_url ? html`<img src=${st.logo_url} alt=${st.brand_name || 'Your logo'} style="max-width:100%;max-height:100%" />` : html`<span class="text-xs text-gray-400">No logo yet</span>`}
+          </div>
+          <input type="file" id="mc-brand-logo-file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onChange=${e => { const f = e.target.files && e.target.files[0]; if (f) upload(f); e.target.value = ''; }} />
+          <div class="flex gap-2 mt-2 flex-wrap">
+            <button class="btn btn-outline btn-sm" onClick=${() => { const el = document.getElementById('mc-brand-logo-file'); if (el) el.click(); }}>${st.logo_url ? 'Replace logo' : 'Upload logo'}</button>
+            ${st.logo_url && html`<button class="btn btn-outline btn-sm" onClick=${removeLogo}>Remove</button>`}
+          </div>
+          <div class="text-xs text-gray-400 mt-2">PNG, JPEG, WebP or GIF, up to 2 MB.</div>
+        </div>
+      </div>
+      ${st.msg && html`<div class="mt-3 text-sm ${st.msg.ok ? 'text-green-600' : 'text-red-600'}">${st.msg.ok ? 'OK - ' : 'Error - '}${st.msg.text}</div>`}
+    </div>
+  </div>`;
+};
+
 const Dashboard = () => {
   const st = viewState('dashboard', {});
   if (!st._loaded) { st._loaded = true;
@@ -1578,7 +1662,8 @@ const App = () => {
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'clients', label: 'Clients', icon: '🤝' },
     { id: 'calendar', label: 'Calendar', icon: '📅' },
-      { id: 'site-config', label: 'Site Config', icon: '🌐' }
+      { id: 'site-config', label: 'Site Config', icon: '🌐' },
+    { id: 'branding', label: 'Email Branding', icon: '🎨' }
   ];
 
   const SiteConfig = () => {
@@ -1920,7 +2005,7 @@ const App = () => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
