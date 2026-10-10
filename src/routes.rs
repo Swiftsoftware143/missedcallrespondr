@@ -574,6 +574,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/impersonate",
             post(crate::handlers::admin_handler::impersonate),
         )
+        // Bulk retire, the admin console's "Delete selected" control (kanban t_31951eca, the
+        // missedcallrespondr leg of t_ac2fe688). It sits directly beside the `:id` route and is a
+        // STATIC segment, so axum's matcher prefers it over `/tenants/:id` for the literal path — the
+        // `DELETE` above can never swallow a bulk call (and the two share ONE refusal helper). Same
+        // admin gate as everything else under `/api/v1/admin/*`, decided at the middleware.
+        .route(
+            "/api/v1/admin/tenants/bulk-delete",
+            post(crate::handlers::admin_handler::bulk_delete_tenants),
+        )
         .route(
             "/api/v1/admin/tenants/:id",
             delete(crate::handlers::admin_handler::delete_tenant),

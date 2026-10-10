@@ -1631,6 +1631,77 @@ const ImpersonateTenants = () => {
   </div>`;
 };
 
+/* ===== 🗂️ TENANTS — every workspace, with the bulk retire control (kanban t_31951eca) =====
+   The platform-wide list is the same gated read the plan pickers already use
+   (GET /admin/tenants → admin_handler::list_all_tenants; note the API answers {tenants:[…]}, not a
+   bare array). Selection is a per-row checkbox plus a select-all header, and the ONE write is
+   POST /admin/tenants/bulk-delete, which answers PER ID: a row the backend refuses (the workspace you
+   are signed in as, a portfolio company) keeps its reason on screen instead of vanishing behind a
+   generic failure. The button is inert until a row is picked and is armed with the count. */
+const TenantsScreen = () => {
+  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true });
+  const load = async () => {
+    try {
+      const d = await API.get('/admin/tenants');
+      st.list = Array.isArray(d) ? d : ((d && d.tenants) || []);
+      st.err = null;
+    } catch (e) { st.err = e.message; st.list = null; }
+    st.busy = null; renderApp();
+  };
+  const reload = async () => { st.busy = 'list'; st.picked = {}; st.msg = null; renderApp(); await load(); };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  const list = Array.isArray(st.list) ? st.list : [];
+  const picked = list.filter(t => st.picked[t.id]);
+  const allPicked = list.length > 0 && picked.length === list.length;
+  const toggle = (id, on) => { if (on) st.picked[id] = true; else delete st.picked[id]; renderApp(); };
+  const toggleAll = (on) => { st.picked = {}; if (on) list.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
+  const del = async () => {
+    const ids = list.filter(t => st.picked[t.id]).map(t => t.id);
+    if (!ids.length) return;
+    if (!confirm('Delete ' + ids.length + ' workspace(s)? This cannot be undone.')) return;
+    st.busy = 'del'; st.msg = null; st.ok = true; renderApp();
+    try {
+      const r = await API.post('/admin/tenants/bulk-delete', { ids });
+      const n = (r && typeof r.deleted === 'number') ? r.deleted : 0;
+      const refused = (r && r.failed) || [];
+      st.ok = refused.length === 0;
+      st.msg = n + ' workspace(s) deleted'
+        + (refused.length ? ' — ' + refused.length + ' refused: ' + refused.map(f => f.error).join('; ') : '');
+      st.picked = {};
+    } catch (e) { st.ok = false; st.msg = 'Delete failed: ' + e.message; }
+    st.busy = null;
+    await load();
+  };
+
+  return html`<div class="card" data-tenants="screen">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-base font-bold text-gray-800">🗂️ Tenants</h2>
+      <div class="flex items-center gap-2">
+        <button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button>
+        <button class="btn btn-sm btn-red" id="tnDel" data-tenants="delete" disabled=${(picked.length === 0 || st.busy === 'del') ? true : false} onClick=${del}>${picked.length ? 'Delete selected (' + picked.length + ')' : 'Delete selected'}</button>
+      </div>
+    </div>
+    <p class="text-xs text-gray-500 mb-2">Every workspace on the platform. Tick the rows to retire, then delete them in one call. The workspace you are signed in as and the portfolio companies are refused by the API.</p>
+    ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}" data-tenants="status">${st.msg}</div>`}
+    ${st.err && html`<div class="text-sm text-red-600 mb-2" data-tenants="status">Could not list tenants: ${st.err}</div>`}
+    ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
+      <thead><tr>
+        <th style="width:36px"><input type="checkbox" id="tnAll" data-tenants="select-all" checked=${allPicked ? true : false} onChange=${e => toggleAll(e.target.checked)} /></th>
+        <th>Workspace</th><th>Slug</th><th>Users</th><th>Plan</th><th>Created</th>
+      </tr></thead>
+      <tbody>${list.map(t => html`<tr>
+        <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
+        <td class="font-medium">${t.name || '-'}</td>
+        <td class="text-gray-500">${t.slug || '-'}</td>
+        <td>${t.user_count == null ? '-' : t.user_count}</td>
+        <td class="text-gray-500">${t.plan_name || '—'}</td>
+        <td class="text-gray-500 text-xs">${t.created_at ? String(t.created_at).slice(0, 10) : '-'}</td>
+      </tr>`)}</tbody></table></div>`
+      : (st.err ? '' : html`<div class="text-xs text-gray-400">loading tenants...</div>`)}
+  </div>`;
+};
+
 const OpsConsole = () => {
   return html`<div class="ops-console space-y-1" data-ops="console">
     <h1 class="text-xl font-bold text-gray-800">Operator Console</h1>
@@ -1648,6 +1719,11 @@ const App = () => {
     { id: 'plans', label: 'Plans & Features', icon: '💳', adminOnly: true },
     // kanban t_1d08bd9a — the switch that lets a FunnelSwift tag create a real free account here.
     { id: 'provisioning', label: 'Provisioning', icon: '🏷', adminOnly: true },
+    // kanban t_31951eca — the platform-wide Tenants screen: every workspace, a checkbox per row, a
+    // select-all header and ONE "Delete selected" control that calls POST /admin/tenants/bulk-delete.
+    // Until this card the console could LIST tenants (the plan pickers read GET /admin/tenants) and
+    // had no way to remove one — clearing a probe/junk workspace meant a psql session.
+    { id: 'tenants', label: 'Tenants', icon: '🗂️', adminOnly: true },
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'portfolio', label: 'Portfolio', icon: '🏢' },
     { id: 'rules', label: 'Response Rules', icon: '⚙️' },
@@ -2005,7 +2081,7 @@ const App = () => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
@@ -2015,7 +2091,7 @@ const App = () => {
         <span class="nav-text font-bold text-gray-800">MissedCall</span>
       </div>
       <div class="flex-1 space-y-1">
-        ${nav.map(n => html`<div class="nav-item ${S.view === n.id ? 'active' : ''}" onClick=${() => { S.view = n.id; renderApp(); }}>
+        ${nav.map(n => html`<div class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }}>
           <span>${n.icon}</span><span class="nav-text">${n.label}</span>
         </div>`)}
       </div>

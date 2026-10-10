@@ -402,13 +402,83 @@ pub async fn add_credits(
     })))
 }
 
-/// Admin: delete a tenant and all associated data
+/// David's sister companies (portfolio). Their accounts exist in every app and are kept by rule, so a
+/// delete must never be able to remove one.
+///
+/// NOTE (measured live 2026-10-10): this app's `tenants` table has NO `is_portfolio` column — the
+/// markers below are the whole test here. Where the column DOES exist (CoreSwift-CRM, incentive
+/// siblings) it is checked first and a real `true` protects the row.
+const PORTFOLIO_TENANT_MARKERS: [&str; 3] = ["swiftimpact", "zaarhub", "giraudy"];
+
+/// Refuse to delete two things, on the SINGLE route and the BULK route alike — one helper, so the two
+/// doors can never drift apart (kanban t_31951eca).
+///
+/// Refused: the workspace the caller is SIGNED IN AS (`claims.aid`) — that is a lockout, not a
+/// cleanup. Refused: a portfolio company, matched on the workspace's name/slug (`tenants.is_portfolio`
+/// where the column exists, plus the marker words).
+///
+/// Everything else behaves as a plain `DELETE FROM tenants`, which retires the whole workspace: every
+/// other foreign key to `tenants` is ON DELETE CASCADE, and migration 000035 arms the one edge that
+/// was not (`provider_keys`), so no hand-rolled child sweep is needed.
+async fn guard_protected(
+    state: &AppState,
+    tenant_id: Uuid,
+    caller_tenant_id: Uuid,
+) -> Result<(), AppError> {
+    if tenant_id == caller_tenant_id {
+        return Err(AppError::BadRequest(
+            "refusing to delete the workspace you are signed in as".into(),
+        ));
+    }
+
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT COALESCE(name, ''), COALESCE(slug, '') FROM tenants WHERE id = $1")
+            .bind(tenant_id)
+            .fetch_optional(&state.pool)
+            .await?;
+
+    if let Some((name, slug)) = row {
+        let hay = format!("{} {}", name, slug).to_lowercase();
+        if let Some(hit) = PORTFOLIO_TENANT_MARKERS.iter().find(|m| hay.contains(*m)) {
+            return Err(AppError::BadRequest(format!(
+                "refusing to delete a portfolio company ({})",
+                hit
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// The refusal's own sentence. `AppError` carries the message but implements no `Display`, and the
+/// bulk answer must report the REASON next to the id it kept, so unwrap the variants here.
+fn refusal_message(e: &AppError) -> String {
+    match e {
+        AppError::BadRequest(m)
+        | AppError::Unauthorized(m)
+        | AppError::NotFound(m)
+        | AppError::Internal(m)
+        | AppError::Conflict(m)
+        | AppError::UpgradeRequired(m)
+        | AppError::Unprocessable(m)
+        | AppError::ServiceUnavailable(m)
+        | AppError::UpstreamRefused(m) => m.clone(),
+    }
+}
+
+/// Admin: delete a tenant and all associated data.
+///
+/// Guarded by [`guard_protected`] (kanban t_31951eca): until that card this route deleted ANY id it
+/// was handed, including the workspace the operator was signed in as.
 pub async fn delete_tenant(
     State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
     Path(tenant_id_str): Path<String>,
 ) -> Result<Json<Value>, AppError> {
     let tenant_id = Uuid::parse_str(&tenant_id_str)
         .map_err(|_| AppError::BadRequest("Invalid tenant ID".into()))?;
+
+    guard_protected(&state, tenant_id, claims.aid).await?;
 
     let result = sqlx::query("DELETE FROM tenants WHERE id = $1")
         .bind(tenant_id)
@@ -422,5 +492,64 @@ pub async fn delete_tenant(
     Ok(Json(json!({
         "message": "Tenant deleted",
         "tenant_id": tenant_id_str
+    })))
+}
+
+/// POST /api/v1/admin/tenants/bulk-delete — retire several workspaces in one call (kanban t_31951eca,
+/// the missedcallrespondr leg of t_ac2fe688).
+///
+/// The counterpart of the same control in the CoreSwift-CRM, IncentiveSwift and FunnelSwift panels, so
+/// an operator no longer has to open a psql session to clear probe/junk workspaces out of the
+/// console's own tenant list. Answers PER ID, so one refused or missing id cannot sink the batch — the
+/// panel shows the reason next to the row that was kept. Both refusals come from the SAME
+/// [`guard_protected`] the single route uses.
+pub async fn bulk_delete_tenants(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<Value>,
+) -> Result<Json<Value>, AppError> {
+    let raw_ids = req
+        .get("ids")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut deleted_ids: Vec<String> = Vec::new();
+    let mut failed: Vec<Value> = Vec::new();
+
+    for v in raw_ids {
+        let raw = v.as_str().unwrap_or_default().trim().to_string();
+
+        let tenant_id = match Uuid::parse_str(&raw) {
+            Ok(t) => t,
+            Err(_) => {
+                failed.push(json!({"id": raw, "error": "not a valid id"}));
+                continue;
+            }
+        };
+
+        if let Err(e) = guard_protected(&state, tenant_id, claims.aid).await {
+            failed.push(json!({"id": raw, "error": refusal_message(&e)}));
+            continue;
+        }
+
+        match sqlx::query("DELETE FROM tenants WHERE id = $1")
+            .bind(tenant_id)
+            .execute(&state.pool)
+            .await
+        {
+            Ok(r) if r.rows_affected() == 0 => {
+                failed.push(json!({"id": raw, "error": "tenant not found"}))
+            }
+            Ok(_) => deleted_ids.push(raw.clone()),
+            Err(e) => failed.push(json!({"id": raw, "error": e.to_string()})),
+        }
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "deleted": deleted_ids.len(),
+        "deleted_ids": deleted_ids,
+        "failed": failed
     })))
 }

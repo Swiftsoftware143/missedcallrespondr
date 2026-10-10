@@ -275,6 +275,18 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000034_system_sender_display_name",
             include_str!("../migrations/000034_system_sender_display_name.sql"),
         ),
+        // 000035 arms the ONE NO ACTION edge that referenced `tenants`
+        // (`provider_keys_tenant_id_fkey`) with ON DELETE CASCADE, so the admin console's mass-retire
+        // control (kanban t_31951eca) can retire a workspace that holds provider keys instead of
+        // answering 500 `23503`. Every other tenant edge was already CASCADE (measured live
+        // 2026-10-10: 1 unarmed edge of 33, and zero `tenant_id` columns with no edge). Idempotent —
+        // the DO block only fires while the edge is still unarmed — and registering it here is also
+        // what forces the rebuild to embed the brand-new .sql (`include_str!` of a new file is not a
+        // dependency of the previous build).
+        (
+            "000035_provider_keys_tenant_id_cascade",
+            include_str!("../migrations/000035_provider_keys_tenant_id_cascade.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
