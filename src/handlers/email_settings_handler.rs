@@ -13,9 +13,10 @@
 //! env file is a stopgap and a panel that cannot tell the two apart would hide it.
 
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     Json,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::config::Claims;
@@ -187,8 +188,19 @@ pub async fn update_email_config(
 /// POST /api/v1/admin/email-config/test — send a real message and return the provider's true
 /// response (used by the "Send test email" button), so "it saved" and "it can send" are two
 /// different answers.
+/// Optional explicit recipient for the "Send test email" button: `POST …/email-config/test?to=<addr>`.
+///
+/// Absent, the test goes to the signed-in admin's own address — behaviour unchanged. Added
+/// 2026-10-10 (test-mail-hygiene): an automated fleet probe must be able to aim the test at a
+/// disposable mailbox, because otherwise every probe run mails whatever inbox the admin owns.
+#[derive(Deserialize)]
+pub struct TestRecipientQuery {
+    pub to: Option<String>,
+}
+
 pub async fn test_email_config(
     State(state): State<AppState>,
+    Query(q): Query<TestRecipientQuery>,
     Extension(claims): Extension<Claims>,
 ) -> Json<Value> {
     let Some(cfg) = email_provider::resolve(&state.pool).await else {
@@ -199,10 +211,10 @@ pub async fn test_email_config(
         }));
     };
 
-    let to = if claims.email.trim().is_empty() {
-        "swiftsoftware143@yahoo.com".to_string()
-    } else {
-        claims.email.clone()
+    let to = match q.to.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(explicit) => explicit.to_string(),
+        None if claims.email.trim().is_empty() => "swiftsoftware143@yahoo.com".to_string(),
+        None => claims.email.clone(),
     };
 
     let subject = "MissedCall Respondr system email test";
