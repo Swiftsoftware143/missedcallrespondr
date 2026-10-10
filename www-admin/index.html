@@ -51,9 +51,9 @@ window.appGuidePages = {
 
 
 <script type="module">
-import { h, render } from 'https://esm.sh/preact@10.26.4';
-import { useState, useEffect } from 'https://esm.sh/preact@10.26.4/hooks';
-import htm from 'https://esm.sh/htm@3.1.1';
+import { h, render } from './vendor/preact.js';
+import { useState, useEffect } from './vendor/hooks.js';
+import htm from './vendor/htm.js';
 const html = htm.bind(h);
 const showUpgradePrompt = (msg) => {
   const div = document.createElement("div");
