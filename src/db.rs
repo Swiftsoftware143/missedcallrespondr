@@ -287,6 +287,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000035_provider_keys_tenant_id_cascade",
             include_str!("../migrations/000035_provider_keys_tenant_id_cascade.sql"),
         ),
+        // kanban t_3bdea5eb — the integration catalogue offered FOUR providers (openai / deepseek /
+        // nexweave / sam_gov) that accept and store a key but that NO code path in this app can spend.
+        // `coming_soon` labels them in both consoles and `upsert_provider_key` refuses them, so the
+        // API can no longer store a credential nothing reads. Registered here because this runner
+        // keeps NO ledger and re-executes every file each boot — the file is idempotent
+        // (ADD COLUMN IF NOT EXISTS + UPDATE) — and `include_str!` of a new file is not a dependency
+        // of the previous build, so this entry is also what forces the rebuild to embed the new .sql.
+        (
+            "000036_provider_coming_soon",
+            include_str!("../migrations/000036_provider_coming_soon.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

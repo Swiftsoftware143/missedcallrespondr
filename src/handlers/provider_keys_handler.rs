@@ -129,17 +129,29 @@ pub async fn upsert_provider_key(
     )?;
     check_opt_len("scope", req.scope.as_deref(), max::PROVIDER_KEYS_SCOPE)?;
 
-    // Verify provider exists
-    let exists =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM available_providers WHERE key = $1")
-            .bind(&req.provider)
-            .fetch_one(&state.pool)
-            .await?;
+    // Verify the provider exists — AND that this app can actually SPEND it. A catalogue row whose
+    // key no code path in MissedCall Respondr reads is not offerable: storing a credential nothing
+    // can spend is the defect this closes (migrations/000036_provider_coming_soon.sql, kanban
+    // t_3bdea5eb; same class as the ADASwift e2e0d35 / WorkflowSwift 083-087 thread). `is_active` is
+    // deliberately NOT touched — the row stays VISIBLE in both consoles with a Coming Soon badge;
+    // only the WRITE is refused here.
+    let provider_row = sqlx::query_as::<_, (String, bool)>(
+        "SELECT name, coming_soon FROM available_providers WHERE key = $1",
+    )
+    .bind(&req.provider)
+    .fetch_optional(&state.pool)
+    .await?;
 
-    if exists == 0 {
+    let Some((provider_name, coming_soon)) = provider_row else {
         return Err(AppError::BadRequest(format!(
             "Unknown provider: {}",
             req.provider
+        )));
+    };
+
+    if coming_soon {
+        return Err(AppError::BadRequest(format!(
+            "{provider_name} is Coming Soon and cannot be connected yet — nothing in MissedCall Respondr reads its key."
         )));
     }
 
@@ -241,8 +253,12 @@ pub async fn delete_provider_key(
 pub async fn list_available_providers(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<Value>>> {
+    // `coming_soon` rides the catalogue response so BOTH consoles render a non-interactive card
+    // (customer dashboard Integrations view) or a labelled refusal (operator console) instead of a
+    // key box for a provider this app cannot spend (migrations/000036_provider_coming_soon.sql,
+    // kanban t_3bdea5eb). The row stays visible and `is_active` stays true — LABEL, don't hide.
     let rows = sqlx::query(
-        "SELECT key, name, description, requires_base_url, requires_metadata, icon
+        "SELECT key, name, description, requires_base_url, requires_metadata, icon, coming_soon
          FROM available_providers ORDER BY name ",
     )
     .fetch_all(&state.pool)
@@ -256,6 +272,7 @@ pub async fn list_available_providers(
         let base_url: bool = row.get("requires_base_url");
         let req_meta: Value = row.get("requires_metadata");
         let icon_val: Option<String> = row.get("icon");
+        let coming_soon: bool = row.get("coming_soon");
         providers.push(Value::Object(serde_json::Map::from_iter([
             (String::from("key"), Value::String(key)),
             (String::from("name"), Value::String(name)),
@@ -263,6 +280,7 @@ pub async fn list_available_providers(
             (String::from("requires_base_url"), Value::Bool(base_url)),
             (String::from("requires_metadata"), req_meta),
             (String::from("icon"), Value::from(icon_val)),
+            (String::from("coming_soon"), Value::Bool(coming_soon)),
         ])));
     }
 

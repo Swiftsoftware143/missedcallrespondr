@@ -900,6 +900,7 @@ const OPSAPI = API;
 const OPS_PANELS = [
 {
 "title": "1. Provider Keys (BYOK)",
+"note": "Coming Soon — openai, deepseek, nexweave and sam_gov are listed in the catalogue but nothing in this app reads their key, so POST /provider-keys refuses them with 400. Do not collect a key for them.",
 "list": "/provider-keys",
 "actions": [
 {
@@ -1601,6 +1602,7 @@ const OpsPanel = ({ panel }) => {
       <span class="text-xs text-gray-400">${(panel.actions || []).length} controls ${open ? '\u2212' : '+'}</span>
     </div>
     ${open && html`<div class="px-4 pb-3 border-t pt-3">
+      ${panel.note && html`<p class="text-xs text-amber-700 mb-2">${panel.note}</p>`}
       ${panel.list && html`<${OpsList} path=${panel.list} />`}
       ${(panel.actions || []).map(a => html`<${OpsAction} act=${a} />`)}
     </div>`}
