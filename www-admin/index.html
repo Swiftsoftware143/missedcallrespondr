@@ -44,7 +44,8 @@ window.appGuidePages = {
   "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
-  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] }
+  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] },
+  "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your password", "See the plan you are on"] }
 };
 </script>
 <script src="/inline-guide-widget.js"></script>
@@ -1770,7 +1771,8 @@ const App = () => {
     { id: 'clients', label: 'Clients', icon: '🤝' },
     { id: 'calendar', label: 'Calendar', icon: '📅' },
       { id: 'site-config', label: 'Site Config', icon: '🌐' },
-    { id: 'branding', label: 'Email Branding', icon: '🎨' }
+    { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    { id: 'account', label: 'My Account', icon: '👤' }
   ];
 
   const SiteConfig = () => {
@@ -2112,7 +2114,134 @@ const App = () => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen };
+  // ---- MY ACCOUNT ----
+  // The signed-in operator's own profile. The backend has carried all five calls since
+  // kanban t_9cd2c8f2 (GET /auth/me resolves the REAL plan tier from tenant_plans, PUT
+  // /auth/profile edits name + company, POST /auth/avatar takes the picture, GET
+  // /auth/avatar/:user_id reads it back, PUT /auth/password changes the credential) and the
+  // tenant app console exercises them - but THIS console had no screen for any of them, so the
+  // operator had no way to change his own name, company, picture or password here. A backend
+  // route with no UI is a defect. /auth/me is re-read on every open, so the form shows what the
+  // server holds, never a stale copy, and the Plan badge carries plan_name, not a role word.
+  const Account = () => {
+    const [me, setMe] = useState(null);
+    const [err, setErr] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [avMsg, setAvMsg] = useState(null);
+    const [pMsg, setPMsg] = useState(null);
+    const [pwMsg, setPwMsg] = useState(null);
+    const [name, setName] = useState('');
+    const [company, setCompany] = useState('');
+    const [avBust, setAvBust] = useState(0);
+    const [np, setNp] = useState('');
+    const [np2, setNp2] = useState('');
+    const [cp, setCp] = useState('');
+
+    useEffect(() => {
+      API.get('/auth/me')
+        .then(d => { setMe(d); setName(d.name || ''); setCompany(d.company || ''); setErr(null); })
+        .catch(e => setErr(e));
+    }, []);
+
+    const upload = async (file) => {
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { setAvMsg({ ok: false, text: 'That image is larger than 2 MB' }); return; }
+      setBusy(true); setAvMsg(null);
+      try {
+        // Multipart, so NOT through API.post: that helper pins Content-Type: application/json,
+        // which would destroy the multipart boundary the browser generates for a FormData body.
+        const fd = new FormData(); fd.append('file', file, file.name || 'picture');
+        const r = await fetch(window.location.origin + '/api/v1/auth/avatar', {
+          method: 'POST',
+          headers: API.token ? { 'Authorization': 'Bearer ' + API.token } : {},
+          body: fd });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.message || j.error || ('Error ' + r.status));
+        const url = j.avatar_url || ('/api/v1/auth/avatar/' + (me && me.id));
+        setAvBust(Date.now());
+        setMe(m => Object.assign({}, m, { avatar_url: url }));
+        setAvMsg({ ok: true, text: 'Picture updated' });
+      } catch (e) { setAvMsg({ ok: false, text: (e && e.message) || 'Upload failed' }); }
+      setBusy(false);
+    };
+    const saveProfile = async () => {
+      if (!name.trim()) { setPMsg({ ok: false, text: 'Enter your name' }); return; }
+      setBusy(true); setPMsg(null);
+      try {
+        await API.put('/auth/profile', { name: name.trim(), company: company.trim() });
+        setPMsg({ ok: true, text: 'Saved' });
+      } catch (e) { setPMsg({ ok: false, text: (e && e.message) || 'Could not save' }); }
+      setBusy(false);
+    };
+    const savePassword = async () => {
+      if (np.length < 8) { setPwMsg({ ok: false, text: 'The new password must be at least 8 characters' }); return; }
+      if (np !== np2) { setPwMsg({ ok: false, text: 'The two new passwords do not match' }); return; }
+      if (!cp) { setPwMsg({ ok: false, text: 'Enter your current password to confirm' }); return; }
+      setBusy(true); setPwMsg(null);
+      try {
+        await API.put('/auth/password', { current_password: cp, new_password: np });
+        setNp(''); setNp2(''); setCp(''); setPwMsg({ ok: true, text: 'Password changed' });
+      } catch (e) { setPwMsg({ ok: false, text: (e && e.message) || 'Could not change the password' }); }
+      setBusy(false);
+    };
+
+    if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-2">My Account</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
+    if (!me) return html`<div class="card"><h2 class="text-xl font-bold mb-2">My Account</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
+
+    const av = me.avatar_url ? (me.avatar_url + (me.avatar_url.indexOf('?') >= 0 ? '&' : '?') + 'v=' + avBust) : '';
+    const initial = ((me.name || me.email || '?') + '?').charAt(0).toUpperCase();
+    const msg = (m) => m && html`<span class="text-sm ml-3 ${m.ok ? 'text-green-600' : 'text-red-600'}">${m.text}</span>`;
+
+    return html`<div>
+      <h2 class="text-xl font-bold mb-4">&#128100; My Account</h2>
+      <div class="card mb-4">
+        <div class="font-semibold mb-3">Profile picture</div>
+        <div class="flex items-center gap-4 flex-wrap">
+          ${av
+            ? html`<img alt="Your profile picture" src=${av} style="width:72px;height:72px;border-radius:50%;object-fit:cover;background:#f1f5f9" />`
+            : html`<span style="width:72px;height:72px;border-radius:50%;background:#4f46e5;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700">${initial}</span>`}
+          <div>
+            <input type="file" id="mc-acct-file" accept="image/png,image/jpeg,image/gif,image/webp" style="font-size:12px"
+              onChange=${e => { const f = e.target.files && e.target.files[0]; if (f) upload(f); e.target.value = ''; }} />
+            <p class="text-xs text-gray-400 mt-1 mb-0">PNG, JPEG, GIF or WebP, up to 2 MB.</p>
+            ${msg(avMsg)}
+          </div>
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="font-semibold mb-3">Your details</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Name</label>
+            <input class="input" value=${name} placeholder="Your name" onInput=${e => setName(e.target.value)} /></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Company</label>
+            <input class="input" value=${company} placeholder="Your company" onInput=${e => setCompany(e.target.value)} /></div>
+        </div>
+        <div class="mt-3"><button class="btn" disabled=${busy} onClick=${saveProfile}>Save</button>${msg(pMsg)}</div>
+      </div>
+      <div class="card mb-4">
+        <div class="font-semibold mb-3">Change password</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">New password</label>
+            <input class="input" type="password" autocomplete="new-password" value=${np} placeholder="At least 8 characters" onInput=${e => setNp(e.target.value)} /></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Confirm new password</label>
+            <input class="input" type="password" autocomplete="new-password" value=${np2} onInput=${e => setNp2(e.target.value)} /></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Current password (verifies it is you)</label>
+            <input class="input" type="password" autocomplete="current-password" value=${cp} onInput=${e => setCp(e.target.value)} /></div>
+        </div>
+        <div class="mt-3"><button class="btn" disabled=${busy} onClick=${savePassword}>Save</button>${msg(pwMsg)}</div>
+      </div>
+      <div class="card">
+        <div class="font-semibold mb-3">Profile</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><div>${me.email || '-'}</div></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Role</label><div><span class="badge badge-blue">${me.role || 'user'}</span></div></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Plan</label><div><span class="badge badge-green">${me.plan_name || 'Free'}</span></div></div>
+        </div>
+      </div>
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
