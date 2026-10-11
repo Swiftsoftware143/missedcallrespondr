@@ -2123,6 +2123,17 @@ const App = () => {
   // operator had no way to change his own name, company, picture or password here. A backend
   // route with no UI is a defect. /auth/me is re-read on every open, so the form shows what the
   // server holds, never a stale copy, and the Plan badge carries plan_name, not a role word.
+  //
+  // The Role line below printed the database's own value verbatim — `account_owner`, `admin`, or a
+  // bare "user" when the field was empty — the same defect the sibling consoles (CoreSwift,
+  // WorkflowSwift) fixed with roleLabel. A written label is shown where one exists, the stored
+  // value as-is when it does not (honest, never an invented role), and an em-dash when the server
+  // sent nothing. The Plan badge beside it carries the REAL plan name from GET /auth/me.
+  const ROLE_LABELS = { account_owner:'Account owner', owner:'Owner', admin:'Admin',
+    super_admin:'Super admin', agency_admin:'Agency admin', client_admin:'Client admin',
+    company_admin:'Company admin', team_member:'Team member', member:'Member', user:'Member',
+    viewer:'Viewer' };
+  const roleLabel = r => { const s = String(r == null ? '' : r).trim(); if (!s) return '—'; return ROLE_LABELS[s.toLowerCase()] || s; };
   const Account = () => {
     const [me, setMe] = useState(null);
     const [err, setErr] = useState(null);
@@ -2234,7 +2245,7 @@ const App = () => {
         <div class="font-semibold mb-3">Profile</div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><div>${me.email || '-'}</div></div>
-          <div><label class="text-sm font-medium text-gray-600 block mb-1">Role</label><div><span class="badge badge-blue">${me.role || 'user'}</span></div></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Role</label><div><span class="badge badge-blue">${roleLabel(me.role)}</span></div></div>
           <div><label class="text-sm font-medium text-gray-600 block mb-1">Plan</label><div><span class="badge badge-green">${me.plan_name || 'Free'}</span></div></div>
         </div>
       </div>
