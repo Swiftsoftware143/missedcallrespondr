@@ -298,6 +298,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000036_provider_coming_soon",
             include_str!("../migrations/000036_provider_coming_soon.sql"),
         ),
+        // kanban (cron `default`, 2026-10-11) — the 000036 sweep missed `twilio`: its header named
+        // telnyx_handler as the reader for "telnyx / twilio", but that handler hard-codes
+        // `provider = 'telnyx'`, so a stored Twilio key can never be spent. This entry flags the row
+        // (the on-screen Coming Soon card and the 400 refusal already ship). Registered here because
+        // this runner keeps NO ledger and re-executes every file each boot — the file is idempotent —
+        // and `include_str!` of a new file is not a dependency of the previous build, so this entry is
+        // also what forces the rebuild to embed the new .sql.
+        (
+            "000037_twilio_coming_soon",
+            include_str!("../migrations/000037_twilio_coming_soon.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
