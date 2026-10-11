@@ -79,6 +79,24 @@ fn body_deadline_response(deadline: std::time::Duration) -> Response {
         })
 }
 
+/// The `413` an over-limit body is answered with - in the app's own JSON error shape.
+///
+/// MEASURED 2026-10-11 (cron `default`): this app already rewrote the rejection into JSON, but kept
+/// axum's own sentence and the mapper's `400`, so an oversized profile picture read
+/// `{"error":"Failed to buffer the request body: length limit exceeded"}` — machine text, and a
+/// status that says "bad request" for a payload that is simply too big. It now answers what the
+/// other four apps answer: `413` and the sentence a person can act on.
+///
+/// The envelope named here is 2 MB, axum's own default read limit.
+fn body_too_large_response() -> Response {
+    const BODY: &str = "{\"error\":\"That file is too large to upload. The maximum size is 2 MB - please choose a smaller image and try again.\",\"status\":413}";
+    Response::builder()
+        .status(StatusCode::PAYLOAD_TOO_LARGE)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(BODY))
+        .unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
 /// Middleware: bound how long a request BODY may take to arrive, and answer `408` if it has not
 /// finished within [`BodyReadDeadline`] of the headers.
 ///
@@ -145,9 +163,17 @@ pub async fn body_read_deadline_middleware(
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
-        // Over the body limit, or a read error on the way in: exactly the rejection the handler's
-        // own extractor would have produced, produced by the same extractor.
-        Ok(Err(rejection)) => rejection.into_response(),
+        // Over the body limit, or a read error on the way in: the rejection the handler's own
+        // extractor would have produced, produced by the same extractor - EXCEPT that an over-limit
+        // body is answered in this app's own JSON shape, with the status that says what happened
+        // (see `body_too_large_response`). A read error on the way in is passed through unchanged.
+        Ok(Err(rejection)) => {
+            if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                body_too_large_response()
+            } else {
+                rejection.into_response()
+            }
+        }
         Err(_elapsed) => {
             warn!(
                 "request body not received within {:?} (stalled body) — answered 408 for {} {}",
@@ -314,6 +340,21 @@ mod tests {
             .await
             .expect("router");
         assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+            "an over-limit body must answer in the app's own error shape"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), 4096)
+            .await
+            .expect("body");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("\"status\":413") && text.contains("\"error\""),
+            "body was {text}"
+        );
     }
 
     /// A request that declares NO body is passed through untouched: with no declared body there is
