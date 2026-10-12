@@ -140,7 +140,10 @@ pub async fn unique_account_slug(db: &sqlx::PgPool, name: &str) -> Result<String
     Ok(format!("{base}_{}", Uuid::new_v4()))
 }
 
-/// Create an account. Refuses (without writing anything) if the address is already a login.
+/// Create an account. Refuses (without writing anything) if the address is already a login — and
+/// writes the workspace, its owner and its plan row as ONE transaction, so a signup that FAILS
+/// (including one that loses a race to the `users_email_key` index) leaves nothing behind
+/// (kanban t_6f88820a).
 pub async fn create_account(
     state: &AppState,
     a: NewAccount<'_>,
@@ -148,7 +151,9 @@ pub async fn create_account(
     let db = &state.pool;
 
     // The duplicate check runs BEFORE the first INSERT (the public signup's order, unchanged): an
-    // orphan workspace must never be left behind by a refused retry.
+    // orphan workspace must never be left behind by a refused retry. It is only a FAST PATH — the
+    // `users_email_key` UNIQUE index below is the real guard, so the loser of a race is mapped to
+    // the same 409 (see the users INSERT).
     if email_taken(db, a.email).await? {
         return Err(AppError::Conflict(
             "A user with this email already exists. Try signing in.".into(),
@@ -156,6 +161,16 @@ pub async fn create_account(
     }
 
     let account_id = Uuid::new_v4();
+
+    // ONE transaction, begun before the first write and committed only once the account is
+    // COMPLETE (measured defect, kanban t_6f88820a). The tenant, the owner user and the plan row
+    // were three separate statements on three pooled connections, so a signup that failed after
+    // the `tenants` INSERT left the workspace behind while the caller got
+    // `500 {"error":"Database error"}` — measured live: eight concurrent
+    // `POST /api/v1/auth/register` with ONE address produced five 500s and FIVE orphan tenants with
+    // zero users, which sit in the operator's tenant list as "…'s Workspace" rows nobody can sign
+    // into. The transaction rolls the loser's workspace back, so a failed signup writes nothing.
+    let mut tx = db.begin().await?;
 
     // The workspace slug (`tenants.slug`) is UNIQUE (`tenants_slug_key`) and the public signup has
     // no workspace field at all — `account_name` is "<name>'s Workspace" — so two visitors of the
@@ -179,7 +194,7 @@ pub async fn create_account(
         .bind(account_id)
         .bind(a.account_name)
         .bind(&candidate)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
         if inserted.rows_affected() == 1 {
             account_slug = Some(candidate);
@@ -196,6 +211,11 @@ pub async fn create_account(
     let user_id = Uuid::new_v4();
     let now = Utc::now().naive_utc();
 
+    // `users_email_key` is the real guard against a duplicate address (the `email_taken` above is
+    // only a fast path and cannot make the check atomic): two racing signups for one address both
+    // pass it, so the loser must be told the TRUTH — the same 409 the pre-check returns — instead
+    // of the 500 a bare `?` turned the unique violation into. Rolling the transaction back is what
+    // makes that failure write NOTHING: no orphan workspace (kanban t_6f88820a).
     sqlx::query(
         "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
@@ -207,8 +227,18 @@ pub async fn create_account(
     .bind(a.role)
     .bind(now)
     .bind(now)
-    .execute(db)
-    .await?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        if let sqlx::Error::Database(ref db_err) = e {
+            if db_err.constraint() == Some("users_email_key") {
+                return AppError::Conflict(
+                    "A user with this email already exists. Try signing in.".into(),
+                );
+            }
+        }
+        AppError::from(e)
+    })?;
 
     // Seat the entry plan with its 50 starter credits. `register`'s statement and values verbatim;
     // only the slug is now a parameter instead of the literal `'free'`.
@@ -216,7 +246,7 @@ pub async fn create_account(
         "SELECT id FROM plans WHERE slug = $1 AND is_active = true LIMIT 1",
     )
     .bind(a.plan_slug)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
 
     if let Some((plan_id,)) = plan {
@@ -227,9 +257,14 @@ pub async fn create_account(
         .bind(Uuid::new_v4())
         .bind(account_id)
         .bind(plan_id)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
     }
+
+    // The workspace, its owner and its plan row now exist as ONE unit of work. Commit BEFORE the
+    // mail: the mail paths below read the account back through the pool, and a notification is a
+    // published outcome, never part of the account's own transaction (kanban t_6f88820a).
+    tx.commit().await?;
 
     // ── The welcome / credentials mail ───────────────────────────────────────────────────────────
     // Two shapes, one per door, both best-effort (a mail failure never fails the account):
