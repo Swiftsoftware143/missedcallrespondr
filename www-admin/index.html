@@ -1746,6 +1746,10 @@ const OpsConsole = () => {
 const App = () => {
   if(!API.token) return html`<${LoginView} />`;
 
+  // `adminOnly` entries are OPERATOR surfaces (Operator Console, Plans & Features,
+  // Provisioning, Tenants, Site Config) and every one of them answers 403
+  // 'Platform admin role required' for a non-admin. They are filtered out at the render
+  // below — fail-CLOSED, using the same role list the API enforces (line 105).
   const nav = [
     { id: 'ops', label: 'Operator Console', icon: '🛠', adminOnly: true },
     { id: 'plans', label: 'Plans & Features', icon: '💳', adminOnly: true },
@@ -1770,7 +1774,7 @@ const App = () => {
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'clients', label: 'Clients', icon: '🤝' },
     { id: 'calendar', label: 'Calendar', icon: '📅' },
-      { id: 'site-config', label: 'Site Config', icon: '🌐' },
+      { id: 'site-config', label: 'Site Config', icon: '🌐', adminOnly: true },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
@@ -2262,7 +2266,7 @@ const App = () => {
         <span class="nav-text font-bold text-gray-800">MissedCall</span>
       </div>
       <div class="flex-1 space-y-1">
-        ${nav.map(n => html`<div class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }}>
+        ${nav.filter(n => !n.adminOnly || (API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0)).map(n => html`<div class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }}>
           <span>${n.icon}</span><span class="nav-text">${n.label}</span>
         </div>`)}
       </div>
