@@ -6,8 +6,15 @@
 !function(){
   var p = window.location.pathname;
   if (p === '/login' || p === '/login.html' || p.startsWith('/api/') || p.startsWith('/ref/')) return;
-  var t = localStorage.getItem('ws_fs_token') || localStorage.getItem('token') || localStorage.getItem('access_token');
-  if (!t) window.location.replace('/login');
+  // This app's login writes `mc_token` to SESSION storage and nothing to localStorage, so a
+  // signed-in user was carrying no key this guard looked at: the app root answered them with a
+  // SECOND sign-in form for a session they already had (measured 2026-10-12). Either store now
+  // means "signed in" and the app belongs at /dashboard/, which answers an anonymous visitor with
+  // its own sign-in screen - so the fallback is safe even when the session is stale.
+  var t = sessionStorage.getItem('mc_token')
+       || localStorage.getItem('ws_fs_token') || localStorage.getItem('token') || localStorage.getItem('access_token');
+  if (!t) { window.location.replace('/login'); return; }
+  window.location.replace('/dashboard/');
 }();
 </script>
 
