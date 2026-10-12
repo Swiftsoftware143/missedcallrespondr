@@ -562,7 +562,7 @@ const ResponseRules = () => {
   const remove = async (id) => { if (!confirm('Delete this rule?')) return; await API.del('/response-rules/' + id); load(); };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ Add Rule</button></div>
-    <p class="text-sm text-gray-500 mb-4">Rules run when a call comes in. They are checked in priority order (lowest first) and the first matching rule acts: a text back to the caller, or a callback queued for you in Follow Ups. A text leaves through Telnyx, so the Telnyx API key and messaging profile must be saved under Admin &rarr; Telnyx Config before one can go out.</p>
+    <p class="text-sm text-gray-500 mb-4">Rules run when a call comes in. They are checked in priority order (lowest first) and the first matching rule acts: a text back to the caller, or a callback queued for you in Follow Ups. A text leaves through Telnyx, so the Telnyx API key and messaging profile must be saved under Admin → Telnyx Config before one can go out.</p>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Name</th><th>Trigger</th><th>Action</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${st.list.map(r => html`<tr><td class="font-medium">${r.name||'-'}</td><td class="text-gray-500">${ruleLabel(RULE_TRIGGERS, r.trigger_condition)}</td><td class="text-gray-500">${ruleLabel(RULE_ACTIONS, r.response_type)}</td><td class="text-gray-500">${r.priority == null ? 100 : r.priority}</td><td><span class="badge ${r.is_active?'badge-green':'badge-red'}">${r.is_active?'Active':'Inactive'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(r)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td></tr>`)}
@@ -1121,7 +1121,7 @@ const Integrations = () => {
         <div style="min-width:210px" class="text-right">
           <div class="text-sm font-semibold text-blue-700">One CRM for every tool you connect</div>
           <a class="btn btn-sm" style="display:inline-block;margin-top:8px;text-decoration:none" href="https://coreswiftcrm.com/?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">Get CoreSwift CRM →</a>
-          <div class="mt-2"><a class="text-xs text-blue-600" href="https://coreswiftcrm.com/pricing?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">See plans &amp; upgrade</a></div>
+          <div class="mt-2"><a class="text-xs text-blue-600" href="https://coreswiftcrm.com/pricing?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">See plans & upgrade</a></div>
         </div>
       </div>
     </div>` : ''}
