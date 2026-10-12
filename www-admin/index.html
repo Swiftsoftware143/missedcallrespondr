@@ -52,9 +52,13 @@ window.appGuidePages = {
 
 
 <script type="module">
-import { h, render } from './vendor/preact.js';
-import { useState, useEffect } from './vendor/hooks.js';
-import htm from './vendor/htm.js';
+// ABSOLUTE specifiers (were './vendor/…'). The vhost's SPA fallback serves this shell at ANY path,
+// so a relative specifier resolved against the REQUEST path: an operator at
+// https://admin.missedcallrespondr.com/<any-path> requested <any-path>/vendor/preact.js (404) and the
+// console rendered BLANK (measured in real Chromium 2026-10-12). /vendor/* is served at every path.
+import { h, render } from '/vendor/preact.js';
+import { useState, useEffect } from '/vendor/hooks.js';
+import htm from '/vendor/htm.js';
 const html = htm.bind(h);
 const showUpgradePrompt = (msg) => {
   const div = document.createElement("div");
