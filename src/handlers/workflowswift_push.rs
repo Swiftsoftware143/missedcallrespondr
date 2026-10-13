@@ -80,12 +80,37 @@ pub async fn push_contact_to_workflowswift(state: &AppState, contact: &Contact) 
     match req.send().await {
         Ok(resp) => {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            if status.is_success() {
+            let body: String = resp
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(500)
+                .collect();
+            if !status.is_success() {
+                tracing::warn!(
+                    "workflowswift push returned {status} for contact {}: {body}",
+                    contact.id
+                );
+                return;
+            }
+            // A 2xx is NOT proof that WorkflowSwift wrote anything. Its capture receiver answers
+            // 200 `{"status":"accepted","matched":false,…}` when no active workflow matches the
+            // source — the hand-off is accepted and NOTHING is created (incoming_handler.rs:109-117).
+            // Logging "succeeded" for that reply is a false success: an operator grepping logs is
+            // told a run exists when it does not. Mirror the FunnelSwift twin, which records the
+            // same fix (kanban t_0a6a93f1): read `matched` and report the unmatched case
+            // distinctly. Reporting only — the capture itself stays best-effort and never fails.
+            let matched = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| v.get("matched").and_then(|m| m.as_bool()))
+                .unwrap_or(false);
+            if matched {
                 tracing::info!("workflowswift push succeeded for contact {}", contact.id);
             } else {
                 tracing::warn!(
-                    "workflowswift push returned {status} for contact {}: {body}",
+                    "workflowswift push accepted but unmatched (no workflow for source \
+                     'missedcallrespondr') for contact {}: {body}",
                     contact.id
                 );
             }
