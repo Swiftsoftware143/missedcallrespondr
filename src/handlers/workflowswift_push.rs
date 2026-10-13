@@ -28,10 +28,14 @@ struct DataPayload {
 /// Best-effort push of a newly created contact to WorkflowSwift.
 /// This function never returns an error — failures are logged and swallowed.
 pub async fn push_contact_to_workflowswift(state: &AppState, contact: &Contact) {
-    let url = &state.workflowswift_url;
-    if url.is_empty() {
+    // WorkflowSwift mounts its generic capture receiver at `/api/v1/incoming` (routes.rs:999,
+    // nested under `/api/v1`). The path is appended HERE so `WORKFLOWSWIFT_URL` stays a plain base
+    // URL, exactly as FunnelSwift's push does (FunnelSwift/src/handlers/workflowswift_push.rs:107).
+    let base = state.workflowswift_url.trim_end_matches('/');
+    if base.is_empty() {
         return;
     }
+    let url = format!("{base}/api/v1/incoming");
 
     let contact_json = match serde_json::to_value(contact) {
         Ok(v) => v,

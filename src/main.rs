@@ -76,8 +76,16 @@ async fn main() -> anyhow::Result<()> {
         }
     );
 
-    let workflowswift_url = std::env::var("WORKFLOWSWIFT_URL")
-        .unwrap_or_else(|_| "http://localhost:8085/api/incoming".into());
+    // BASE URL only. WorkflowSwift's generic capture receiver has always been mounted at
+    // `/api/v1/incoming` (routes.rs:999), and the path is appended at the call site — the same
+    // contract FunnelSwift's push follows (FunnelSwift/src/handlers/workflowswift_push.rs:107).
+    // Until 2026-10-13 the default here was the FULL path `.../api/incoming`, which this fleet has
+    // never mounted, so every contact push answered 404 and was swallowed as best-effort: a contact
+    // captured in MissedCall never reached WorkflowSwift. Measured live before the fix:
+    // `POST /api/incoming` -> 404 (empty body) while `POST /api/v1/incoming` -> 200
+    // {"status":"accepted"}. Override with WORKFLOWSWIFT_URL as a base (e.g. http://host:8085).
+    let workflowswift_url =
+        std::env::var("WORKFLOWSWIFT_URL").unwrap_or_else(|_| "http://localhost:8085".into());
 
     // Stripe signature freshness (kanban t_4754e612): how far a delivery's `t=` stamp may be from
     // this host's clock before the receiver refuses it even though its HMAC verified. In the boot
