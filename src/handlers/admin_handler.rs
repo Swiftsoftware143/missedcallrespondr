@@ -372,9 +372,14 @@ pub async fn add_credits(
             .await?;
         }
         None => {
-            // Try to find any plan to associate, or use a dummy fallback
+            // Try to find any plan to associate, or use a dummy fallback.
+            // Deterministic (kanban t_b73c597e): `sort_order` defaults to 0 and only the seeded rows
+            // set it, so Enterprise and Pro both sit at 0 and this `LIMIT 1` used to pick whichever
+            // row the planner happened to return first — the same inconsistent-sort_order class as
+            // the Plans list. The tie now breaks on price, then name, so a credit grant can never
+            // seat the $199 tier by accident.
             let plan = sqlx::query_scalar::<_, Uuid>(
-                "SELECT id FROM plans ORDER BY sort_order ASC LIMIT 1",
+                "SELECT id FROM plans ORDER BY sort_order ASC, price_monthly ASC, name ASC LIMIT 1",
             )
             .fetch_optional(&state.pool)
             .await?;

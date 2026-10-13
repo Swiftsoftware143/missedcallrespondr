@@ -153,8 +153,11 @@ Rules that matter operationally:
 ## Plans, tiers and the plan feature registry
 
 Four live tiers: **Enterprise** (the TOP tier), Pro, Pro Monthly and Free. "Top" is established from
-LIVE data, not from the name — the first ACTIVE row in the panel's own order (`sort_order`, then
-`price_monthly`, then `price`, then slug). The registry catalogue reports the winner as `top_plan`.
+LIVE data, not from the name — the most expensive ACTIVE plan (`price_monthly`, then `price_yearly`,
+then slug), read by one shared rule so the panel and the *Grant top tier every feature* button can
+never name different plans. The registry catalogue reports the winner as `top_plan`. The plan columns
+in that catalogue are a **price ladder, cheapest-first** (Free, Pro, Pro Monthly, Enterprise), and so
+is the plan list on the Operator Console — `sort_order` no longer decides what the operator reads.
 
 **The standing rule (David, 2026-09-23): the top tier gets everything.** Every key the app's feature
 registry defines must be granted on the top tier. Two keys were granted by no plan at all before

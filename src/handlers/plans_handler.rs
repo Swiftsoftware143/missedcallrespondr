@@ -6,7 +6,7 @@ use axum::{
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::FromRow;
+use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -363,6 +363,24 @@ pub async fn admin_update_plan_features(
     Ok(Json(json!({"message": "Features updated"})))
 }
 
+/// THE ONE rule for "which plan is the TOP tier" (kanban t_b73c597e).
+///
+/// The catalogue's own ORDER BY used to *be* the definition: `sort_order ASC, price_monthly DESC`
+/// made `plan_registry` and `grant_top_tier` agree only by accident, because `sort_order` carries no
+/// intended meaning — it defaults to 0 and only the SEEDED rows set it (migration 000008 puts Free at
+/// 1 and Pro Monthly at 2), so Enterprise and Pro both sat at 0 and the winner hung on a tie-break.
+/// The top tier is now the most expensive ACTIVE plan, and BOTH surfaces (the registry panel and the
+/// `Grant top tier every feature` button) read it from here, so the two cannot disagree.
+pub async fn top_plan(db: &PgPool) -> Result<(Uuid, String), AppError> {
+    let row: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, slug FROM plans WHERE is_active \
+         ORDER BY price_monthly DESC NULLS LAST, price_yearly DESC NULLS LAST, slug ASC LIMIT 1",
+    )
+    .fetch_optional(db)
+    .await?;
+    row.ok_or_else(|| AppError::NotFound("No active plan is defined".into()))
+}
+
 /// GET /api/v1/admin/plan-registry — the plan × feature CATALOGUE (kanban t_dd2f7e32).
 ///
 /// One row per registry key, one column per live plan, plus the resolved value and its SOURCE for
@@ -370,8 +388,14 @@ pub async fn admin_update_plan_features(
 /// very functions the gates call — so "what the panel shows" is, by construction, the trade the
 /// gate enforced (the card's requirement 4: gate == panel).
 ///
-/// `top_plan` is established from LIVE data (first ACTIVE row in the panel's own order: `sort_order`,
-/// then `price_monthly`, then `price`, then slug) — not from the plan's name.
+/// `top_plan` comes from `top_plan()` above (the most expensive ACTIVE plan) — not from the plan's
+/// name, and no longer from the display order.
+///
+/// The columns themselves are a PRICE LADDER, cheapest-first (kanban t_b73c597e): the panel used to
+/// be ordered `sort_order ASC, price_monthly DESC`, which put the FREE tier ($0) BELOW both paid
+/// tiers and the $49 `Pro Monthly` last — the operator read the catalogue in an order no price
+/// ladder can produce. Same rule as `list_plans` and the fleet convention (ADASwift: `ORDER BY
+/// price ASC`).
 pub async fn plan_registry(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
@@ -379,7 +403,7 @@ pub async fn plan_registry(
     let rows = sqlx::query(
         "SELECT id, name, slug, is_active, sort_order, price_monthly::float8 AS price_monthly, \
          price_yearly::float8 AS price_yearly, price::float8 AS price FROM plans \
-         ORDER BY is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC",
+         ORDER BY is_active DESC, price_monthly ASC NULLS LAST, name ASC",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -396,10 +420,9 @@ pub async fn plan_registry(
             money(r, "price_yearly"),
         ));
     }
-    let top_slug = plan_rows
-        .first()
-        .map(|p| p.1.clone())
-        .ok_or_else(|| AppError::NotFound("No plans are defined".into()))?;
+    // The top tier is NOT the first display row (the ladder is cheapest-first); it is the most
+    // expensive ACTIVE plan, from the one shared rule so this panel and `grant_top_tier` agree.
+    let top_slug = top_plan(&state.pool).await?.1;
 
     // Resolve every registry key for every plan, remembering value + source per kind.
     let mut limit_vals: std::collections::HashMap<(String, String), Option<i64>> =
@@ -601,7 +624,7 @@ pub async fn plan_registry(
         "superset_ok": violations.is_empty(),
         "superset_violations": violations,
         "top_plan": top_slug,
-        "top_rule": "first ACTIVE plan in the panel's own order: is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC",
+        "top_rule": "the most expensive ACTIVE plan (price_monthly DESC, then price_yearly DESC, then slug ASC); the table itself lists plans cheapest-first",
         "value_legend": "-1 = unlimited/granted, 0 = NOT available on this plan, N>0 = a cap of N; booleans: non-zero = on, 0 = off",
     })))
 }
@@ -777,14 +800,9 @@ pub async fn set_plan_entitlement(
 pub async fn grant_top_tier(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let plan: Option<(Uuid, String)> = sqlx::query_as(
-        "SELECT id, slug FROM plans WHERE is_active \
-         ORDER BY is_active DESC, sort_order ASC, price_monthly DESC, price DESC, slug ASC LIMIT 1",
-    )
-    .fetch_optional(&state.pool)
-    .await?;
-    let (plan_id, slug) =
-        plan.ok_or_else(|| AppError::NotFound("No active plan to grant".into()))?;
+    // The SAME rule the registry panel reports as `top_plan` (kanban t_b73c597e) — the button and
+    // the table can no longer name different plans for "the top tier".
+    let (plan_id, slug) = top_plan(&state.pool).await?;
 
     let mut granted: Vec<String> = Vec::new();
     let mut already: Vec<String> = Vec::new();
