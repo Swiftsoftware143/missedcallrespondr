@@ -81,10 +81,17 @@ pub async fn list_plans(
     use sqlx::Row;
     // NOTE: price_monthly/price_yearly are `numeric`; the ::float8 cast is what
     // makes them decodable as f64 (see `money`).
+    //
+    // Ordered as a PRICE LADDER (kanban, cron `default`, 2026-10-13). `ORDER BY sort_order ASC,
+    // price_monthly ASC` put the FREE tier BELOW every paid one, because `sort_order` was seeded
+    // inconsistently (Enterprise/Pro = 0, Free = 1, Pro Monthly = 2): the operator's Plans table
+    // rendered [Pro $49, Enterprise $199, Free $0, Pro Monthly $49]. Cheapest-first is the fleet
+    // convention for a plan catalogue (ADASwift: `ORDER BY price ASC`), so the ladder is driven by
+    // the price and ties break on the name. Same defect class as IncentiveSwift d5aed10b.
     let rows = sqlx::query(
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
          price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
-         created_at, updated_at FROM plans ORDER BY sort_order ASC, price_monthly ASC",
+         created_at, updated_at FROM plans ORDER BY price_monthly ASC NULLS LAST, name ASC",
     )
     .fetch_all(&state.pool)
     .await?;
