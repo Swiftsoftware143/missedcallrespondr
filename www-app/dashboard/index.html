@@ -196,7 +196,7 @@ const Overview = () => {
         ? html`<ul style="list-style:none;padding:0;margin:0">
             ${st.activity.map(a => html`<li class="text-sm text-gray-600" style="padding:6px 0;border-bottom:1px solid #f1f5f9">
               <b>${ACT_LABEL[a.action] || a.action}</b>${actDetail(a)}
-              <span class="text-gray-400" style="float:right">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span></li>`)}
+              <span class="text-gray-400" style="float:right">${utcTime(a.created_at)}</span></li>`)}
           </ul>`
         : html`<p class="text-sm text-gray-400">Nothing yet — a call, an automatic reply or a captured contact shows here.</p>`}
     </div>
@@ -250,7 +250,7 @@ const PhoneNumbers = () => {
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Number</th><th>Status</th><th>Added</th><th></th></tr></thead>
-        <tbody>${st.list.map(n => html`<tr><td class="font-medium">${n.number || n.phone_number || n.id || '-'}</td><td><span class="badge ${n.status==='active'||(n.active!==false)?'badge-green':'badge-yellow'}">${n.status||(n.active!==false?'active':'inactive')}</span></td><td class="text-gray-500">${n.created_at?new Date(n.created_at).toLocaleDateString():'-'}</td><td><button class="btn btn-sm btn-red" disabled=${st.busy === n.id} onClick=${() => release(n)}>Release</button></td></tr>`)}
+        <tbody>${st.list.map(n => html`<tr><td class="font-medium">${n.number || n.phone_number || n.id || '-'}</td><td><span class="badge ${n.status==='active'||(n.active!==false)?'badge-green':'badge-yellow'}">${n.status||(n.active!==false?'active':'inactive')}</span></td><td class="text-gray-500">${utcDate(n.created_at)}</td><td><button class="btn btn-sm btn-red" disabled=${st.busy === n.id} onClick=${() => release(n)}>Release</button></td></tr>`)}
         ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No phone numbers yet. Add one, or wait for the platform operator to provision it.</td></tr>`}
       </tbody></table>
     </div>
@@ -324,7 +324,7 @@ const Calls = () => {
         <tbody>${rows.map(c => html`<tr>
           <td class="font-medium">${c.caller_name || c.caller_number || '-'}</td>
           <td class="text-gray-500">${c.called_number || '-'}</td>
-          <td class="text-gray-500 text-sm">${c.call_time ? new Date(c.call_time).toLocaleString() : '-'}</td>
+          <td class="text-gray-500 text-sm">${utcTime(c.call_time)}</td>
           <td><span class="badge ${c.disposition === 'missed' ? 'badge-red' : 'badge-blue'}">${c.disposition || '-'}</span></td>
           <td>${c.disposition === 'missed'
             ? html`<button class="btn btn-sm ${st.responded[c.id] ? 'btn-outline' : 'btn-green'}" disabled=${st.busy === c.id || !!st.responded[c.id]} onClick=${() => respond(c)}>${st.responded[c.id] ? 'Queued ✓' : 'Respond'}</button>`
@@ -679,6 +679,7 @@ const messageBadge = (s) => (s === 'delivered' || s === 'sent') ? 'badge-green' 
 // by the browser as LOCAL time, so the clock time would be wrong by the timezone offset; pin it to
 // UTC before formatting.
 const utcTime = (v) => { if (!v) return '-'; const s = String(v); const iso = /[zZ]|[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z'; const d = new Date(iso); return isNaN(d.getTime()) ? '-' : d.toLocaleString(); };
+const utcDate = (v) => { if (!v) return '-'; const s = String(v); const iso = /[zZ]|[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z'; const d = new Date(iso); return isNaN(d.getTime()) ? '-' : d.toLocaleDateString(); };
 
 // ===== MESSAGES =====
 const Messages = () => {
@@ -737,7 +738,7 @@ const FollowUps = () => {
   const callLabel = (f) => {
     const c = callOf(f);
     if (!c) return f.call_id ? String(f.call_id).slice(0, 8) + '…' : '-';
-    return (c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + new Date(c.call_time).toLocaleString() : '');
+    return (c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + utcTime(c.call_time) : '');
   };
   const openNew = () => { st.error = null; st.notice = null; Object.assign(viewState('followups_form', {}), { call_id: '', type: 'call_back', when: '', notes: '' }); st.showNew = true; renderApp(); };
   const create = async () => {
@@ -779,7 +780,7 @@ const FollowUps = () => {
     ${st.calls.length === 0 && html`<p class="text-xs text-gray-500 mb-2">A follow-up is always attached to one of your calls; none have come in yet, so there is nothing to schedule against.</p>`}
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Call</th><th>Scheduled</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(f => html`<tr><td class="text-gray-500">${callLabel(f)}</td><td class="text-gray-500">${f.scheduled_at?new Date(f.scheduled_at + 'Z').toLocaleString():'-'}</td><td><span class="badge ${f.status==='completed'||f.status==='done'?'badge-green':f.status==='scheduled'?'badge-blue':'badge-yellow'}">${f.status||'pending'}</span></td><td>${f.status==='completed'||f.status==='done' ? '' : html`<button class="btn btn-sm btn-outline" disabled=${st.busy === f.id} onClick=${() => markDone(f)}>Mark done</button>`}<button class="btn btn-sm btn-red" disabled=${st.busy === f.id} onClick=${() => remove(f)}>Delete</button></td></tr>`)}
+        <tbody>${st.list.map(f => html`<tr><td class="text-gray-500">${callLabel(f)}</td><td class="text-gray-500">${utcTime(f.scheduled_at)}</td><td><span class="badge ${f.status==='completed'||f.status==='done'?'badge-green':f.status==='scheduled'?'badge-blue':'badge-yellow'}">${f.status||'pending'}</span></td><td>${f.status==='completed'||f.status==='done' ? '' : html`<button class="btn btn-sm btn-outline" disabled=${st.busy === f.id} onClick=${() => markDone(f)}>Mark done</button>`}<button class="btn btn-sm btn-red" disabled=${st.busy === f.id} onClick=${() => remove(f)}>Delete</button></td></tr>`)}
         ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No follow-ups scheduled.</td></tr>`}
       </tbody></table>
     </div>
@@ -787,7 +788,7 @@ const FollowUps = () => {
       <h3 class="text-lg font-bold mb-4">New Follow-up</h3>
       ${(() => { const f = viewState('followups_form', { call_id: '', type: 'call_back', when: '', notes: '' });
         return html`<div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">Call</label><select class="input" value=${f.call_id} onChange=${e => { f.call_id = e.target.value; }}><option value="">Pick a call…</option>${st.calls.map(c => html`<option value=${c.id}>${(c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + new Date(c.call_time).toLocaleString() : '')}</option>`)}</select></div>
+        <div><label class="text-sm font-medium block mb-1">Call</label><select class="input" value=${f.call_id} onChange=${e => { f.call_id = e.target.value; }}><option value="">Pick a call…</option>${st.calls.map(c => html`<option value=${c.id}>${(c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + utcTime(c.call_time) : '')}</option>`)}</select></div>
         <div><label class="text-sm font-medium block mb-1">Type</label><input class="input" value=${f.type} onInput=${e => { f.type = e.target.value; }} placeholder="call_back" /></div>
         <div><label class="text-sm font-medium block mb-1">Due</label><input class="input" type="datetime-local" value=${f.when} onInput=${e => { f.when = e.target.value; }} /></div>
         <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
