@@ -865,10 +865,17 @@ const Lists = () => {
 
 // ---- CORE INTEGRATION ----
 const CoreIntegration = () => {
-  const st = viewState('core', { status: null, lists: [], campaigns: [], checked: false });
+  const st = viewState('core', { status: null, lists: [], listsErr: null, campaigns: [], checked: false });
   const load = async () => {
     try { const s = await API.get('/integrations/coreswift/status'); st.status = s; } catch(e) { st.status = { connected: false, error: e.message }; }
-    try { const l = await API.get('/integrations/coreswift/lists'); st.lists = (l && l.lists) || (Array.isArray(l) ? l : []); } catch(e) { st.lists = []; }
+    /* kanban cron-20261013: a 400 here is the "not connected" refusal, NOT an empty CoreSwift account.
+       The card used to swallow it and print "Connected? No lists found in CoreSwift." on a workspace
+       with no key at all — the API's own reason was discarded, which is the false-cause defect the
+       Card Analytics / Location Tracking screens were fixed for. Carry the refusal's message through.
+       Measured live 2026-10-13 on admin.missedcallrespondr.com: status 200 {connected:false};
+       lists 400 {"error":"CoreSwift is not connected — store your csk_ key in the Integration Center first"}. */
+    try { const l = await API.get('/integrations/coreswift/lists'); st.lists = (l && l.lists) || (Array.isArray(l) ? l : []); st.listsErr = null; }
+    catch(e) { st.lists = []; st.listsErr = (e && e.message) || 'Could not load your CoreSwift lists.'; }
     try { const c = await API.get('/campaigns'); st.campaigns = Array.isArray(c) ? c : []; } catch(e) { console.error(e); }
     st.checked = true; renderApp(); };
   if (!st._loaded) { st._loaded = true; load(); }
@@ -883,7 +890,8 @@ const CoreIntegration = () => {
     </div>
     <div class="card mb-4">
       <h3 class="font-semibold mb-2">Your CoreSwift Lists</h3>
-      ${st.lists.length === 0 ? html`<p class="text-gray-400 text-sm">Connected? No lists found in CoreSwift.</p>`
+      ${st.listsErr ? html`<p class="text-gray-500 text-sm">${st.listsErr}</p>`
+        : st.lists.length === 0 ? html`<p class="text-gray-400 text-sm">Connected, but this CoreSwift account has no lists yet.</p>`
         : html`<table class="table"><thead><tr><th>Name</th><th>ID</th></tr></thead><tbody>${st.lists.map(l => html`<tr><td class="font-medium">${l.name||l.title||'-'}</td><td class="text-gray-500">${l.id||'-'}</td></tr>`)}</tbody></table>`}
     </div>
     <div class="card">
