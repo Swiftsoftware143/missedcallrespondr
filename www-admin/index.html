@@ -109,6 +109,21 @@ const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] =
 const PLATFORM_ADMIN_ROLES = ['admin', 'super_admin', 'agency_admin'];
 const TENANT_APP = 'https://app.missedcallrespondr.com';
 
+// Timestamps on this panel arrive from the API as naive-UTC strings (the columns are
+// `timestamp without time zone` and the Rust models serialise `NaiveDateTime`, so the JSON has
+// no zone suffix). A bare `new Date(v)` parses such a string as LOCAL time, so every render here
+// was shifted by the viewer's UTC offset (4 hours in EDT). These three helpers pin the value to
+// UTC first; `utcIso` is the mirror used on the WRITE side — the calendar form is labelled
+// "(UTC)", so its `datetime-local` value must be stamped as UTC before it is sent, otherwise
+// saving an event moved it by the local offset every time.
+const utcIso = (v) => {
+  const s = String(v == null ? '' : v);
+  if (!s) return s;
+  return /[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s + 'Z';
+};
+const utcDate = (v) => { if (!v) return '-'; const d = new Date(utcIso(v)); return isNaN(d.getTime()) ? '-' : d.toLocaleDateString(); };
+const utcStamp = (v) => { if (!v) return '-'; const d = new Date(utcIso(v)); return isNaN(d.getTime()) ? '-' : d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; };
+
 // ---- LOGIN ----
 const LoginView = () => {
   // kanban t_02ef49ca — the login draft lives in the SHARED view object (S.views['login_form']),
@@ -478,7 +493,7 @@ const Contacts = () => {
           <td class="font-medium">${c.name || c.full_name || '-'}</td>
           <td class="text-gray-500">${c.phone || '-'}</td>
           <td class="text-gray-500">${c.email || '-'}</td>
-          <td class="text-gray-500 text-sm">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '-'}</td>
+          <td class="text-gray-500 text-sm">${utcDate(c.created_at)}</td>
         </tr>`)}
         ${filtered.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
       </tbody></table>
@@ -776,7 +791,7 @@ const CalendarView = () => {
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       ${st.list.map(ev => html`<div class="card">
         <div class="font-semibold text-gray-800">${ev.title || 'Untitled'}</div>
-        <div class="text-xs text-gray-500 mt-1">${ev.start_at ? new Date(ev.start_at).toLocaleString() : '-'}${ev.end_at ? ' → ' + new Date(ev.end_at).toLocaleString() : ''}</div>
+        <div class="text-xs text-gray-500 mt-1">${ev.start_at ? utcStamp(ev.start_at) : '-'}${ev.end_at ? ' → ' + utcStamp(ev.end_at) : ''}</div>
         <div class="text-sm text-gray-600 mt-1">${ev.event_type || 'call'}</div>
         <div class="flex gap-2 mt-3"><button class="btn btn-sm btn-outline" onClick=${() => { show(ev); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(ev.id)}>Delete</button></div>
       </div>`)}
@@ -800,7 +815,7 @@ const CalendarView = () => {
             <div><label class="text-sm font-medium block mb-1">Title</label><input class="input" value=${f.title} onInput=${e => { f.title = e.target.value; }} /></div>
             <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" value=${f.event_type} onChange=${e => { f.event_type = e.target.value; }}><option value="call">Call</option><option value="meeting">Meeting</option><option value="follow-up">Follow-up</option></select></div>
             <div><label class="text-sm font-medium block mb-1">Start (UTC)</label><input class="input" type="datetime-local" value=${f.start_at ? f.start_at.slice(0,16) : ''} onInput=${e => { f.start_at = e.target.value; }} /></div>
-            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({title: f.title, event_type: f.event_type, start_at: f.start_at ? new Date(f.start_at).toISOString() : null})}>${st.editItem ? 'Save' : 'Add'}</button></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({title: f.title, event_type: f.event_type, start_at: f.start_at ? new Date(utcIso(f.start_at)).toISOString() : null})}>${st.editItem ? 'Save' : 'Add'}</button></div>
           </div>`; })()}
       </div>
     </div>`}
