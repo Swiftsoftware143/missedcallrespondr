@@ -1,3 +1,4 @@
+mod activity;
 mod auth;
 mod body_deadline;
 mod branding;

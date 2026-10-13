@@ -364,6 +364,22 @@ pub async fn create_message(
     .execute(&state.pool)
     .await?;
 
+    // Activity feed (best-effort): a manual send from the console shows on the dashboard. Logged
+    // for a failed attempt too — the feed reports what happened, the Messages log keeps the detail.
+    crate::activity::message_sent(
+        &state.pool,
+        crate::activity::MessageActivity {
+            tenant_id: claims.aid,
+            user_id: Some(claims.sub),
+            message_id: id,
+            to: req.to_number.trim(),
+            body: &req.body,
+            status: outcome.status,
+            auto_rule: None,
+        },
+    )
+    .await;
+
     // The failed attempt is recorded BEFORE the caller is told, so the tenant's log carries what
     // happened either way, and the answer to the caller repeats the provider's own reason.
     if outcome.status == "failed" {
@@ -466,6 +482,22 @@ pub(crate) async fn send_rule_sms(
     .bind(now)
     .execute(&state.pool)
     .await?;
+
+    // Activity feed (best-effort): the automatic reply a response rule sent shows on the
+    // dashboard — this is the action the customer actually bought.
+    crate::activity::message_sent(
+        &state.pool,
+        crate::activity::MessageActivity {
+            tenant_id,
+            user_id: None,
+            message_id: id,
+            to,
+            body,
+            status: outcome.status,
+            auto_rule: Some(rule_name),
+        },
+    )
+    .await;
 
     if outcome.status == "failed" {
         tracing::warn!(

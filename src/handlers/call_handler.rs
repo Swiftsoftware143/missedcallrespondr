@@ -61,6 +61,17 @@ pub async fn create_call(
         .fetch_one(&state.pool)
         .await?;
 
+    // Activity feed (best-effort): the customer's dashboard says a call landed. Written before the
+    // spawned pushes below so the feed is current the moment the console reloads.
+    crate::activity::call_received(
+        &state.pool,
+        claims.aid,
+        id,
+        &call.caller_number,
+        &disposition,
+    )
+    .await;
+
     // Inbound capture → CoreSwift: a logged call whose caller number we know is a captured
     // lead. Best-effort in a spawned task (never blocks the save, never errors the request)
     // and a quiet no-op when the tenant has not connected CoreSwift. One CoreSwift code

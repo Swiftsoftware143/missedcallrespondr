@@ -78,6 +78,17 @@ pub async fn create_contact(
         .fetch_one(&state.pool)
         .await?;
 
+    // Activity feed (best-effort): a captured contact shows on the customer's dashboard.
+    crate::activity::contact_created(
+        &state.pool,
+        claims.aid,
+        Some(claims.sub),
+        id,
+        &item.name,
+        Some(item.phone.as_str()),
+    )
+    .await;
+
     // Best-effort pushes (never block on failure)
     let state_clone = state.clone();
     let item_clone = item.clone();

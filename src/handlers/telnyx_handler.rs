@@ -495,6 +495,17 @@ async fn process_webhook_event(state: &AppState, body: &Value) -> ApiResult<Json
     .execute(&state.pool)
     .await?;
 
+    // Activity feed (best-effort) — the customer's dashboard says a call landed. This is the REAL
+    // intake path, so it is written here as well as in the manual/API one.
+    crate::activity::call_received(
+        &state.pool,
+        tenant_id,
+        call_id,
+        &normalized_caller,
+        "missed",
+    )
+    .await;
+
     // -- 7. Insert call_log record
     sqlx::query(
         // `recorded` was dropped from the table (kanban t_1d4fc956 RETIRE-VOICEMAILS): this writer

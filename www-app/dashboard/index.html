@@ -151,12 +151,29 @@ const Overview = () => {
   if (!st._loaded) { st._loaded = true;
     API.get('/dashboard/stats').then(s => Object.assign(st, s)).catch(() => {}).then(renderApp);
     API.get('/me/usage').then(u => { st.usage = u; renderApp(); }).catch(() => {});
+    // GET /dashboard/activity — the backend route existed with NO caller and, until this card, no
+    // writer either (nothing in the crate inserted into `activity_log`). Both halves now exist, so
+    // the panel below shows what the tenant's auto-response setup actually did.
+    API.get('/dashboard/activity').then(a => { st.activity = Array.isArray(a) ? a.slice(0, 8) : []; renderApp(); })
+      .catch(() => { st.activity = []; renderApp(); });
   }
   const c = API.user || {};
   const u = st.usage || {};
   const num = (v) => (v === undefined || v === null) ? '—' : v;
+  // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
+  // is honest rather than invisible.
+  const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added' };
+  const actDetail = (a) => {
+    const m = (a.metadata && typeof a.metadata === 'object') ? a.metadata : {};
+    if (a.action === 'call.received') return m.caller_number ? ' from ' + m.caller_number : '';
+    if (a.action === 'message.sent') return (m.auto_rule ? ' (' + m.auto_rule + ')' : '') + (m.to_number ? ' to ' + m.to_number : '');
+    if (a.action === 'contact.created') return m.name ? ': ' + m.name : '';
+    return '';
+  };
   const totalCalls = st.total_calls;
-  const rate = (st.response_rate === undefined || st.response_rate === null) ? null : Math.round(st.response_rate * 100);
+  // `response_rate` is ALREADY a percentage — the handler computes answered/total*100. The console
+  // multiplied it by 100 a second time, so any tenant with a real call history read e.g. "5000%".
+  const rate = (st.response_rate === undefined || st.response_rate === null) ? null : Math.round(st.response_rate);
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Overview</h2>
     <div class="card"><p class="text-sm text-gray-600">Welcome back, <b>${c.name || c.email || 'there'}</b>. Here's what's happening with your auto-response setup.</p></div>
@@ -173,6 +190,15 @@ const Overview = () => {
       <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
         <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || 'Free'}</span></p>
         <p class="text-sm text-gray-600 mt-2">${num(u.rules)} response rules · ${num(u.phone_numbers)} phone numbers · ${num(u.contacts)} contacts</p></div>
+    </div>
+    <div class="card mt-4"><h3 class="font-semibold mb-2">Recent activity</h3>
+      ${(st.activity && st.activity.length)
+        ? html`<ul style="list-style:none;padding:0;margin:0">
+            ${st.activity.map(a => html`<li class="text-sm text-gray-600" style="padding:6px 0;border-bottom:1px solid #f1f5f9">
+              <b>${ACT_LABEL[a.action] || a.action}</b>${actDetail(a)}
+              <span class="text-gray-400" style="float:right">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span></li>`)}
+          </ul>`
+        : html`<p class="text-sm text-gray-400">Nothing yet — a call, an automatic reply or a captured contact shows here.</p>`}
     </div>
   </div>`;
 };
