@@ -160,6 +160,10 @@ const Overview = () => {
   const c = API.user || {};
   const u = st.usage || {};
   const num = (v) => (v === undefined || v === null) ? '—' : v;
+  // A count of 1 must not render the plural noun — the same class as the CoreSwift usage readout
+  // that printed "1 users" for every workspace. `num` still supplies the dash when the payload
+  // omits the value, so the noun is the only thing this decides.
+  const plural = (v, one, many) => `${num(v)} ${v === 1 ? one : many}`;
   // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
   // is honest rather than invisible.
   const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added' };
@@ -189,7 +193,7 @@ const Overview = () => {
           : (rate === null ? 'Not measured yet' : rate + '% of calls answered or sent an automatic reply')}</p></div>
       <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
         <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || 'Free'}</span></p>
-        <p class="text-sm text-gray-600 mt-2">${num(u.rules)} response rules · ${num(u.phone_numbers)} phone numbers · ${num(u.contacts)} contacts</p></div>
+        <p class="text-sm text-gray-600 mt-2">${plural(u.rules, 'response rule', 'response rules')} · ${plural(u.phone_numbers, 'phone number', 'phone numbers')} · ${plural(u.contacts, 'contact', 'contacts')}</p></div>
     </div>
     <div class="card mt-4"><h3 class="font-semibold mb-2">Recent activity</h3>
       ${(st.activity && st.activity.length)
