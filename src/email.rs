@@ -391,7 +391,7 @@ fn url_host(api_url: &str) -> &str {
 /// `docker logs`.
 ///
 /// Best-effort by construction: a recording failure is logged and never changes the send's result.
-async fn record_last_send(
+pub async fn record_last_send(
     pool: &PgPool,
     kind: &str,
     to: &str,

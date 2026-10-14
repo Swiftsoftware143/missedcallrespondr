@@ -1766,6 +1766,102 @@ const TenantsScreen = () => {
   </div>`;
 };
 
+// ── EMAIL PROVIDER (system mail) ─────────────────────────────────────────────────────────────────
+// The backend serves GET/PUT /api/v1/admin/email-config (provider + sealed credential + `last_send`)
+// and POST /admin/email-config/test, and the only screen that reached them was the Operator Console's
+// raw JSON catalogue — so an operator could save credentials and never see whether a customer's mail
+// actually left, and a "Send test email" press recorded nothing at all. A backend route with no UI is
+// a defect: this is the screen.
+const EmailProviderScreen = () => {
+  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, last: null, to: '', busy: false, msg: null });
+  const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
+  const load = async () => {
+    try {
+      const r = await API.get('/admin/email-config');
+      const c = (r && r.config) || {};
+      st.prov = (r && r.providers) || [];
+      st.provider = c.provider || st.provider;
+      st.api_url = c.api_url || ''; st.api_key = c.api_key || ''; st.domain = c.domain || '';
+      st.from_address = c.from_address || c.from_email || ''; st.from_name = c.from_name || '';
+      st.configured = !!(r && r.configured); st.source = (r && r.source) || 'none';
+      st.stored = !!(r && r.stored); st.last = (r && r.last_send) || null;
+      st.msg = null;
+    } catch (e) { st.msg = { ok: false, text: (e && e.message) || 'Could not read the email config' }; }
+    renderApp();
+  };
+  if (!st._loaded && isAdmin) { st._loaded = true; load(); }
+  const save = async () => {
+    st.busy = true; st.msg = null; renderApp();
+    try {
+      await API.put('/admin/email-config', { provider: st.provider, api_url: st.api_url, api_key: st.api_key, domain: st.domain, from_address: st.from_address, from_name: st.from_name });
+      await load(); st.msg = { ok: true, text: 'Email provider saved.' };
+    } catch (e) { st.msg = { ok: false, text: 'Save failed: ' + ((e && e.message) || 'unknown error') }; }
+    st.busy = false; renderApp();
+  };
+  const sendTest = async () => {
+    st.busy = true; st.msg = null; renderApp();
+    try {
+      const q = st.to.trim() ? ('?to=' + encodeURIComponent(st.to.trim())) : '';
+      const r = await API.post('/admin/email-config/test' + q, {});
+      st.msg = { ok: !!r.success, text: r.success ? ('Test email: ' + (r.detail || 'accepted')) : ('Not sent: ' + (r.detail || 'failed')) };
+      await load();
+    } catch (e) { st.msg = { ok: false, text: 'Test failed: ' + ((e && e.message) || 'unknown error') }; }
+    st.busy = false; renderApp();
+  };
+  if (!isAdmin) return html`<div class="card"><h2 class="text-xl font-bold mb-2">📧 Email Provider</h2><p class="text-sm text-gray-600">This screen is for platform admins: the mail provider this install sends through is an operator setting.</p></div>`;
+  const last = (st.last && st.last.present !== false) ? st.last : null;
+  const withheld = !!(last && /withheld/i.test(last.detail || ''));
+  const accepted = !!(last && last.ok && !withheld);
+  const label = !last ? null : (accepted ? '\u2705 Accepted by the provider' : (withheld ? '\u26d4 Not sent (withheld)' : '\u274c Not delivered'));
+  return html`<div data-email-provider="screen">
+    <h2 class="text-xl font-bold mb-4">📧 Email Provider</h2>
+    <div class="card">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="font-semibold">System mail (welcome, invitations, password resets)</div>
+        <span class="badge ${st.configured ? 'badge-green' : 'badge-yellow'}">${st.configured ? 'configured' : 'not configured'}</span>
+        ${st.source && st.source !== 'none' ? html`<span class="text-xs text-gray-400">source: ${st.source}</span>` : null}
+      </div>
+      <p class="text-sm text-gray-500 mb-4">Every transactional mail this install sends goes through this provider — the welcome mail a new customer needs first. Credentials are stored sealed and shown masked; leaving the key unchanged keeps the stored one.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Provider</label>
+          <select class="input" value=${st.provider} onChange=${e => { st.provider = e.target.value; renderApp(); }}>
+            ${(st.prov.length ? st.prov : [{ value: 'mailgun', label: 'Mailgun' }, { value: 'sendgrid', label: 'SendGrid' }, { value: 'sendiio', label: 'Sendiio' }]).map(p => html`<option value=${p.value} selected=${p.value === st.provider}>${p.label || p.value}</option>`)}
+          </select></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">API URL</label>
+          <input class="input" value=${st.api_url} placeholder="https://api.mailgun.net/v3/mail.example.com/messages" onInput=${e => { st.api_url = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">API key</label>
+          <input class="input" type="password" value=${st.api_key} placeholder="paste the provider key" onInput=${e => { st.api_key = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Sending domain</label>
+          <input class="input" value=${st.domain} placeholder="mail.missedcallrespondr.com" onInput=${e => { st.domain = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">From name</label>
+          <input class="input" value=${st.from_name} placeholder="MissedCall Respondr" onInput=${e => { st.from_name = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">From address</label>
+          <input class="input" value=${st.from_address} placeholder="no-reply@mail.missedcallrespondr.com" onInput=${e => { st.from_address = e.target.value; }} /></div>
+      </div>
+      <div class="flex gap-2 mt-4"><button class="btn" data-email-provider="save" disabled=${st.busy} onClick=${save}>Save email provider</button></div>
+      <div class="mt-4 pt-3" style="border-top:1px solid #e5e7eb">
+        <label class="text-sm font-medium text-gray-600 block mb-1">Send a test email</label>
+        <div class="flex gap-2 flex-wrap items-center">
+          <input class="input" style="max-width:320px" value=${st.to} placeholder="test@example.invalid (a test inbox)" onInput=${e => { st.to = e.target.value; }} />
+          <button class="btn btn-outline" data-email-provider="test" disabled=${st.busy} onClick=${sendTest}>Send test email</button>
+        </div>
+        <div class="text-xs text-gray-400 mt-1">Leave the address empty to send it to your own signed-in address. Use a test inbox: reserved addresses (*.invalid, example.*, swiftsoftware.dev) are withheld at source, nothing is sent, and the attempt is recorded below as withheld.</div>
+      </div>
+      ${st.msg && html`<div class="mt-3 text-sm ${st.msg.ok ? 'text-green-700' : 'text-red-600'}" data-email-provider="status">${st.msg.ok ? 'OK - ' : 'Error - '}${st.msg.text}</div>`}
+    </div>
+    <div class="card mt-4" id="email-last-send" data-email-provider="last-send">
+      <div class="flex items-center justify-between mb-1">
+        <span class="font-semibold">Last transactional email</span>
+        <button class="btn btn-outline btn-sm" data-email-provider="refresh" disabled=${st.busy} onClick=${load}>Refresh</button>
+      </div>
+      ${last ? html`<div class="text-sm ${accepted ? 'text-green-700' : 'text-red-600'}" id="email-last-send-line">${label} · ${utcStamp(last.at)} · ${last.kind || 'send'}${last.to ? (' to ' + last.to) : ''}</div>
+        ${last.detail ? html`<div class="text-xs text-gray-500 mt-1">${last.detail}</div>` : null}`
+      : html`<div class="text-sm text-gray-400" id="email-last-send-line">No system email has been sent yet — press "Send test email" to record one.</div>`}
+      <div class="text-xs text-gray-400 mt-1">Every transactional mail this install sends is recorded here, so "the customer never got it" is answerable without opening the server logs.</div>
+    </div>
+  </div>`;
+};
+
 const OpsConsole = () => {
   return html`<div class="ops-console space-y-1" data-ops="console">
     <h1 class="text-xl font-bold text-gray-800">Operator Console</h1>
@@ -1808,6 +1904,9 @@ const App = () => {
     { id: 'calendar', label: 'Calendar', icon: '📅' },
       { id: 'site-config', label: 'Site Config', icon: '🌐', adminOnly: true },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    // The system mail provider (GET/PUT /admin/email-config) plus whether the last customer mail
+    // actually left — the route had no screen (2026-10-14) and the ops catalogue only showed raw JSON.
+    { id: 'email-provider', label: 'Email Provider', icon: '📧', adminOnly: true },
     { id: 'payment-providers', label: 'Payment Providers', icon: '💳', adminOnly: true },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
@@ -2404,7 +2503,7 @@ const PaymentProviderModal = ({ st, closeForm, save }) => {
   </div>`;
 };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">

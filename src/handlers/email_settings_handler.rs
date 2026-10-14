@@ -211,21 +211,73 @@ pub async fn test_email_config(
         }));
     };
 
+    // A test press must NEVER guess a recipient (test-mail-hygiene). This arm used to fall back to a
+    // hardcoded owner address, so a press from a session carrying no email mailed the owner directly.
+    // Refuse and name the two ways to give it one.
     let to = match q.to.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(explicit) => explicit.to_string(),
-        None if claims.email.trim().is_empty() => "swiftsoftware143@yahoo.com".to_string(),
+        None if claims.email.trim().is_empty() => {
+            return Json(json!({
+                "success": false,
+                "source": "none",
+                "detail": "No recipient: this session carries no email address. Pass ?to=<address> (a test inbox), or sign in with an account that has one — this route will not guess an address."
+            }));
+        }
         None => claims.email.clone(),
     };
 
     let subject = "MissedCall Respondr system email test";
     let text = "This is a test of the MissedCall Respondr system email provider.\n\nIf you received it, sending works.\n\n- MissedCall Respondr";
-    match email_provider::deliver(&cfg, &to, subject, text, None).await {
+    let result = email_provider::deliver(&cfg, &to, subject, text, None).await;
+    // `deliver` answers Ok("suppressed: …") for a reserved/harness recipient — it deliberately
+    // attempts nothing — so Ok alone is not a delivery. Record BOTH the outcome and the withheld
+    // distinction onto the same panel-visible line a real customer mail writes, or the operator
+    // reads a stale "accepted" for a press that never left the box.
+    let withheld = result
+        .as_deref()
+        .map(|r| r.starts_with("suppressed"))
+        .unwrap_or(false);
+    let detail = if withheld {
+        format!(
+            "withheld: '{to}' is a reserved test address, so nothing was sent (no provider request)"
+        )
+    } else {
+        match &result {
+            Ok(receipt) => receipt.clone(),
+            Err(e) => e.clone(),
+        }
+    };
+    crate::email::record_last_send(
+        &state.pool,
+        "test",
+        &to,
+        &cfg.provider,
+        &if withheld {
+            Err(detail.clone())
+        } else {
+            result.clone()
+        },
+    )
+    .await;
+
+    match result {
         Ok(receipt) => {
             tracing::info!(
                 "email.test: provider={} source={} to={to} receipt={receipt:?}",
                 cfg.provider,
                 cfg.source
             );
+            if withheld {
+                return Json(json!({
+                    "success": false,
+                    "withheld": true,
+                    "provider": cfg.provider,
+                    "source": cfg.source,
+                    "to": to,
+                    "status": receipt,
+                    "detail": detail,
+                }));
+            }
             Json(json!({
                 "success": true,
                 "provider": cfg.provider,
