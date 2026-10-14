@@ -45,6 +45,7 @@ window.appGuidePages = {
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] },
+  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are stored encrypted and are never shown back in full.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use"] },
   "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your password", "See the plan you are on"] }
 };
 </script>
@@ -1807,6 +1808,7 @@ const App = () => {
     { id: 'calendar', label: 'Calendar', icon: '📅' },
       { id: 'site-config', label: 'Site Config', icon: '🌐', adminOnly: true },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    { id: 'payment-providers', label: 'Payment Providers', icon: '💳', adminOnly: true },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
 
@@ -2287,7 +2289,122 @@ const App = () => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account };
+// ---- PAYMENT PROVIDERS (platform admin) ----
+// The app's own checkout router (src/handlers/checkout_handler.rs) mounts
+//   GET    /api/v1/payment-providers                list the configured providers (secrets masked)
+//   POST   /api/v1/payment-providers                upsert one (blank secret = keep the stored one)
+//   DELETE /api/v1/payment-providers/:provider_type remove one
+// all platform-admin only, secrets sealed at rest (`enc:v1:` ciphertext) and never returned in
+// full. `get_active_provider()` reads this table on EVERY checkout session and `lookup_webhook_secret()`
+// reads it on both inbound receivers (`POST /api/v1/webhooks/stripe`, `/paypal`) — while this console
+// had no screen calling any of the three, so the operator could not connect the Stripe/PayPal account
+// the whole payment path runs on. David's rule: a backend route with no UI is a DEFECT, not a feature.
+const PP_KINDS = [['stripe', 'Stripe'], ['paypal', 'PayPal'], ['square', 'Square'], ['paddle', 'Paddle']];
+const PaymentProviders = () => {
+  const st = viewState('payment_providers', { list: null, err: null, busy: false, msg: null, form: null });
+  const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
+  const load = async () => {
+    try { const d = await API.get('/payment-providers'); st.list = (d && d.providers) || []; st.err = null; }
+    catch (e) { st.list = []; st.err = (e && e.message) || 'Could not load the payment providers'; }
+    renderApp();
+  };
+  if (!st._loaded && isAdmin) { st._loaded = true; load(); }
+  const openForm = (row) => {
+    st.form = { open: true, edit: !!row, provider_type: row ? row.provider_type : 'stripe',
+      api_key: '', webhook_secret: '', publishable_key: (row && row.publishable_key) || '',
+      label: (row && row.label) || '', is_test_mode: row ? row.is_test_mode !== false : true,
+      is_active: row ? row.is_active !== false : true, err: null, busy: false };
+    st.msg = null; renderApp();
+  };
+  const closeForm = () => { st.form = null; renderApp(); };
+  const save = async () => {
+    const f = st.form; if (!f) return;
+    const pt = String(f.provider_type || '').trim().toLowerCase();
+    if (PP_KINDS.map(k => k[0]).indexOf(pt) < 0) { f.err = 'Choose Stripe, PayPal, Square or Paddle.'; renderApp(); return; }
+    if (!f.edit && !String(f.api_key || '').trim()) { f.err = 'The secret key is required the first time you connect a provider.'; renderApp(); return; }
+    f.busy = true; f.err = null; renderApp();
+    const body = { provider_type: pt, label: (f.label || '').trim(), is_active: !!f.is_active,
+      is_test_mode: !!f.is_test_mode, publishable_key: (f.publishable_key || '').trim() };
+    // A BLANK credential is the "keep the stored value" signal the upsert's four arms key on, so a
+    // box the operator did not type into is left OUT of the body entirely.
+    if ((f.api_key || '').trim()) body.api_key = f.api_key.trim();
+    if ((f.webhook_secret || '').trim()) body.webhook_secret = f.webhook_secret.trim();
+    try { await API.post('/payment-providers', body); st.msg = 'Saved the ' + pt + ' configuration.'; st.form = null; await load(); }
+    catch (e) { f.busy = false; f.err = (e && e.message) || 'Could not save that provider'; renderApp(); }
+  };
+  const remove = async (row) => {
+    if (!confirm('Delete the ' + row.provider_type + ' configuration? Checkout and the inbound payment webhooks stop working until a provider is configured again.')) return;
+    st.busy = true; st.msg = null; renderApp();
+    try { await API.del('/payment-providers/' + encodeURIComponent(row.provider_type)); st.msg = 'Removed ' + row.provider_type + '.'; }
+    catch (e) { st.msg = 'Not removed: ' + ((e && e.message) || e); }
+    st.busy = false; await load();
+  };
+  if (!isAdmin) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Payment Providers</h2><p class="text-sm text-gray-600">This screen is for platform admins: the payment keys this install collects through are set by an operator with the admin role.</p></div>`;
+  const rows = st.list || [];
+  return html`<div>
+    <div class="flex items-center justify-between mb-4">
+      <div><h2 class="text-xl font-bold">Payment Providers</h2>
+        <p class="text-sm text-gray-500">The Stripe or PayPal account this install collects through. The secret key and the webhook signing secret are stored encrypted and are never shown back in full. Every checkout session and both inbound payment webhooks read the active provider from here.</p></div>
+      <button class="btn btn-sm btn-green" disabled=${st.busy} onClick=${() => openForm(null)}>+ Add provider</button>
+    </div>
+    ${st.msg ? html`<div class="text-sm mb-3 text-gray-700">${st.msg}</div>` : null}
+    ${st.err ? html`<div class="text-sm mb-3 text-red-700">${st.err}</div>` : null}
+    ${st.list === null ? html`<div class="card text-center text-gray-400 py-8">Loading...</div>`
+      : rows.length === 0 ? html`<div class="card text-center text-gray-400 py-8">No payment provider is connected yet. Add your Stripe or PayPal keys so checkout and the inbound payment webhooks can work.</div>`
+      : html`<div class="card p-0 overflow-hidden"><table class="table">
+          <thead><tr><th>Provider</th><th>Label</th><th>Secret key</th><th>Publishable key</th><th>Mode</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${rows.map(r => html`<tr data-provider=${r.provider_type}>
+            <td class="font-medium">${r.provider_type}</td>
+            <td class="text-gray-500">${r.label || '—'}</td>
+            <td>${r.key_status === 'configured' ? html`<span class="badge badge-green">configured</span>` : html`<span class="badge badge-yellow">not set</span>`}</td>
+            <td class="font-mono text-xs text-gray-500">${r.publishable_key || 'not set'}</td>
+            <td>${r.is_test_mode ? html`<span class="badge badge-blue">test</span>` : html`<span class="badge badge-purple">live</span>`}</td>
+            <td>${r.is_active ? html`<span class="badge badge-green">Active</span>` : html`<span class="badge badge-red">Inactive</span>`}</td>
+            <td><button class="btn btn-sm" disabled=${st.busy} onClick=${() => openForm(r)}>Edit</button>
+              <button class="btn btn-sm btn-red" style="margin-left:8px" disabled=${st.busy} onClick=${() => remove(r)}>Delete</button></td>
+          </tr>`)}</tbody></table></div>`}
+    ${st.form && st.form.open ? PaymentProviderModal({ st, closeForm, save }) : null}
+  </div>`;
+};
+
+const PaymentProviderModal = ({ st, closeForm, save }) => {
+  const f = st.form;
+  return html`<div class="modal" onClick=${e => e.target === e.currentTarget && closeForm()}>
+    <div class="modal-content" data-pp-form="1">
+      <h3 class="text-lg font-bold mb-4">${f.edit ? 'Edit' : 'Add'} payment provider</h3>
+      <div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">Provider</label>
+          <select class="input" value=${f.provider_type} disabled=${f.edit}
+            onChange=${e => { f.provider_type = e.target.value; renderApp(); }}>
+            ${PP_KINDS.map(k => html`<option value=${k[0]}>${k[1]}</option>`)}
+          </select>
+          <div class="text-xs text-gray-400 mt-1">Stripe and PayPal have an inbound webhook receiver in this app; Square and Paddle are stored but nothing reads them yet.</div></div>
+        <div><label class="text-sm font-medium block mb-1">Label (optional)</label>
+          <input class="input" value=${f.label} onInput=${e => { f.label = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Secret key${f.edit ? ' (leave blank to keep the stored one)' : ''}</label>
+          <input class="input" type="password" autocomplete="new-password" value=${f.api_key} onInput=${e => { f.api_key = e.target.value; }} />
+          <div class="text-xs text-gray-400 mt-1">Stripe's secret key starts <code>sk_</code>; PayPal takes <code>client_id:client_secret</code>.</div></div>
+        <div><label class="text-sm font-medium block mb-1">Webhook signing secret${f.edit ? ' (leave blank to keep the stored one)' : ''}</label>
+          <input class="input" type="password" autocomplete="new-password" value=${f.webhook_secret} onInput=${e => { f.webhook_secret = e.target.value; }} />
+          <div class="text-xs text-gray-400 mt-1">The key an inbound payment event's signature is checked against. Stripe shows it beside the endpoint's signing secret.</div></div>
+        <div><label class="text-sm font-medium block mb-1">Publishable key (optional)</label>
+          <input class="input" value=${f.publishable_key} onInput=${e => { f.publishable_key = e.target.value; }} /></div>
+        <div class="flex gap-4 items-center flex-wrap">
+          <label class="text-sm flex items-center gap-2"><input type="checkbox" checked=${f.is_test_mode} onChange=${e => { f.is_test_mode = e.target.checked; renderApp(); }} /> Test mode (sandbox keys)</label>
+          <label class="text-sm flex items-center gap-2"><input type="checkbox" checked=${f.is_active} onChange=${e => { f.is_active = e.target.checked; renderApp(); }} /> Active</label>
+        </div>
+        <div class="text-xs text-gray-400">Only an active provider is used. A provider left inactive is kept but takes no part in checkout.</div>
+      </div>
+      ${f.err ? html`<p class="text-sm text-red-600 mt-3">${f.err}</p>` : null}
+      <div class="flex gap-2 justify-end mt-4">
+        <button class="btn btn-outline" disabled=${f.busy} onClick=${() => closeForm()}>Cancel</button>
+        <button class="btn" disabled=${f.busy} onClick=${() => save()}>${f.busy ? 'Saving...' : (f.edit ? 'Save changes' : 'Add provider')}</button>
+      </div>
+    </div>
+  </div>`;
+};
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
