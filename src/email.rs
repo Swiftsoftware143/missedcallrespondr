@@ -398,15 +398,26 @@ pub async fn record_last_send(
     provider: &str,
     outcome: &Result<String, String>,
 ) {
+    // `deliver` answers Ok("suppressed: …") for a reserved/harness recipient — it deliberately
+    // attempts nothing — so Ok alone is not a delivery. Recording that as accepted is the misreport
+    // this line exists to prevent (measured 2026-10-14 on the admin test route), so the withheld
+    // receipt is recorded as the non-send it is.
+    let suppressed = matches!(outcome, Ok(receipt) if receipt.starts_with("suppressed"));
     let payload = json!({
         "at": chrono::Utc::now().to_rfc3339(),
         "kind": kind,
         "to": to,
         "provider": provider,
-        "ok": outcome.is_ok(),
-        "detail": match outcome {
-            Ok(receipt) => receipt.clone(),
-            Err(e) => e.clone(),
+        "ok": outcome.is_ok() && !suppressed,
+        "detail": if suppressed {
+            format!(
+                "withheld: '{to}' is a reserved test address, so nothing was sent (no provider request)"
+            )
+        } else {
+            match outcome {
+                Ok(receipt) => receipt.clone(),
+                Err(e) => e.clone(),
+            }
         },
     });
     if let Err(e) = sqlx::query(
@@ -457,6 +468,19 @@ async fn send_email_request(
             kind = %kind,
             "send suppressed: recipient is a fleet harness address (fleet-dev domain)"
         );
+        // Record the withheld outcome on the SAME panel-visible line a real send writes. Returning
+        // silently left the previous, unrelated "accepted" line standing, so an operator reading
+        // "the last mail was accepted" had no way to know this one was never sent.
+        record_last_send(
+            pool,
+            kind,
+            to,
+            "suppressed",
+            &Err(format!(
+                "withheld: '{domain}' is a fleet-harness / reserved address, so nothing was sent"
+            )),
+        )
+        .await;
         return Ok(());
     }
     // The account's branding opens both parts of the message (kanban t_feab8aff); a no-op for an
