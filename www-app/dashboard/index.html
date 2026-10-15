@@ -97,6 +97,13 @@ const API = (() => {
       if (!token) return Promise.resolve(null);
       return get('/auth/me').then(function (me) {
         user = Object.assign({}, user || {}, me);
+        // `/auth/me` OMITS `avatar_url` when the account has NO picture (the server skips a None),
+        // and the merge above spreads the answer OVER the cached row — so an ABSENT key left the
+        // STALE URL alive. Measured in a real browser after Remove (kanban t_0278f465): the picture
+        // stayed painted (and its <img> then 404'd) and the Remove control was still offered, i.e.
+        // the removal looked like it had not happened. Take the field from the answer, so every
+        // caller - including the Profile view's own merge of this result - sees the cleared value.
+        user.avatar_url = me.avatar_url || '';
         sessionStorage.setItem('mc_user', JSON.stringify(user));
         return user;
       }).catch(function () { return null; });
