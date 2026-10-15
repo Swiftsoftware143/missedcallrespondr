@@ -39,7 +39,7 @@ window.appGuidePages = {
   "deals": { title: "Deals", desc: "The opportunities in play, with their value and the stage they have reached.", actions: ["Add a deal", "Move a deal to the next stage"] },
   "campaigns": { title: "Campaigns", desc: "Outbound callbacks and messages sent to a set of contacts. Choose the audience and watch how it performs.", actions: ["Create a campaign", "Pick the audience", "Send or schedule it"] },
   "lists": { title: "Lists", desc: "Named groups of contacts that a campaign or a rule can target as one.", actions: ["Create a list", "Add or remove members"] },
-  "core": { title: "CoreSwift Integration", desc: "The link to CoreSwift: the status of the connection, and the personal API key that turns it on. Leads pushed here land in your CoreSwift contact pool.", actions: ["Check the connection status", "Add a CoreSwift API key under Settings, then Integrations"] },
+  "core": { title: "CoreSwift Integration", desc: "The link to CoreSwift: the status of the connection, and the personal API key that turns it on. Leads pushed here land in your CoreSwift contact pool.", actions: ["Check the connection status", "Paste a CoreSwift API key on this screen", "Test the connection", "Disconnect"] },
   "tickets": { title: "Tickets", desc: "Support requests raised on this workspace, with the status of each.", actions: ["Open a ticket", "Update its status"] },
   "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
@@ -885,7 +885,7 @@ const Lists = () => {
 
 // ---- CORE INTEGRATION ----
 const CoreIntegration = () => {
-  const st = viewState('core', { status: null, lists: [], listsErr: null, campaigns: [], checked: false });
+  const st = viewState('core', { status: null, lists: [], listsErr: null, campaigns: [], checked: false, keyIn: '', busy: null, msg: null });
   const load = async () => {
     try { const s = await API.get('/integrations/coreswift/status'); st.status = s; } catch(e) { st.status = { connected: false, error: e.message }; }
     /* kanban cron-20261013: a 400 here is the "not connected" refusal, NOT an empty CoreSwift account.
@@ -899,14 +899,61 @@ const CoreIntegration = () => {
     try { const c = await API.get('/campaigns'); st.campaigns = Array.isArray(c) ? c : []; } catch(e) { console.error(e); }
     st.checked = true; renderApp(); };
   if (!st._loaded) { st._loaded = true; load(); }
+  // kanban cron-20261015: this screen told the operator to store the key under "Settings ->
+  // Integrations" -- a screen that does not exist in THIS console (the tenant app has one; the
+  // admin console's key store is the Operator Console's Provider Keys panel, which is not where a
+  // reader of this sentence looks). An instruction that names a screen the reader cannot open is a
+  // dead end, so the screen now carries the control itself, on the SAME three routes the tenant
+  // Integration Center uses: POST /provider-keys (provider=coreswift), POST
+  // /provider-keys/coreswift/test, DELETE /provider-keys/coreswift.
+  const connectCore = async () => {
+    const k = (st.keyIn || '').trim();
+    if (!k) { st.msg = { ok: false, text: 'Paste the CoreSwift key first' }; renderApp(); return; }
+    st.busy = 'save'; st.msg = null; renderApp();
+    try {
+      await API.post('/provider-keys', { provider: 'coreswift', api_key: k });
+      st.keyIn = ''; st.msg = { ok: true, text: 'CoreSwift connected.' }; await load();
+    } catch (e) { st.msg = { ok: false, text: 'Could not connect: ' + ((e && e.message) || 'unknown error') }; }
+    st.busy = null; renderApp();
+  };
+  const testCore = async () => {
+    st.busy = 'test'; st.msg = null; renderApp();
+    try {
+      const r = await API.post('/provider-keys/coreswift/test', {});
+      st.msg = { ok: !!(r && r.ok), text: (r && r.message) || 'No live connection test available for this provider yet' };
+    } catch (e) { st.msg = { ok: false, text: 'Test failed: ' + ((e && e.message) || 'unknown error') }; }
+    st.busy = null; renderApp();
+  };
+  const disconnectCore = async () => {
+    if (!confirm('Disconnect CoreSwift? Leads stop pushing until a key is stored again.')) return;
+    st.busy = 'del'; st.msg = null; renderApp();
+    try {
+      await API.del('/provider-keys/coreswift');
+      st.msg = { ok: true, text: 'CoreSwift disconnected.' }; await load();
+    } catch (e) { st.msg = { ok: false, text: 'Could not disconnect: ' + ((e && e.message) || 'unknown error') }; }
+    st.busy = null; renderApp();
+  };
   return html`<div>
     <h2 class="text-xl font-bold mb-4">CoreSwift Integration</h2>
     ${!st.checked ? html`<p class="text-gray-500 text-sm">Checking...</p>` : html`
     <div class="card mb-4">
       <h3 class="font-semibold mb-2">Connection Status</h3>
       ${st.status && st.status.connected
-        ? html`<span class="badge badge-green">✅ Connected</span><p class="text-sm text-gray-500 mt-2">CoreSwift is connected via your personal API key. Leads pushed to CoreSwift land in your account's contact pool / linked campaign lists.</p>`
-        : html`<span class="badge badge-red">⚠️ Not connected</span><p class="text-sm text-gray-500 mt-2">Connect CoreSwift by adding a personal API key (<code>csk_...</code>) under <b>Settings → Integrations</b> with provider <code>coreswift</code>.</p>`}
+        ? html`<span class="badge badge-green">✅ Connected</span><p class="text-sm text-gray-500 mt-2">CoreSwift is connected via your personal API key. Leads pushed to CoreSwift land in your account's contact pool / linked campaign lists.</p>
+        ${st.status.base_url ? html`<p class="text-xs text-gray-400 mt-1">→ ${st.status.base_url}</p>` : ''}
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-sm btn-outline" disabled=${st.busy === 'test'} onClick=${testCore}>Test connection</button>
+          <button class="btn btn-sm btn-red" disabled=${st.busy === 'del'} onClick=${disconnectCore}>Disconnect</button>
+        </div>`
+        : html`<span class="badge badge-red">⚠️ Not connected</span><p class="text-sm text-gray-500 mt-2">Paste your CoreSwift API key (<code>csk_...</code>) below. It is stored against this workspace only, and the leads this workspace captures push through it.</p>
+        <div class="space-y-2 mt-3" style="max-width:520px">
+          <input class="input" id="core-key-input" type="password" placeholder="csk_..." value=${st.keyIn} onInput=${e => { st.keyIn = e.target.value; }} />
+          <div class="flex gap-2">
+            <button class="btn btn-sm" id="core-connect-btn" disabled=${st.busy === 'save'} onClick=${connectCore}>${st.busy === 'save' ? 'Connecting...' : 'Connect CoreSwift'}</button>
+            <button class="btn btn-sm btn-outline" disabled=${st.busy === 'test'} onClick=${testCore}>Test connection</button>
+          </div>
+        </div>`}
+      ${st.msg ? html`<p class="text-xs mt-2 ${st.msg.ok ? 'text-green-700' : 'text-amber-700'}">${st.msg.text}</p>` : ''}
     </div>
     <div class="card mb-4">
       <h3 class="font-semibold mb-2">Your CoreSwift Lists</h3>
