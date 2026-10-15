@@ -1240,7 +1240,7 @@ const Integrations = () => {
         <div style="min-width:210px" class="text-right">
           <div class="text-sm font-semibold text-blue-700">One CRM for every tool you connect</div>
           <a class="btn btn-sm" style="display:inline-block;margin-top:8px;text-decoration:none" href="https://coreswiftcrm.com/?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">Get CoreSwift CRM →</a>
-          <div class="mt-2"><a class="text-xs text-blue-600" id="billing-link" href="#" onClick=${e => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>See plans &amp; upgrade</a></div>
+          <div class="mt-2"><a class="text-xs text-blue-600" id="billing-link" href="#" onClick=${e => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>See plans & upgrade</a></div>
         </div>
       </div>
     </div>` : ''}
@@ -1315,9 +1315,15 @@ const Billing = () => {
   const buy = async p => {
     st.busy = true; st.buying = keyOf(p); st.notice = null; st.error = null; renderApp();
     try {
+      // The handler REFUSES a plan checkout without `amount` (measured live 2026-10-15:
+      // POST /checkout/create {purchasable_type, purchasable_id} answers 400 "amount is
+      // required"), so the tier's own stored monthly price is sent explicitly rather than
+      // assumed to be derived server-side. `currency` defaults to USD.
       const r = await API.post('/checkout/create', {
         purchasable_type: 'plan',
         purchasable_id: p.id,
+        amount: monthly(p),
+        currency: 'USD',
         success_url: window.location.origin + '/dashboard/',
         cancel_url: window.location.origin + '/dashboard/'
       });
@@ -1328,7 +1334,7 @@ const Billing = () => {
     st.busy = false; st.buying = null; renderApp();
   };
   return html`<div data-billing="screen">
-    <h2 class="text-xl font-bold mb-4">Plan &amp; Billing</h2>
+    <h2 class="text-xl font-bold mb-4">Plan & Billing</h2>
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700" id="billing-error">${st.error}</p></div>`}
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700" id="billing-notice">${st.notice}</p></div>`}
     <div class="card">
