@@ -210,6 +210,10 @@ mod tests {
             "/api/v1/me/usage",
             "/api/v1/auth/me",
             "/api/v1/checkout/create",
+            // The tenant-facing plan catalogue (kanban t_a57ae7db) the plan-and-billing screen
+            // reads: it sits NEXT TO the platform-admin `/api/v1/admin/plans` in the router, so it
+            // is pinned here to keep a future widening of the admin prefix from swallowing it.
+            "/api/v1/plans",
         ] {
             assert!(
                 !admin_surface_denied(path, "account_owner"),

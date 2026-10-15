@@ -480,16 +480,18 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             15
         );
-        // 119 entries / 119 distinct paths (the avatar read + its private upload twin joined on
+        // 120 entries / 120 distinct paths (the avatar read + its private upload twin joined on
         // 2026-10-08, card t_9cd2c8f2; the email-branding logo read + its two private write twins
         // joined on 2026-10-09, card t_feab8aff; the admin bulk-retire arm joined on 2026-10-10,
-        // card t_31951eca), and the two lists are disjoint.
+        // card t_31951eca; the TENANT-facing plan catalogue joined on 2026-10-15, card
+        // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
+        // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 119, "mounted .route entries");
+        assert_eq!(lits.len(), 120, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 119, "distinct mounted paths");
+        assert_eq!(uniq.len(), 120, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

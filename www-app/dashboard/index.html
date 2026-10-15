@@ -57,7 +57,8 @@ window.appGuidePages = {
   followups:    { title: "Follow-ups", desc: "Messages scheduled to go out later, so a lead is not forgotten after the first reply.", actions: ["See what is queued", "Check what has already sent"] },
   contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list.", actions: ["Search your contacts", "Open a contact's history"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
-  integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] }
+  integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
+  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Upgrading opens the payment provider's own secure checkout.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] }
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
@@ -1239,7 +1240,7 @@ const Integrations = () => {
         <div style="min-width:210px" class="text-right">
           <div class="text-sm font-semibold text-blue-700">One CRM for every tool you connect</div>
           <a class="btn btn-sm" style="display:inline-block;margin-top:8px;text-decoration:none" href="https://coreswiftcrm.com/?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">Get CoreSwift CRM →</a>
-          <div class="mt-2"><a class="text-xs text-blue-600" href="https://coreswiftcrm.com/pricing?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">See plans & upgrade</a></div>
+          <div class="mt-2"><a class="text-xs text-blue-600" id="billing-link" href="#" onClick=${e => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>See plans &amp; upgrade</a></div>
         </div>
       </div>
     </div>` : ''}
@@ -1270,6 +1271,91 @@ const Integrations = () => {
   </div>`;
 };
 
+// ===== PLAN & BILLING =====
+// kanban t_a57ae7db (2026-10-15). This console showed the account's tier NAME and nothing else, and
+// the only "See plans & upgrade" link it carried pointed at https://coreswiftcrm.com/pricing — a
+// DIFFERENT product's pricing page — which answers 404 (measured live, browser UA). So a
+// MissedCall Respondr tenant had no shipped screen on which to see the ladder or pay for it, while
+// the app can in fact sell: plans are $0 / $49 / $199 and POST /api/v1/checkout/create is mounted.
+// This screen reads the SAME catalogue the operator's Plans table edits (GET /plans, added to the
+// tenant router alongside this screen) and drives the REAL checkout. Whatever the server refuses —
+// no provider configured, provider declined, plan not on sale — is shown in the server's own words,
+// never replaced by a generic failure, so an unconfigured install says what is missing instead of
+// looking broken.
+const Billing = () => {
+  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null });
+  if (!st.loaded && !st.busy) {
+    st.busy = true;
+    API.get('/plans').then(d => {
+      const list = (d && d.plans) || d || [];
+      st.plans = (Array.isArray(list) ? list : []).filter(p => p.is_active !== false);
+      st.loaded = true; st.busy = false; renderApp();
+    }).catch(e => {
+      st.error = 'Could not load the plans: ' + e.message;
+      st.loaded = true; st.busy = false; renderApp();
+    });
+  }
+  const me = API.user || {};
+  const current = String(me.plan_name || 'Free').trim().toLowerCase();
+  const nameOf = p => p.name || p.slug || 'Plan';
+  const keyOf = p => p.slug || p.name || String(p.id);
+  const isCurrent = p => {
+    const a = String(p.name || '').trim().toLowerCase(), b = String(p.slug || '').trim().toLowerCase();
+    return !!current && (a === current || b === current);
+  };
+  const monthly = p => Number(p.price_monthly || 0);
+  const priceLine = p => monthly(p) <= 0 ? 'Free'
+    : ('$' + (monthly(p) % 1 === 0 ? monthly(p).toFixed(0) : monthly(p).toFixed(2)) + ' / month');
+  const features = p => {
+    const f = p.features;
+    if (!f) return [];
+    if (Array.isArray(f)) return f.map(x => String(x).replace(/_/g, ' '));
+    return Object.keys(f).map(k => k.replace(/_/g, ' ') + ': ' + f[k]);
+  };
+  const buy = async p => {
+    st.busy = true; st.buying = keyOf(p); st.notice = null; st.error = null; renderApp();
+    try {
+      const r = await API.post('/checkout/create', {
+        purchasable_type: 'plan',
+        purchasable_id: p.id,
+        success_url: window.location.origin + '/dashboard/',
+        cancel_url: window.location.origin + '/dashboard/'
+      });
+      const url = (r && (r.checkout_url || r.url)) || '';
+      if (url) { window.location.href = url; return; }
+      st.notice = 'A checkout session was opened on the server but the payment provider returned no link.';
+    } catch (e) { st.error = e.message; }
+    st.busy = false; st.buying = null; renderApp();
+  };
+  return html`<div data-billing="screen">
+    <h2 class="text-xl font-bold mb-4">Plan &amp; Billing</h2>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700" id="billing-error">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700" id="billing-notice">${st.notice}</p></div>`}
+    <div class="card">
+      <h3 class="font-semibold mb-1">Your current plan</h3>
+      <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || 'Free'}</span></p>
+      <p class="text-sm text-gray-500 mt-2">Payment is taken by the provider this install is connected to: pressing a button below opens that provider's own secure checkout, and no card details are entered on this site.</p>
+    </div>
+    ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans&hellip;</div>` : null}
+    ${st.loaded && st.plans.length === 0 && !st.error ? html`<div class="card text-sm text-gray-400">No plans are on sale yet. The platform operator publishes them under Plans in the admin panel.</div>` : null}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      ${st.plans.map(p => html`<div class="card" data-plan=${keyOf(p)}>
+        <h3 class="font-semibold">${nameOf(p)}</h3>
+        <p class="text-2xl font-bold mt-1">${priceLine(p)}</p>
+        ${p.description ? html`<p class="text-sm text-gray-600 mt-2">${p.description}</p>` : null}
+        ${features(p).length ? html`<ul class="text-sm text-gray-600 mt-3" style="list-style:disc;padding-left:18px">${features(p).map(f => html`<li>${f}</li>`)}</ul>` : null}
+        <div class="mt-4">
+          ${isCurrent(p)
+            ? html`<span class="badge badge-green">Your plan</span>`
+            : (monthly(p) <= 0
+              ? html`<span class="badge badge-gray">Included</span>`
+              : html`<button class="btn" id=${'billing-buy-' + keyOf(p)} disabled=${st.busy} onClick=${() => buy(p)}>${st.buying === keyOf(p) ? 'Opening checkout\u2026' : 'Upgrade to ' + nameOf(p)}</button>`)}
+        </div>
+      </div>`)}
+    </div>
+  </div>`;
+};
+
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
@@ -1295,9 +1381,10 @@ const App = () => {
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, branding: Branding, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, branding: Branding, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">

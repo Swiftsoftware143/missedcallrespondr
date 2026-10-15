@@ -133,6 +133,19 @@ pub fn create_router(state: AppState) -> Router {
     let protected_routes = Router::new()
         .route("/api/v1/auth/me", get(auth_handlers::me))
         .route("/api/v1/me/usage", get(auth_handlers::get_usage))
+        // The TENANT-facing plan catalogue (kanban t_a57ae7db). The console could see its own
+        // tier name and nothing else: its only "See plans & upgrade" link pointed at
+        // https://coreswiftcrm.com/pricing — a DIFFERENT app's pricing page — which answers
+        // 404 (measured live 2026-10-15). This app's ladder was reachable only through the
+        // platform-admin table at /api/v1/admin/plans, so a tenant had no shipped screen on
+        // which to see or buy it. Same read-only handler the operator table uses; the checkout
+        // arm the console drives (`POST /api/v1/checkout/create`) already sits on this router,
+        // and every plan comes back with its `is_active` flag so the console offers only what
+        // the operator has left on.
+        .route(
+            "/api/v1/plans",
+            get(crate::handlers::plans_handler::list_plans),
+        )
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
         // The profile picture UPLOAD (kanban t_9cd2c8f2): the body IS the raw image. The effective
