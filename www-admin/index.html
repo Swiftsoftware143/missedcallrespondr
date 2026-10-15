@@ -912,7 +912,16 @@ const CoreIntegration = () => {
     st.busy = 'save'; st.msg = null; renderApp();
     try {
       await API.post('/provider-keys', { provider: 'coreswift', api_key: k });
-      st.keyIn = ''; st.msg = { ok: true, text: 'CoreSwift connected.' }; await load();
+      st.keyIn = ''; await load();
+      // A stored key is not a WORKING key: the status above only says a key exists. Run the same live
+      // probe the Test button uses and show its verdict HERE, so a rejected key is reported at connect
+      // time instead of leaving a green badge the operator has to take on trust.
+      try {
+        const r = await API.post('/provider-keys/coreswift/test', {});
+        st.msg = (r && r.ok)
+          ? { ok: true,  text: 'Key saved and CoreSwift accepted it.' }
+          : { ok: false, text: 'Key saved, but CoreSwift refused it: ' + ((r && r.message) || 'no detail') };
+      } catch (e) { st.msg = { ok: false, text: 'Key saved, but the live test failed: ' + ((e && e.message) || 'unknown error') }; }
     } catch (e) { st.msg = { ok: false, text: 'Could not connect: ' + ((e && e.message) || 'unknown error') }; }
     st.busy = null; renderApp();
   };
