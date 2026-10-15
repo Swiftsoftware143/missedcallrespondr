@@ -1065,7 +1065,22 @@ const Integrations = () => {
     const body = { provider: p.key, api_key };
     const bu = (st.baseInput[p.key] || '').trim();
     if (bu) body.base_url = bu;
-    try { await API.post('/provider-keys', body); st.keyInput[p.key] = ''; st.notice = (p.name || p.key) + ' connected'; }
+    try {
+      await API.post('/provider-keys', body);
+      st.keyInput[p.key] = '';
+      // A STORED key is not a WORKING key: this used to announce "<Provider> connected" and nothing
+      // more, so a credential the far side rejects still read as a live integration. Run the same
+      // live probe the Test button uses and report ITS verdict — including the honest "no live test
+      // for this provider yet" case, which is `ok: null` and must not be dressed up as success.
+      const nm = p.name || p.key;
+      let v = { ok: null, message: 'No live connection test available for this provider yet' };
+      try { v = await API.post('/provider-keys/' + encodeURIComponent(p.key) + '/test', {}); }
+      catch (e) { v = { ok: false, message: 'the live test could not be run: ' + ((e && e.message) || 'unknown error') }; }
+      st.probe = { key: p.key, ok: v && v.ok, message: (v && v.message) || '' };
+      if (v && v.ok === true) st.notice = nm + ' connected — the key was accepted.';
+      else if (v && v.ok === null) st.notice = nm + ' key saved. ' + ((v && v.message) || 'No live connection test available for this provider yet');
+      else st.notice = nm + ' key saved, but the connection test failed: ' + ((v && v.message) || 'no detail');
+    }
     catch (e) { st.error = (p.name || p.key) + ': ' + e.message; }
     st.busy = null; load();
   };
