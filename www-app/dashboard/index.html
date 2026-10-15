@@ -1304,8 +1304,14 @@ const Billing = () => {
     return !!current && (a === current || b === current);
   };
   const monthly = p => Number(p.price_monthly || 0);
-  const priceLine = p => monthly(p) <= 0 ? 'Free'
-    : ('$' + (monthly(p) % 1 === 0 ? monthly(p).toFixed(0) : monthly(p).toFixed(2)) + ' / month');
+  // The price slot must carry a PRICE, not a second copy of the plan's own name. It read
+  // `monthly(p) <= 0 ? 'Free' : …`, and this screen already prints the plan name in the `h3`
+  // directly above it (`nameOf(p)`), so the free tier rendered as "Free / Free" — the tile's
+  // headline and its price line said the same word — while every sibling console shows the $0:
+  // WorkflowSwift renders "$0/mo" and IncentiveSwift "$0/month". Measured live 2026-10-15 on
+  // app.missedcallrespondr.com/dashboard/ (the only tile on the screen whose price line was not a
+  // price). Same "$X / month" shape as the paid tiles now, for every plan including free.
+  const priceLine = p => '$' + (monthly(p) % 1 === 0 ? monthly(p).toFixed(0) : monthly(p).toFixed(2)) + ' / month';
   const features = p => {
     const f = p.features;
     if (!f) return [];
