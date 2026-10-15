@@ -22,6 +22,11 @@
     if (!q.impersonation_token) return;
     var who = q.impersonation_tenant || 'a tenant';
     sessionStorage.setItem('mc_token', q.impersonation_token);
+    // Its OWN key too (kanban t_ff1e3bb1). `mc_token` is what every scoped API call on this origin
+    // uses, but the Stop control must be able to present THE IMPERSONATION TOKEN specifically: the
+    // route that ends a session exists for that caller, so handing it the operator's own token (or a
+    // later normal login's token) would prove nothing. Kept apart, discarded with the session.
+    sessionStorage.setItem('mc_impersonation_token', q.impersonation_token);
     // NOT the operator's identity: the impersonated token keeps the operator's `sub`, so
     // GET /auth/me would hand this shell the ADMIN's own user row. A marker instead.
     sessionStorage.setItem('mc_user', JSON.stringify({
@@ -32,7 +37,7 @@
 }();
 </script>
 <title>MissedCall Respondr — Dashboard</title>
-<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}</style>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:#b91c1c;font-weight:600}</style>
 <link rel="stylesheet" href="/dashboard/tw.css">
 </head>
 <body>
@@ -108,9 +113,46 @@ const API = (() => {
         return user;
       }).catch(function () { return null; });
     },
-    logout() { token = null; user = null; sessionStorage.removeItem('mc_token'); sessionStorage.removeItem('mc_user'); }
+    logout() { token = null; user = null; sessionStorage.removeItem('mc_token'); sessionStorage.removeItem('mc_user'); sessionStorage.removeItem('mc_impersonation_token'); }
   };
 })();
+
+/* ===== END THE IMPERSONATION SESSION (kanban t_ff1e3bb1) =====
+   The banner used to offer only a local logout: the control discarded the token in this tab and
+   returned to the admin panel WITHOUT telling the server, and the route that exists for exactly
+   this caller (`POST /api/v1/admin/stop-impersonation`) was refused 403 by the platform-admin gate
+   even for the session itself. Both halves are fixed: the gate carries the one carve-out (keyed on
+   the impersonation role, pinned to that exact path), and this control presents THE IMPERSONATION
+   TOKEN to it before discarding anything. A refusal is shown on screen, never hidden behind a
+   logout that would make it look like the session ended. */
+function endImpersonation() {
+  const tok = sessionStorage.getItem('mc_impersonation_token');
+  S.impStopError = null;
+  const leave = () => {
+    API.logout();
+    window.location.href = 'https://admin.missedcallrespondr.com/';
+  };
+  // Nothing to end (the session was never handed a token to this tab): just leave.
+  if (!tok) { leave(); return; }
+  fetch(window.location.origin + '/api/v1/admin/stop-impersonation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+    body: '{}'
+  }).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+  }).then(function (res) {
+    if (!res.ok) {
+      S.impStopError = 'The session could not be ended (' + res.status + '): '
+        + ((res.d && (res.d.error || res.d.message)) || 'unknown error');
+      renderApp();
+      return;
+    }
+    leave();
+  }).catch(function (e) {
+    S.impStopError = 'The session could not be ended: ' + e.message;
+    renderApp();
+  });
+}
 
 const S = { view: 'overview', loading: false, error: null, views: {} };
 const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
@@ -1282,9 +1324,10 @@ const App = () => {
       <div class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span>🚪</span><span class="nav-txt">Logout</span></div>
     </div>
     <div class="main">
-      ${impTenant && html`<div class="imp-banner" data-impersonating=${impTenant}>
+      ${impTenant && html`<div class="imp-banner" id="imp-banner" data-impersonating=${impTenant}>
         <span>🔑 Impersonating <b>${impTenant}</b> — this tab is the customer's session, not yours. Your operator session stays open on the admin panel.</span>
-        <button onClick=${() => { API.logout(); window.location.href = 'https://admin.missedcallrespondr.com/'; }}>Exit impersonation</button>
+        <button id="imp-stop" onClick=${() => endImpersonation()}>Exit impersonation</button>
+        ${S.impStopError && html`<span id="imp-stop-error" class="imp-error">${S.impStopError}</span>`}
       </div>`}
       <${CurrentView} />
     </div>
