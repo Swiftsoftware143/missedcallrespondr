@@ -292,6 +292,12 @@ pub async fn list_all_tenants(
     }
 
     use sqlx::Row;
+    // `owner_email` (added 2026-10-15, kanban t_81a1ba13) is the WORKSPACE'S OWNER as the operator's
+    // list has to show it. `tenants` carries no email column at all here, so before this the row
+    // (name, plan, status) was the whole answer and an operator could not tell whose workspace it
+    // was — a leftover probe workspace read exactly like a customer. The identity lives in `users`:
+    // the workspace's own owner-ish role first (`register` mints `account_owner`), else the earliest
+    // member. NULL only when the workspace has no user row at all (e.g. a portfolio-sync row).
     let rows = sqlx::query(
         r#"SELECT 
             t.id, t.name, t.slug, t.created_at,
@@ -299,7 +305,12 @@ pub async fn list_all_tenants(
             tp.credit_balance,
             p.name as plan_name, p.price_monthly, p.price_yearly,
             p.features->>'included_credits' as included_credits,
-            (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count
+            (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count,
+            (SELECT u.email FROM users u WHERE u.tenant_id = t.id
+             ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
+                           THEN 0 ELSE 1 END,
+                      u.created_at ASC
+             LIMIT 1) as owner_email
         FROM tenants t
         LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id
         LEFT JOIN plans p ON p.id = tp.plan_id
@@ -322,6 +333,7 @@ pub async fn list_all_tenants(
             "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
+            "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
             "credit_balance": r.try_get::<Option<i32>,_>("credit_balance").ok().flatten().unwrap_or(0),
             "included_credits": r.try_get::<Option<String>,_>("included_credits").ok().flatten()
         })

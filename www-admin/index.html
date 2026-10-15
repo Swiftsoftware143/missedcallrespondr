@@ -1698,6 +1698,18 @@ const OpsPanel = ({ panel }) => {
   </div>`;
 };
 
+/* Owner cell for a workspace row (kanban t_81a1ba13). The list endpoint answers `owner_email`:
+   the workspace's own user, preferring its owner-ish role. A reserved-domain address
+   (.invalid/.example/.test/.local) can never belong to a customer, so it is badged as a probe —
+   that is what keeps a leftover probe workspace from reading like a paying one at a glance. */
+const ownerCell = (t) => {
+  const oe = String((t && (t.owner_email || t.email)) || '').trim();
+  if (!oe) return html`<span class="text-gray-400">—</span>`;
+  const dom = oe.split('@')[1] || '';
+  const probe = /(^|\.)(invalid|example|test|local)$/i.test(dom);
+  return html`<span class="text-gray-500">${oe}</span>${probe ? html` <span class="badge badge-yellow" title="a reserved address — a fleet probe, not a customer">probe</span>` : ''}`;
+};
+
 /* ===== 🔑 IMPERSONATE A TENANT (kanban t_25b8c662) =====
    The working operator control for `POST /admin/impersonate`, on the only surface that can name a
    tenant: `GET /admin/tenants` returns EVERY tenant (admin_handler::list_all_tenants), while
@@ -1741,9 +1753,9 @@ const ImpersonateTenants = () => {
     ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}">${st.msg}</div>`}
     ${st.err && html`<div class="text-sm text-red-600 mb-2">Could not list tenants: ${st.err}</div>`}
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:300px"><table class="table">
-      <thead><tr><th>Tenant</th><th>Slug</th><th>Users</th><th>Plan</th><th></th></tr></thead>
+      <thead><tr><th>Tenant</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th></th></tr></thead>
       <tbody>${st.list.map(t => html`<tr>
-        <td class="font-medium">${t.name || '-'}</td><td class="text-gray-500">${t.slug || '-'}</td>
+        <td class="font-medium">${t.name || '-'}</td><td>${ownerCell(t)}</td><td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td><td class="text-gray-500">${t.plan_name || '—'}</td>
         <td><button class="btn btn-sm btn-blue" disabled=${st.busy === t.id} onClick=${() => go(t)}>${st.busy === t.id ? '...' : '🔑 Impersonate'}</button></td>
       </tr>`)}</tbody></table></div>`
@@ -1808,11 +1820,12 @@ const TenantsScreen = () => {
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
       <thead><tr>
         <th style="width:36px"><input type="checkbox" id="tnAll" data-tenants="select-all" checked=${allPicked ? true : false} onChange=${e => toggleAll(e.target.checked)} /></th>
-        <th>Workspace</th><th>Slug</th><th>Users</th><th>Plan</th><th>Created</th>
+        <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Created</th>
       </tr></thead>
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
         <td class="font-medium">${t.name || '-'}</td>
+        <td>${ownerCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
         <td class="text-gray-500">${t.plan_name || '—'}</td>
