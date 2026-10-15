@@ -1336,7 +1336,23 @@ const Billing = () => {
       const url = (r && (r.checkout_url || r.url)) || '';
       if (url) { window.location.href = url; return; }
       st.notice = 'A checkout session was opened on the server but the payment provider returned no link.';
-    } catch (e) { st.error = e.message; }
+    } catch (e) {
+      // A refused purchase must not answer the BUYER in the operator's words. This arm put the
+      // server's own sentence straight into the red card — measured live 2026-10-15: POST
+      // /api/v1/checkout/create answered 400 {"error":"No active stripe provider configured"} and
+      // the buyer read exactly that. It names the one thing a customer cannot act on, and reads
+      // like something they broke. Fleet convention, already shipped by ADASwift's dashboard,
+      // WorkflowSwift's Plan & Billing and IncentiveSwift's Plan & Billing: lead with the
+      // customer's own line and the fact that nothing was charged, then the server's detail
+      // unchanged so the operator still reads the whole cause. A refused /checkout/create never
+      // creates a session (measured on this leg: checkout_sessions 0 -> 0), so "nothing was
+      // charged" holds on every refusal arm.
+      const detail = (e && e.message) ? String(e.message) : '';
+      st.error = (/provider|not configured/i.test(detail)
+        ? 'Upgrades are not open on this workspace yet \u2014 nothing was charged.'
+        : 'The upgrade could not be started \u2014 nothing was charged.')
+        + (detail ? ' ' + detail : '');
+    }
     st.busy = false; st.buying = null; renderApp();
   };
   return html`<div data-billing="screen">
