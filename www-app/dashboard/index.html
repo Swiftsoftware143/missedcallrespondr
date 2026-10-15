@@ -401,6 +401,28 @@ const Profile = () => {
     st.busy = false; renderApp();
   };
 
+  // The REMOVAL twin of `upload` (kanban t_0278f465). The upload upserts one row per user and no
+  // route deleted it, so a picture could only ever be REPLACED — an operator who wanted his initials
+  // back had no way to ask, and this screen could only offer "Change picture". The route is an
+  // authenticated DELETE on the caller's OWN row (no path id to spoof) and is idempotent: the answer
+  // carries `removed` (1 or 0) and an empty `avatar_url`. `refresh()` re-reads /auth/me, so the
+  // repaint below drops BOTH the profile picture and the sidebar chip back to their placeholders,
+  // and the Remove control (rendered only while a picture exists) is withdrawn in the same render.
+  const remove = async () => {
+    if (!c.avatar_url) { st.error = 'There is no picture to remove'; renderApp(); return; }
+    if (!window.confirm('Remove your profile picture?')) return;
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      // The API helper adds the bearer token and JSON headers; the route refuses an anonymous
+      // caller at the boundary (401) before it can reach the handler.
+      await API.del('/auth/avatar');
+      st.bust = Date.now(); S.avatarBust = st.bust;
+      await refresh();
+      st.notice = 'Picture removed';
+    } catch (e) { st.error = 'Remove failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+
   const changePw = async () => {
     st.notice = null; st.error = null;
     if (!st.next || st.next.length < 8) { st.error = 'New password must be at least 8 characters'; renderApp(); return; }
@@ -429,6 +451,7 @@ const Profile = () => {
             ${pic ? 'Change picture' : 'Upload picture'}
             <input id="picture-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onChange=${upload} />
           </label>
+          ${pic && html`<button id="remove-picture" class="btn btn-sm btn-outline" style="margin-top:8px" disabled=${st.busy} onClick=${remove}>Remove picture</button>`}
           <p class="text-xs text-gray-400 mt-2">PNG, JPEG, GIF or WebP · up to 2 MB</p>
         </div>
         <div class="space-y-3" style="flex:1;max-width:420px">

@@ -143,7 +143,16 @@ pub fn create_router(state: AppState) -> Router {
         // choking on text/plain. A non-image, an empty body and (defensively) an over-size body are
         // 400s from the handler; only the format is sniffed, and only from the bytes. The anonymous
         // GET twin lives on the public router above.
-        .route("/api/v1/auth/avatar", post(auth_handlers::upload_avatar))
+        // The DELETE twin (kanban t_0278f465, the picture-removal gap): the upload upserts, so
+        // without it a wrong picture could be swapped for another one but never taken down. It acts
+        // on the caller's OWN row, so it stays on this authenticated router — the same split the
+        // email-branding logo pair below uses. The path is not in `auth::route_policy::PUBLIC_ROUTES`
+        // (asserted by `the_deliberate_public_surfaces_stay_public`), so an anonymous DELETE answers
+        // 401 at the boundary rather than reaching the handler.
+        .route(
+            "/api/v1/auth/avatar",
+            post(auth_handlers::upload_avatar).delete(auth_handlers::delete_avatar),
+        )
         // Per-account email branding (kanban t_feab8aff). GET/PUT the text half (name + colour,
         // with the stored logo preserved on a PUT that omits it) and POST/DELETE the logo bytes.
         // The logo POST takes the body as the raw image, exactly like the avatar upload above.

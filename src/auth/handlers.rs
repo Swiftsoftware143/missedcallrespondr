@@ -435,6 +435,45 @@ pub async fn upload_avatar(
     })))
 }
 
+/// `DELETE /api/v1/auth/avatar` — remove the caller's OWN profile picture.
+///
+/// The upload twin only ever REPLACES the row (`ON CONFLICT (user_id) DO UPDATE`), so before this
+/// route existed a picture could be swapped for another one but never taken down: an operator who
+/// wanted their initials back had no way to ask, and both consoles could only offer "Change
+/// picture". The per-account email-branding logo has had its own DELETE since it shipped
+/// (`handlers::branding_handler::delete_logo`), so this closes the same gap on the profile.
+/// Precedent copied, not redesigned: `FunnelSwift/src/auth/handlers.rs` @1c3ad32.
+///
+/// It writes the SESSION's own user — there is no path id to spoof, exactly the rule `upload_avatar`
+/// follows — and it is idempotent: `removed` reports whether a row was actually there, so calling it
+/// on an account with no picture answers 200 with `removed=0` rather than inventing a 404 for a
+/// state that is already the state the caller asked for. `avatar_url` comes back empty so the caller
+/// can repaint from the response instead of re-reading `/auth/me`.
+///
+/// ONE row carries the picture on this app and one statement clears it: the row in `user_avatars`
+/// is both the bytes `get_avatar` streams AND the existence `me()` derives `avatar_url` from
+/// (`SELECT EXISTS(SELECT 1 FROM user_avatars WHERE user_id = $1)`) — this app has NO pointer column
+/// on `users`, so unlike FunnelSwift/ADASwift there is no second statement to write and no stale URL
+/// that could survive. The route stays PRIVATE: `/api/v1/auth/avatar` is not in
+/// `auth::route_policy::PUBLIC_ROUTES` (asserted by `the_deliberate_public_surfaces_stay_public`),
+/// so an anonymous DELETE is refused at the boundary with 401 before it can reach this handler.
+pub async fn delete_avatar(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let removed = sqlx::query("DELETE FROM user_avatars WHERE user_id = $1")
+        .bind(claims.sub)
+        .execute(&state.pool)
+        .await?
+        .rows_affected();
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "removed": removed,
+        "avatar_url": "",
+    })))
+}
+
 /// `GET /api/v1/auth/avatar/:user_id` — serve the stored picture (card t_9cd2c8f2).
 ///
 /// ANONYMOUS BY CONSTRUCTION and narrow by design: an `<img src>` cannot carry a bearer token, so

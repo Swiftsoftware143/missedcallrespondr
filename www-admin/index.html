@@ -2367,6 +2367,31 @@ const App = () => {
       } catch (e) { setAvMsg({ ok: false, text: (e && e.message) || 'Upload failed' }); }
       setBusy(false);
     };
+    // The REMOVAL twin of `upload` (kanban t_0278f465). Until this existed the picture could only
+    // ever be REPLACED — the upload upserts one row per user and no route deleted it — so an
+    // operator who wanted his initials back had no way to ask. The route is an authenticated DELETE
+    // on the caller's OWN row (no path id to spoof), and it is idempotent: the answer carries
+    // `removed` (1 or 0) and an empty `avatar_url`. The screen repaints from that answer, so the
+    // initials placeholder comes back and the Remove control is withdrawn in the SAME render.
+    const remove = async () => {
+      if (!(me && me.avatar_url)) { setAvMsg({ ok: false, text: 'There is no picture to remove' }); return; }
+      if (!window.confirm('Remove your profile picture?')) return;
+      setBusy(true); setAvMsg(null);
+      try {
+        // Multipart is irrelevant here (no body), but the request must NOT go through API.post:
+        // that helper pins Content-Type: application/json. A bare DELETE with the bearer token is
+        // exactly what the route expects.
+        const r = await fetch(window.location.origin + '/api/v1/auth/avatar', {
+          method: 'DELETE',
+          headers: API.token ? { 'Authorization': 'Bearer ' + API.token } : {} });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.message || j.error || ('Error ' + r.status));
+        setAvBust(Date.now());
+        setMe(m => Object.assign({}, m, { avatar_url: '' }));
+        setAvMsg({ ok: true, text: 'Picture removed' });
+      } catch (e) { setAvMsg({ ok: false, text: (e && e.message) || 'Remove failed' }); }
+      setBusy(false);
+    };
     const saveProfile = async () => {
       if (!name.trim()) { setPMsg({ ok: false, text: 'Enter your name' }); return; }
       setBusy(true); setPMsg(null);
@@ -2407,6 +2432,7 @@ const App = () => {
             <input type="file" id="mc-acct-file" accept="image/png,image/jpeg,image/gif,image/webp" style="font-size:12px"
               onChange=${e => { const f = e.target.files && e.target.files[0]; if (f) upload(f); e.target.value = ''; }} />
             <p class="text-xs text-gray-400 mt-1 mb-0">PNG, JPEG, GIF or WebP, up to 2 MB.</p>
+            ${me.avatar_url && html`<button class="btn" id="mc-acct-avdel" disabled=${busy} onClick=${remove} style="margin-top:6px">Remove picture</button>`}
             ${msg(avMsg)}
           </div>
         </div>
