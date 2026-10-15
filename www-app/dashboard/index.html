@@ -1348,7 +1348,7 @@ const Billing = () => {
       <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || 'Free'}</span></p>
       <p class="text-sm text-gray-500 mt-2">Payment is taken by the provider this install is connected to: pressing a button below opens that provider's own secure checkout, and no card details are entered on this site.</p>
     </div>
-    ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans&hellip;</div>` : null}
+    ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans…</div>` : null}
     ${st.loaded && st.plans.length === 0 && !st.error ? html`<div class="card text-sm text-gray-400">No plans are on sale yet. The platform operator publishes them under Plans in the admin panel.</div>` : null}
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       ${st.plans.map(p => html`<div class="card" data-plan=${keyOf(p)}>
