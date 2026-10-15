@@ -26,7 +26,8 @@ use crate::{
     config::Claims,
     error::AppError,
     handlers::coreswift_external::{
-        get_coreswift_connection, hub_probe, is_connected, push_lead_to_coreswift, SOURCE_APP,
+        get_coreswift_connection, hub_probe, is_connected, push_lead_to_coreswift_detailed,
+        SOURCE_APP,
     },
     state::AppState,
 };
@@ -77,13 +78,18 @@ pub async fn lists(
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| AppError::Internal(format!("CoreSwift unreachable: {e}")))?;
+        .map_err(|e| AppError::UpstreamRefused(format!("CoreSwift unreachable: {e}")))?;
 
     let status_code = resp.status();
     let body: Value = resp.json().await.unwrap_or_else(|_| json!({ "lists": [] }));
 
     if !status_code.is_success() {
-        return Err(AppError::Internal(format!(
+        // 424, not 500: CoreSwift was reached and refused. A 5xx tells the caller OUR server broke,
+        // and this app sits behind Cloudflare, which rewrites an origin 502/504 body — the operator
+        // would get a JavaScript parse error instead of CoreSwift's own sentence. The same
+        // `UpstreamRefused` variant (424 Failed Dependency) is already this fleet's answer on the
+        // provider-failure path of /api/v1/messages.
+        return Err(AppError::UpstreamRefused(format!(
             "CoreSwift returned {status_code}: {}",
             serde_json::to_string(&body).unwrap_or_default()
         )));
@@ -117,7 +123,9 @@ pub struct PushLeadRequest {
 /// POST /api/v1/integrations/coreswift/push — the inbound path.
 ///
 /// Proxies CoreSwift's POST /api/external/contacts through the SAME helper the automatic
-/// capture paths use. Not connected → a clean 400 (never a crash, never a silent success).
+/// capture paths use. Not connected → a clean 400 (never a crash, never a silent success);
+/// a provider that was reached and refused (or could not be reached) → a 424 carrying the
+/// provider's OWN words, not a 500 and not a generic sentence.
 pub async fn push(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
@@ -139,7 +147,10 @@ pub async fn push(
         .trim()
         .to_string();
 
-    let pushed = push_lead_to_coreswift(
+    // The DETAILED form: the manual "Push now" button is the one place the operator is waiting on
+    // the answer, so it must carry the provider's reason rather than a fixed sentence. The automatic
+    // capture paths keep the bool form (a CRM outage never blocks an entry save).
+    if let Err(reason) = push_lead_to_coreswift_detailed(
         &state,
         &claims.aid,
         &name,
@@ -151,12 +162,11 @@ pub async fn push(
         Some(source.as_str()),
         req.notes.as_deref(),
     )
-    .await;
-
-    if !pushed {
-        return Err(AppError::Internal(
-            "CoreSwift rejected the push — check the stored key and base URL".to_string(),
-        ));
+    .await
+    {
+        return Err(AppError::UpstreamRefused(format!(
+            "CoreSwift refused the push: {reason}"
+        )));
     }
 
     Ok(Json(json!({

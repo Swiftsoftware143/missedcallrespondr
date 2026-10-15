@@ -172,10 +172,12 @@ pub async fn get_campaign_tag_id(state: &AppState, campaign_id: &Uuid) -> Option
 ///   - list_id (optional — the CoreSwift list this should land in)
 ///   - source (optional string like "missed-call" / "follow-up" / "manual")
 ///
-/// Returns true on success. Never panics — failures are logged and swallowed so a
-/// CoreSwift outage never blocks the entry/lead save.
+/// Returns the provider's own reason on failure (`Err`) and `()` on success. Never panics.
+/// Callers that must not block on a CRM outage use the bool wrapper
+/// [`push_lead_to_coreswift`] below; the operator-facing "Push now" button uses THIS form so the
+/// reason reaches the screen behind a 424.
 #[allow(clippy::too_many_arguments)]
-pub async fn push_lead_to_coreswift(
+pub async fn push_lead_to_coreswift_detailed(
     state: &AppState,
     account_id: &Uuid,
     name: &str,
@@ -186,10 +188,13 @@ pub async fn push_lead_to_coreswift(
     list_id: Option<&str>,
     source: Option<&str>,
     notes: Option<&str>,
-) -> bool {
+) -> Result<(), String> {
     let Some((api_key, base_url)) = get_coreswift_connection(state, account_id).await else {
         // Not connected to CoreSwift — nothing to do (this is the no-CRM user case).
-        return false;
+        return Err(
+            "CoreSwift is not connected — store your csk_ key in the Integration Center first"
+                .to_string(),
+        );
     };
 
     let mut body = Map::new();
@@ -244,19 +249,42 @@ pub async fn push_lead_to_coreswift(
                     "coreswift external push OK: lead {name} (list={})",
                     list_id.unwrap_or("-")
                 );
-                true
+                Ok(())
             } else {
-                let b = resp.text().await.unwrap_or_default();
+                let b: String = resp.text().await.unwrap_or_default();
+                let snippet: String = b.chars().take(300).collect();
                 tracing::warn!(
-                    "coreswift external push returned {status} for lead {name}: {}",
-                    b.chars().take(300).collect::<String>()
+                    "coreswift external push returned {status} for lead {name}: {snippet}"
                 );
-                false
+                Err(format!("CoreSwift returned {status}: {snippet}"))
             }
         }
         Err(e) => {
             tracing::warn!("coreswift external push failed for lead {name}: {e}");
-            false
+            Err(format!("CoreSwift unreachable at {base_url}: {e}"))
         }
     }
+}
+
+/// The bool face of [`push_lead_to_coreswift_detailed`], for the AUTOMATIC capture paths
+/// (call / contact / lead / SMS): a CoreSwift outage must never block the entry save, so they log
+/// and carry on. The operator-facing manual push uses the detailed form.
+#[allow(clippy::too_many_arguments)]
+pub async fn push_lead_to_coreswift(
+    state: &AppState,
+    account_id: &Uuid,
+    name: &str,
+    company: Option<&str>,
+    email: Option<&str>,
+    phone: Option<&str>,
+    tags: &[String],
+    list_id: Option<&str>,
+    source: Option<&str>,
+    notes: Option<&str>,
+) -> bool {
+    push_lead_to_coreswift_detailed(
+        state, account_id, name, company, email, phone, tags, list_id, source, notes,
+    )
+    .await
+    .is_ok()
 }
