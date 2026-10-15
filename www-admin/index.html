@@ -1704,10 +1704,20 @@ const OpsPanel = ({ panel }) => {
    that is what keeps a leftover probe workspace from reading like a paying one at a glance. */
 const ownerCell = (t) => {
   const oe = String((t && (t.owner_email || t.email)) || '').trim();
-  if (!oe) return html`<span class="text-gray-400">—</span>`;
   const dom = oe.split('@')[1] || '';
-  const probe = /(^|\.)(invalid|example|test|local)$/i.test(dom);
-  return html`<span class="text-gray-500">${oe}</span>${probe ? html` <span class="badge badge-yellow" title="a reserved address — a fleet probe, not a customer">probe</span>` : ''}`;
+  // TWO arms, because a workspace can be a probe for two different reasons and only one of them
+  // leaves an address behind. (1) `probe_harness` is the marker the signup door stamps from the
+  // X-Swift-Harness HEADER -- it survives a deleted user row, where there is no address left to
+  // read. (2) a reserved-domain address (.invalid/.example/.test/.local) can never belong to a
+  // customer. Neither arm alone is enough: a machine-minted probe domain is not a reserved one,
+  // and a probe with no user row has no address at all.
+  const probe = Boolean(t && String(t.probe_harness || '').trim())
+    || /(^|\.)(invalid|example|test|local)$/i.test(dom);
+  const badge = probe
+    ? html` <span class="badge badge-yellow" title=${'a fleet probe, not a customer' + (String(t && t.probe_harness || '').trim() ? ' (' + String(t.probe_harness).trim() + ')' : '')}>probe</span>`
+    : '';
+  if (!oe) return html`<span class="text-gray-400">—</span>${badge}`;
+  return html`<span class="text-gray-500">${oe}</span>${badge}`;
 };
 
 /* ===== 🔑 IMPERSONATE A TENANT (kanban t_25b8c662) =====

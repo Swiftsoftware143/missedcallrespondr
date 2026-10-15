@@ -302,7 +302,7 @@ pub async fn list_all_tenants(
     // member. NULL only when the workspace has no user row at all (e.g. a portfolio-sync row).
     let rows = sqlx::query(
         r#"SELECT 
-            t.id, t.name, t.slug, t.created_at,
+            t.id, t.name, t.slug, t.created_at, t.probe_harness,
             tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
             tp.credit_balance,
             p.name as plan_name, p.price_monthly, p.price_yearly,
@@ -336,6 +336,12 @@ pub async fn list_all_tenants(
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
             "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
+            // The harness marker the signup door stamps from the `X-Swift-Harness` HEADER
+            // (`auth::signup::create_account`). It was written since 2026-10-15 and read by
+            // nothing: the operator list could only GUESS a probe from a reserved-domain owner
+            // address, so a harness workspace whose user row is gone (owner_email NULL) read
+            // exactly like a broken customer workspace. NULL for every real customer signup.
+            "probe_harness": r.try_get::<Option<String>,_>("probe_harness").ok().flatten(),
             "credit_balance": r.try_get::<Option<i32>,_>("credit_balance").ok().flatten().unwrap_or(0),
             "included_credits": r.try_get::<Option<String>,_>("included_credits").ok().flatten()
         })
