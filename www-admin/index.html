@@ -1702,19 +1702,29 @@ const OpsPanel = ({ panel }) => {
    the workspace's own user, preferring its owner-ish role. A reserved-domain address
    (.invalid/.example/.test/.local) can never belong to a customer, so it is badged as a probe —
    that is what keeps a leftover probe workspace from reading like a paying one at a glance. */
+// A workspace address that no customer can hold -- the fleet's probe badge. THREE arms, because a
+// workspace can be a probe for three different reasons and only two of them leave an address behind:
+//  * `probe_harness` -- the marker the signup door stamps from the `X-Swift-Harness` HEADER. It is
+//    the ONLY arm that survives a deleted user row, where there is no address left to read.
+//  * the reserved TLDs (RFC 2606/6761: .invalid/.example/.test/.local, plus example.com/.net/.org).
+//  * the fleet's OWN machine-minted probe domains, which are not reserved TLDs and so were invisible
+//    to the address arm alone: the nightly tenancy canary keys its fixtures at
+//    `probe-canary-a@swiftsoftware.dev`, so the two `Tenancy Canary A/B` workspaces sat in the
+//    operator's own Tenants list looking like unrecognised signups.
+// `swiftsoftware.com` is deliberately NOT here: it is a real, routable domain and the operator's own.
+// Definition ported verbatim from the fleet standard (FunnelSwift www-admin/index.html).
+const RESERVED_ADDR_RE = /@(?:[^@]*\.)?(?:invalid|example|test|local)$|@(?:[^@]*\.)?example\.(?:com|net|org)$/i;
+const FLEET_PROBE_ADDR_RE = /@(?:[^@]*\.)?(?:swiftsoftware\.(?:dev|local)|sw\.dev)$|@local\.(?:funnelswift|coreswift|adaswift|incentiveswift|workflowswift|missedcallrespondr|multidirectory)$/i;
+function isProbeAddress(addr) {
+  const a = String(addr || '');
+  return RESERVED_ADDR_RE.test(a) || FLEET_PROBE_ADDR_RE.test(a);
+}
 const ownerCell = (t) => {
   const oe = String((t && (t.owner_email || t.email)) || '').trim();
-  const dom = oe.split('@')[1] || '';
-  // TWO arms, because a workspace can be a probe for two different reasons and only one of them
-  // leaves an address behind. (1) `probe_harness` is the marker the signup door stamps from the
-  // X-Swift-Harness HEADER -- it survives a deleted user row, where there is no address left to
-  // read. (2) a reserved-domain address (.invalid/.example/.test/.local) can never belong to a
-  // customer. Neither arm alone is enough: a machine-minted probe domain is not a reserved one,
-  // and a probe with no user row has no address at all.
-  const probe = Boolean(t && String(t.probe_harness || '').trim())
-    || /(^|\.)(invalid|example|test|local)$/i.test(dom);
+  const tag = String((t && t.probe_harness) || '').trim();
+  const probe = Boolean(tag) || isProbeAddress(oe);
   const badge = probe
-    ? html` <span class="badge badge-yellow" title=${'a fleet probe, not a customer' + (String(t && t.probe_harness || '').trim() ? ' (' + String(t.probe_harness).trim() + ')' : '')}>probe</span>`
+    ? html` <span class="badge badge-yellow" title=${'a fleet probe, not a customer' + (tag ? ' (' + tag + ')' : '')}>probe</span>`
     : '';
   if (!oe) return html`<span class="text-gray-400">—</span>${badge}`;
   return html`<span class="text-gray-500">${oe}</span>${badge}`;
