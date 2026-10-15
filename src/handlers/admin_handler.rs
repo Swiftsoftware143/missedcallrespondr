@@ -126,6 +126,8 @@ pub async fn portfolio_sync(
     let mut tenant_slug: Option<String> = None;
     for _ in 0..4 {
         let candidate = crate::auth::signup::unique_account_slug(&state.pool, &name).await?;
+        // NOT marked with `probe_harness` on purpose (kanban t_4a744754): an AUTHENTICATED
+        // admin-console door, not the served, unauthenticated signup the marker exists for.
         let inserted = sqlx::query(
             "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) ON CONFLICT (slug) DO NOTHING",
         )

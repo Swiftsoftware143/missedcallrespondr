@@ -80,6 +80,12 @@ pub struct NewAccount<'a> {
     pub plan_slug: &'a str,
     /// The owner user's role. `register` mints `account_owner`.
     pub role: &'a str,
+    /// The `X-Swift-Harness` marker, when the door that called this mint is the SERVED,
+    /// unauthenticated signup and the caller sent one (kanban t_4a744754). Read from the request
+    /// HEADER only (`crate::probe_harness::from_headers`) — never from the body and never from a
+    /// query field. `None` mints a row byte-identical to every row minted before the column
+    /// existed, which is what every authenticated door passes.
+    pub probe_harness: Option<&'a str>,
 }
 
 /// The rows that were written. `account_id` is this app's notion of "the account" (`tenants.id`).
@@ -189,11 +195,12 @@ pub async fn create_account(
             _ => unique_account_slug(db, a.account_name).await?,
         };
         let inserted = sqlx::query(
-            "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) ON CONFLICT (slug) DO NOTHING",
+            "INSERT INTO tenants (id, name, slug, probe_harness) VALUES ($1, $2, $3, $4) ON CONFLICT (slug) DO NOTHING",
         )
         .bind(account_id)
         .bind(a.account_name)
         .bind(&candidate)
+        .bind(a.probe_harness)
         .execute(&mut *tx)
         .await?;
         if inserted.rows_affected() == 1 {

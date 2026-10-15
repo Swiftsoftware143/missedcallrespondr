@@ -330,6 +330,12 @@ pub async fn provision_free_account(
             account_slug: Some(&account_slug),
             plan_slug: &resolved_slug,
             role: "account_owner",
+            // DELIBERATELY `None`: this is an AUTHENTICATED machine door (the fleet-internal
+            // provision-free-account call FunnelSwift makes when a lead is tagged), not the
+            // served signup. Only the anonymous signup records the `X-Swift-Harness` marker
+            // (kanban t_4a744754), so a workspace this door mints stays byte-identical to what
+            // it minted before.
+            probe_harness: None,
         },
     )
     .await

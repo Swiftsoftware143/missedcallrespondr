@@ -222,7 +222,9 @@ pub async fn internal_create_portfolio_company(
 
     let id = Uuid::new_v4();
 
-    // Ensure tenant exists (FK constraint)
+    // Ensure tenant exists (FK constraint).
+    // NOT marked with `probe_harness` on purpose (kanban t_4a744754): an AUTHENTICATED
+    // x-internal-key portfolio door, not the served, unauthenticated signup the marker exists for.
     sqlx::query(
         "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, CONCAT($3, '-', LEFT(CAST($1 AS TEXT), 8))) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug"
     )

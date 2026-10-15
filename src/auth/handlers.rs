@@ -22,8 +22,15 @@ use crate::{
 
 pub async fn register(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    // Attribution for the workspace this route is about to mint, from the `X-Swift-Harness`
+    // request HEADER only — never the body (client-controlled data the flow writes into
+    // customer-visible columns) and never a query field (kanban t_4a744754). `None` for every
+    // ordinary customer signup, so a real workspace is byte-identical to what it was before the
+    // column existed.
+    let probe_harness = crate::probe_harness::from_headers(&headers);
     // ── Address boundary (kanban t_54b1ffab) ────────────────────────────────────────────────
     // FIRST, before any SELECT and long before any INSERT. `users.email` is both the login identity
     // and the only address the welcome/credentials mail can ever reach; the handler used to bind
@@ -83,6 +90,7 @@ pub async fn register(
             account_slug: None,
             plan_slug: "free",
             role: "account_owner",
+            probe_harness: probe_harness.as_deref(),
         },
     )
     .await?;

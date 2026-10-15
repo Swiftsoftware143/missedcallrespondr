@@ -1611,6 +1611,10 @@ async fn deliver_credentials(
                 account_slug: Some(&account_slug),
                 plan_slug: &plan_slug,
                 role: "account_owner",
+                // DELIBERATELY `None` (kanban t_4a744754): this is the paid-checkout
+                // credential path (a provider-signed payment webhook), not the served,
+                // unauthenticated signup — the only door the marker belongs to.
+                probe_harness: None,
             },
         )
         .await?;

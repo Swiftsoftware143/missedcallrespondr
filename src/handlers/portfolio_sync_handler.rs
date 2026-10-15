@@ -41,6 +41,8 @@ async fn mirror_tenant(
     name: &str,
     slug: &str,
 ) -> Result<(), AppError> {
+    // NOT marked with `probe_harness` on purpose (kanban t_4a744754): this is the x-internal-key
+    // portfolio-sync door (an AUTHENTICATED machine call), not the served signup.
     sqlx::query(
         "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
     )

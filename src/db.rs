@@ -309,6 +309,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000037_twilio_coming_soon",
             include_str!("../migrations/000037_twilio_coming_soon.sql"),
         ),
+        // kanban t_4a744754 — the public signup mints a `tenants` row named
+        // "<name>'s Workspace", so a probe workspace used to be indistinguishable from a
+        // customer's. `probe_harness` records the X-Swift-Harness header the fleet's harnesses
+        // already send. Catalog-only + idempotent (ADD COLUMN IF NOT EXISTS + COMMENT), because
+        // this runner keeps NO ledger and re-executes every file each boot.
+        (
+            "000038_tenants_probe_harness",
+            include_str!("../migrations/000038_tenants_probe_harness.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
