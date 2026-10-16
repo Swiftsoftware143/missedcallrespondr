@@ -68,6 +68,25 @@ async fn main() -> anyhow::Result<()> {
         ),
     }
 
+    // At-rest seal for the platform MAIL credential (the class of kanban t_a794cb09). The mail
+    // transport's own write path seals before it binds, but the `admin_settings.email` row can also
+    // arrive plaintext: from a dump taken before the envelope existed, a manual SQL write, or a
+    // rotation tool that updates the row directly (`scripts/mg-rotate-db-keys.py` does exactly
+    // that). The four sibling apps each run this backfill at boot; this app was the one missing it
+    // (measured 2026-10-16: a plaintext `smtp_password` planted in the live row survived a restart
+    // on the previous binary). Idempotent, and never fatal — a mail credential must not stop boot.
+    match email_provider::seal_legacy_config_secrets(&pool).await {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!(
+            rows = n,
+            "admin_settings.email: sealed legacy plaintext credential(s) at rest"
+        ),
+        Err(e) => tracing::error!(
+            "admin_settings.email credential backfill failed (plaintext may remain at rest): {}",
+            e
+        ),
+    }
+
     // BYOK at-rest encryption posture (PROVIDER_KEY_ENC_SECRET). DISABLED means provider key
     // writes fail closed rather than storing a plaintext credential.
     tracing::info!(

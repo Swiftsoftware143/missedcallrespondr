@@ -229,6 +229,46 @@ pub async fn open_config_secrets(
     Ok(())
 }
 
+/// Seal every credential still sitting in the clear in the `admin_settings.email` row.
+///
+/// `seal_config_secrets` covers both write paths, so a credential stored THROUGH this app is
+/// sealed before it is bound. This is the half that converges a row which arrived another way: a
+/// database restored from a dump taken before the envelope existed, a manual SQL write, or a
+/// rotation tool that writes the row directly — the fleet's own `mg-rotate-db-keys.py` does exactly
+/// that. Without it such a credential sits in the clear for ever on this app, while the four
+/// siblings (funnelswift / incentiveswift / workflowswift / adaswift) each self-heal at boot and
+/// this one did not (measured 2026-10-16: a plaintext `smtp_password` planted in the live row
+/// survived a container restart on the old binary).
+///
+/// Idempotent — an already-sealed (or empty) field is left exactly as it is, so this returns 0 on
+/// every boot after the first. Never fatal: a mail credential must not stop the app booting.
+pub async fn seal_legacy_config_secrets(
+    pool: &PgPool,
+) -> Result<u64, provider_key_crypto::CryptoError> {
+    let mut value: Option<Value> =
+        sqlx::query_scalar("SELECT value FROM admin_settings WHERE key = $1")
+            .bind(ADMIN_KEY)
+            .fetch_optional(pool)
+            .await?;
+    let Some(mut value) = value.take() else {
+        return Ok(0);
+    };
+    if !value.is_object() {
+        return Ok(0);
+    }
+    let before = value.clone();
+    seal_config_secrets(pool, &mut value).await?;
+    if value == before {
+        return Ok(0);
+    }
+    sqlx::query("UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE key = $2")
+        .bind(&value)
+        .bind(ADMIN_KEY)
+        .execute(pool)
+        .await?;
+    Ok(1)
+}
+
 /// The stored row, credential opened. `None` = no row; `Err` = a row exists but its credential
 /// cannot be opened (a wrong/missing master key) — surfaced, never treated as "unconfigured".
 pub async fn stored_config(pool: &PgPool) -> Result<Option<EmailConfig>, String> {
