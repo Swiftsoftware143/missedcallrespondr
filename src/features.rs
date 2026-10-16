@@ -429,6 +429,23 @@ pub async fn check_feature_limit(
     enforce_feature_limit(pool, tenant_id, feature_key, label).await
 }
 
+/// The tenant's ACTIVE plan slug — the same join `auth::handlers::plan_name_for` reads, so the
+/// allowance the console shows belongs to the plan whose NAME it shows. `None` when no active row
+/// exists: a tenant on no plan has no allowances to name (and the console falls back to the plan
+/// label alone, exactly as it did before).
+pub async fn active_plan_slug(pool: &PgPool, tenant_id: Uuid) -> Option<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT p.slug FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id \
+         WHERE tp.tenant_id = $1 AND tp.status = 'active' \
+         ORDER BY tp.created_at DESC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Current usage snapshot for the dashboard/me/usage endpoint.
 pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value {
     let contacts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1")
@@ -470,12 +487,37 @@ pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value
     // The `workflows` count is GONE with the module (kanban t_66cfccff): the table is dropped by
     // `000028_retire_workflows.sql`, so this query would be a `42P01 undefined_table` that
     // `unwrap_or(0)` would have hidden — the exact blindness the `users` comment above records.
+    // ── The plan's OWN allowances, resolved the SAME way the gate resolves them (kanban cron-1016).
+    // The tenant console can now read "0 of 5" beside a counter, but only from THIS resolver:
+    // `resolve_limit` is the ONE function `enforce_feature_limit` calls, and its first arm is the
+    // panel-managed `feature_limits` grant. A console that read `plans.features` itself would
+    // disagree with the gate the moment such a grant exists — measured 2026-10-16 on this database:
+    // the Enterprise plan's JSONB is an ARRAY (no keys at all) while its `feature_limits` rows grant
+    // `max_phone_numbers = -1`, so a JSONB read would print the plan's name and no allowance at all.
+    // Only keys that RESOLVE are emitted: an absent key means "the plan declares no allowance"
+    // (the gate allows), and -1 is the fleet's unlimited sentinel the console renders as words.
+    let mut allowances = serde_json::Map::new();
+    if let Some(slug) = active_plan_slug(pool, tenant_id).await {
+        for key in [
+            "max_contacts",
+            "max_phone_numbers",
+            "max_rules",
+            "max_users",
+            "max_leads",
+            "max_tags",
+        ] {
+            if let Ok((Some(v), _)) = resolve_limit(pool, &slug, key).await {
+                allowances.insert(key.to_string(), serde_json::json!(v));
+            }
+        }
+    }
     serde_json::json!({
         "contacts": contacts,
         "leads": leads,
         "deals": deals,
         "phone_numbers": phone_numbers,
         "rules": rules,
-        "users": users
+        "users": users,
+        "allowances": allowances
     })
 }

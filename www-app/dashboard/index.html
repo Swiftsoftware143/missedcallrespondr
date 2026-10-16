@@ -214,6 +214,23 @@ const Overview = () => {
   // that printed "1 users" for every workspace. `num` still supplies the dash when the payload
   // omits the value, so the noun is the only thing this decides.
   const plural = (v, one, many) => `${num(v)} ${v === 1 ? one : many}`;
+  // kanban cron-1016 — each figure is the workspace's real count beside the allowance its OWN plan
+  // row carries. BOTH halves come from the server on the SAME read: the counts from this route and
+  // the allowances object that `features::get_usage_json` resolves with `resolve_limit` — the one
+  // resolver the purchase gate itself calls — so what a tenant reads here cannot disagree with the
+  // number a purchase is refused against. A key the plan does not declare shows the count alone (the
+  // gate allows it); -1 is the fleet's unlimited sentinel; and 0 means the plan does not grant the
+  // thing at all, which is words, not "0/0": the shape FunnelSwift's dashboard shipped.
+  const al = (u.allowances && typeof u.allowances === 'object') ? u.allowances : {};
+  const withCap = (used, key, one, many) => {
+    const base = plural(used, one, many);
+    if (!Object.prototype.hasOwnProperty.call(al, key)) return base;
+    const cap = Number(al[key]);
+    if (!isFinite(cap)) return base;
+    if (cap < 0) return base + ' \u2014 unlimited';
+    if (cap === 0) return base + ' \u2014 not on this plan';
+    return base + ' of ' + cap + ((typeof used === 'number' && used > cap) ? ' \u26a0' : '');
+  };
   // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
   // is honest rather than invisible.
   const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added' };
@@ -243,7 +260,7 @@ const Overview = () => {
           : (rate === null ? 'Not measured yet' : rate + '% of calls answered or sent an automatic reply')}</p></div>
       <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
         <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || 'Free'}</span></p>
-        <p class="text-sm text-gray-600 mt-2">${plural(u.rules, 'response rule', 'response rules')} · ${plural(u.phone_numbers, 'phone number', 'phone numbers')} · ${plural(u.contacts, 'contact', 'contacts')}</p></div>
+        <p class="text-sm text-gray-600 mt-2">${withCap(u.rules, 'max_rules', 'response rule', 'response rules')} · ${withCap(u.phone_numbers, 'max_phone_numbers', 'phone number', 'phone numbers')} · ${withCap(u.contacts, 'max_contacts', 'contact', 'contacts')}</p></div>
     </div>
     <div class="card mt-4"><h3 class="font-semibold mb-2">Recent activity</h3>
       ${(st.activity && st.activity.length)
