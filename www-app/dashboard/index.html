@@ -1143,7 +1143,7 @@ const Tickets = () => {
   const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Tickets</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ New Ticket</button></div>
-    ${st.stats && html`<div class="card p-3 mb-4 flex flex-wrap gap-4 text-sm text-gray-600">
+    ${st.stats && html`<div id="tk-stats" class="card p-3 mb-4 flex flex-wrap gap-4 text-sm text-gray-600">
       <span><strong>${st.stats.open||0}</strong> open</span>
       <span><strong>${st.stats.in_progress||0}</strong> in progress</span>
       <span><strong>${st.stats.resolved||0}</strong> resolved</span>
