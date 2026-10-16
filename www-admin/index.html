@@ -45,7 +45,7 @@ window.appGuidePages = {
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] },
-  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are stored encrypted and are never shown back in full.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
+  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
   "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your password", "See the plan you are on"] }
 };
 </script>
@@ -2524,6 +2524,15 @@ const App = () => {
 // reads it on both inbound receivers (`POST /api/v1/webhooks/stripe`, `/paypal`) — while this console
 // had no screen calling any of the three, so the operator could not connect the Stripe/PayPal account
 // the whole payment path runs on. David's rule: a backend route with no UI is a DEFECT, not a feature.
+// At-rest posture of a payment provider's SAVED credential (kanban t_d1fcda7e). Measured by the API
+// from the ciphertext COLUMN, never asserted here: until 2026-10-16 the header promised "stored
+// encrypted" whatever the row held, and `key_status` cannot tell a sealed row from a legacy
+// plaintext one. Tri-state on purpose — a missing field prints "unknown", never "in the clear".
+const ppPostureCell = (set, sealed) => !set
+  ? html`<span class="text-gray-400">—</span>`
+  : (sealed === true ? html`<span class="badge badge-green" data-pp="sealed">encrypted</span>`
+     : sealed === false ? html`<span class="badge badge-red" data-pp="plain">in the clear</span>`
+     : html`<span class="text-gray-400" data-pp="unknown">unknown</span>`);
 const PP_KINDS = [['stripe', 'Stripe'], ['paypal', 'PayPal'], ['square', 'Square'], ['paddle', 'Paddle']];
 const PaymentProviders = () => {
   const st = viewState('payment_providers', { list: null, err: null, busy: false, msg: null, form: null });
@@ -2600,7 +2609,7 @@ const PaymentProviders = () => {
   return html`<div>
     <div class="flex items-center justify-between mb-4">
       <div><h2 class="text-xl font-bold">Payment Providers</h2>
-        <p class="text-sm text-gray-500">The Stripe or PayPal account this install collects through. The secret key and the webhook signing secret are stored encrypted and are never shown back in full. Every checkout session and both inbound payment webhooks read the active provider from here.</p></div>
+        <p class="text-sm text-gray-500">The Stripe or PayPal account this install collects through. The secret key and the webhook signing secret are never shown back in full, and the Encrypted column states whether the saved copy is encrypted at rest. Every checkout session and both inbound payment webhooks read the active provider from here.</p></div>
       <button class="btn btn-sm btn-green" disabled=${st.busy} onClick=${() => openForm(null)}>+ Add provider</button>
     </div>
     ${st.msg ? html`<div class="text-sm mb-3 text-gray-700">${st.msg}</div>` : null}
@@ -2608,11 +2617,12 @@ const PaymentProviders = () => {
     ${st.list === null ? html`<div class="card text-center text-gray-400 py-8">Loading...</div>`
       : rows.length === 0 ? html`<div class="card text-center text-gray-400 py-8">No payment provider is connected yet. Add your Stripe or PayPal keys so checkout and the inbound payment webhooks can work.</div>`
       : html`<div class="card p-0 overflow-hidden"><table class="table">
-          <thead><tr><th>Provider</th><th>Label</th><th>Secret key</th><th>Publishable key</th><th>Mode</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Provider</th><th>Label</th><th>Secret key</th><th>Encrypted</th><th>Publishable key</th><th>Mode</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>${rows.map(r => html`<tr data-provider=${r.provider_type}>
             <td class="font-medium">${r.provider_type}</td>
             <td class="text-gray-500">${r.label || '—'}</td>
             <td>${r.key_status === 'configured' ? html`<span class="badge badge-green">configured</span>` : html`<span class="badge badge-yellow">not set</span>`}</td>
+            <td class="text-xs whitespace-nowrap" data-pp-posture>key ${ppPostureCell(r.api_key_set, r.api_key_sealed)} webhook ${ppPostureCell(r.webhook_secret_set, r.webhook_secret_sealed)}</td>
             <td class="font-mono text-xs text-gray-500">${r.publishable_key || 'not set'}</td>
             <td>${r.is_test_mode ? html`<span class="badge badge-blue">test</span>` : html`<span class="badge badge-purple">live</span>`}</td>
             <td>${r.is_active ? html`<span class="badge badge-green">Active</span>` : html`<span class="badge badge-red">Inactive</span>`}</td>
