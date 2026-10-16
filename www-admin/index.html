@@ -78,10 +78,27 @@ const API = (() => {
   const headers = () => ({ 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) });
   const handle = async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || d.message || 'Request failed'); return d; };
   const login = (e, p) => fetch(base + '/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:e,password:p}) }).then(handle);
-  const get = (p) => fetch(base + p, {headers:headers()}).then(handle).catch(e => { console.error(e); throw e; });
-  const post = (p, b) => fetch(base + p, {method:'POST', headers:headers(), body:JSON.stringify(b)}).then(handle);
-  const put = (p, b) => fetch(base + p, {method:'PUT', headers:headers(), body:JSON.stringify(b)}).then(handle);
-  const del = (p) => fetch(base + p, {method:'DELETE', headers:headers()}).then(handle);
+  // A 401 on a request that CARRIED a session means the session the server knows about is gone: the
+  // panel's 7-day token has expired or was revoked. Ending it HERE is the only way this console gets
+  // back to a sign-in — measured in real Chromium on admin.missedcallrespondr.com (2026-10-16): with
+  // an expired session in storage the panel kept the signed-in shell and every screen failed, and no
+  // sign-in was offered (browser-run/mcr-session-expiry-proof.js, PRE arm). API.login() is a separate
+  // call that carries NO token, so a wrong password still shows the API's own sentence.
+  const sessionEnded = () => {
+    token = null; user = null;
+    try { sessionStorage.removeItem('mc_token'); sessionStorage.removeItem('mc_user'); } catch (e) { /* storage can be blocked; the in-memory clear still signs the panel out */ }
+    S.sessionEnded = true; S.view = 'dashboard'; S.error = null;
+    renderApp();
+    throw new Error('session ended');
+  };
+  const send = (p, opts) => {
+    const carried = !!token;
+    return fetch(base + p, opts).then((r) => (r.status === 401 && carried ? sessionEnded() : handle(r)));
+  };
+  const get = (p) => send(p, {headers:headers()}).catch(e => { console.error(e); throw e; });
+  const post = (p, b) => send(p, {method:'POST', headers:headers(), body:JSON.stringify(b)});
+  const put = (p, b) => send(p, {method:'PUT', headers:headers(), body:JSON.stringify(b)});
+  const del = (p) => send(p, {method:'DELETE', headers:headers()});
   return {
     login, get, post, put, del,
     get token(){ return token; },
@@ -146,7 +163,7 @@ const LoginView = () => {
         setTimeout(() => { window.location.replace(TENANT_APP + '/dashboard'); }, 1500);
         return;
       }
-      API.setAuth(r.token, u); f.email = ''; f.pw = ''; S.view = 'dashboard';
+      API.setAuth(r.token, u); S.sessionEnded = false; f.email = ''; f.pw = ''; S.view = 'dashboard';
     } catch(err) { S.error = err.message; }
     S.loading = false; renderApp();
   };
@@ -160,6 +177,7 @@ const LoginView = () => {
       <form onSubmit=${submit} class="space-y-4">
         <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${f.email} onInput=${e => f.email = e.target.value} placeholder="admin@company.com" required /></div>
         <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${f.pw} onInput=${e => f.pw = e.target.value} placeholder="......" required /></div>
+        ${S.sessionEnded && html`<div class="text-amber-800 text-sm bg-amber-50 p-2 rounded-lg">Your session ended, so you were signed out. Sign in again to carry on.</div>`}
         ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
         <button type="submit" class="btn w-full">Sign In</button>
       </form>

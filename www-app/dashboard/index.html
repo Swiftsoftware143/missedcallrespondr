@@ -86,10 +86,33 @@ const API = (() => {
   let user = JSON.parse(sessionStorage.getItem('mc_user') || 'null');
   const headers = () => ({ 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) });
   const handle = async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || d.message || 'Request failed'); return d; };
-  const get = (p) => fetch(base + p, { headers: headers() }).then(handle);
-  const post = (p, b) => fetch(base + p, { method: 'POST', headers: headers(), body: JSON.stringify(b) }).then(handle);
-  const put = (p, b) => fetch(base + p, { method: 'PUT', headers: headers(), body: JSON.stringify(b) }).then(handle);
-  const del = (p) => fetch(base + p, { method: 'DELETE', headers: headers() }).then(handle);
+  // A 401 on a request that CARRIED a session means the session the server knows about is gone: the
+  // token's 7 days are up (`exp: now + 86400 * 7`, src/auth/handlers.rs) or it was revoked. Ending
+  // it HERE is the only way this console can get back to a sign-in — measured in real Chromium on
+  // app.missedcallrespondr.com (2026-10-16): with an expired session in storage, /auth/me, /me/usage,
+  // /dashboard/stats and /dashboard/activity each answered 401 while the signed-in shell, its nav and
+  // the account level stayed painted and NO sign-in was ever offered (browser-run/
+  // mcr-session-expiry-proof.js, PRE arm). The sign-in request itself carries no token, so a wrong
+  // password still shows the API's own sentence instead of being read as an expired session.
+  const sessionEnded = () => {
+    token = null; user = null;
+    try {
+      sessionStorage.removeItem('mc_token');
+      sessionStorage.removeItem('mc_user');
+      sessionStorage.removeItem('mc_impersonation_token');
+    } catch (e) { /* storage can be blocked; the in-memory clear above still signs the shell out */ }
+    S.sessionEnded = true; S.view = 'overview'; S.error = null;
+    renderApp();
+    throw new Error('session ended');
+  };
+  const send = (p, opts) => {
+    const carried = !!token;
+    return fetch(base + p, opts).then((r) => (r.status === 401 && carried ? sessionEnded() : handle(r)));
+  };
+  const get = (p) => send(p, { headers: headers() });
+  const post = (p, b) => send(p, { method: 'POST', headers: headers(), body: JSON.stringify(b) });
+  const put = (p, b) => send(p, { method: 'PUT', headers: headers(), body: JSON.stringify(b) });
+  const del = (p) => send(p, { method: 'DELETE', headers: headers() });
   return {
     get, post, put, del,
     get token() { return token; },
@@ -165,7 +188,7 @@ const LoginView = () => {
   // so the old `let email = '', pw = ''` blanked BOTH fields on every attempt.
   const f = viewState('login_form', { email: '', pw: '' });
   const submit = async (e) => { e.preventDefault(); S.loading = true; S.error = null; renderApp();
-    try { const r = await API.post('/auth/login', { email: f.email, password: f.pw }); API.setAuth(r.token, r.team_member || r.user || r); S.meLoaded = false; f.email = ''; f.pw = ''; S.view = 'overview'; } catch (err) { S.error = err.message; }
+    try { const r = await API.post('/auth/login', { email: f.email, password: f.pw }); API.setAuth(r.token, r.team_member || r.user || r); S.meLoaded = false; S.sessionEnded = false; f.email = ''; f.pw = ''; S.view = 'overview'; } catch (err) { S.error = err.message; }
     S.loading = false; renderApp();
   };
   return html`<div class="flex items-center justify-center min-h-screen w-full">
@@ -178,6 +201,7 @@ const LoginView = () => {
       <form onSubmit=${submit} class="space-y-4">
         <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${f.email} onInput=${e => f.email = e.target.value} required /></div>
         <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${f.pw} onInput=${e => f.pw = e.target.value} required /></div>
+        ${S.sessionEnded && html`<div class="text-amber-800 text-sm bg-amber-50 p-2 rounded-lg">Your session ended, so you were signed out. Sign in again to carry on.</div>`}
         ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
         <button type="submit" class="btn w-full">Sign In</button>
       </form>
