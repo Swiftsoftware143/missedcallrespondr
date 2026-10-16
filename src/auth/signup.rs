@@ -156,6 +156,21 @@ pub async fn create_account(
 ) -> Result<NewAccountIds, AppError> {
     let db = &state.pool;
 
+    // ── The owner's NAME, bounded at the ONE writer both doors pass through ─────────────────────
+    // Nothing bounded it: `users.name` is TEXT, so `POST /api/v1/auth/register {"name":"   "}`
+    // answered 200 and stored a whitespace name — the console header, the derived workspace label
+    // ("   's Workspace") and the welcome mail's greeting were then empty, and the row was
+    // indistinguishable from a real one. Measured LIVE 2026-10-16 (origin 127.0.0.1:8088): `"   "`
+    // -> 200 and a 3-space `users.name`; FunnelSwift / WorkflowSwift / ADASwift / IncentiveSwift
+    // already refuse it, and `register` answers 422 for the same class (its email arm), so this
+    // matches. Rebinding `a` means EVERY downstream use — the `users` INSERT and both mail
+    // templates — takes the trimmed value: `"  Bob  "` is stored and greeted as "Bob".
+    let name = a.name.trim();
+    if name.is_empty() {
+        return Err(AppError::Unprocessable("name: is required".into()));
+    }
+    let a = NewAccount { name, ..a };
+
     // The duplicate check runs BEFORE the first INSERT (the public signup's order, unchanged): an
     // orphan workspace must never be left behind by a refused retry. It is only a FAST PATH — the
     // `users_email_key` UNIQUE index below is the real guard, so the loser of a race is mapped to
