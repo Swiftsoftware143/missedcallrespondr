@@ -1867,7 +1867,7 @@ const TenantsScreen = () => {
 // actually left, and a "Send test email" press recorded nothing at all. A backend route with no UI is
 // a defect: this is the screen.
 const EmailProviderScreen = () => {
-  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, last: null, to: '', busy: false, msg: null });
+  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, to: '', busy: false, msg: null });
   const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   const load = async () => {
     try {
@@ -1879,6 +1879,10 @@ const EmailProviderScreen = () => {
       st.from_address = c.from_address || c.from_email || ''; st.from_name = c.from_name || '';
       st.configured = !!(r && r.configured); st.source = (r && r.source) || 'none';
       st.stored = !!(r && r.stored); st.last = (r && r.last_send) || null;
+      // At-rest posture of the stored credential (the rule the CoreSwift panel set, kanban t_d1fcda7e):
+      // the API reports whether the database holds the saved key encrypted, so this screen states the
+      // fact instead of asserting "credentials are stored sealed" whether or not that is true.
+      st.sealed = !!(r && r.sealed); st.credential_present = !!(r && r.credential_present);
       st.msg = null;
     } catch (e) { st.msg = { ok: false, text: (e && e.message) || 'Could not read the email config' }; }
     renderApp();
@@ -1913,9 +1917,11 @@ const EmailProviderScreen = () => {
       <div class="flex items-center gap-3 mb-2">
         <div class="font-semibold">System mail (welcome, invitations, password resets)</div>
         <span class="badge ${st.configured ? 'badge-green' : 'badge-yellow'}">${st.configured ? 'configured' : 'not configured'}</span>
+        ${!st.credential_present ? null : html`<span class="badge ${st.sealed ? 'badge-green' : 'badge-red'}" data-email-provider="sealed">${st.sealed ? '🔒 credential encrypted at rest' : '⚠ credential stored in the clear'}</span>`}
         ${st.source && st.source !== 'none' ? html`<span class="text-xs text-gray-400">source: ${st.source}</span>` : null}
       </div>
-      <p class="text-sm text-gray-500 mb-4">Every transactional mail this install sends goes through this provider — the welcome mail a new customer needs first. Credentials are stored sealed and shown masked; leaving the key unchanged keeps the stored one.</p>
+      <p class="text-sm text-gray-500 mb-4">Every transactional mail this install sends goes through this provider — the welcome mail a new customer needs first. A key saved here is encrypted before it is written and shown masked, and the badge above says whether the STORED one is encrypted: a row that arrived from a restored backup, a manual database write or a key-rotation tool reads "stored in the clear" until the app's next start seals it. Leaving the key unchanged keeps the stored one.</p>
+      ${st.credential_present && !st.sealed ? html`<div class="text-xs text-red-600 mb-3" data-email-provider="sealed-hint">The saved key is readable in the database as it stands. Restart the app (or save the key again from this panel) and it is encrypted at rest.</div>` : null}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div><label class="text-sm font-medium text-gray-600 block mb-1">Provider</label>
           <select class="input" value=${st.provider} onChange=${e => { st.provider = e.target.value; renderApp(); }}>

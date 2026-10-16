@@ -229,6 +229,39 @@ pub async fn open_config_secrets(
     Ok(())
 }
 
+/// Does the `admin_settings.email` row carry a credential at all? An empty or absent secret field
+/// is not a credential, so the panel can say "nothing saved" instead of guessing from the row's
+/// existence (a row can hold only a provider/URL and no key).
+pub fn stored_credential_present(row: &Value) -> bool {
+    CONFIG_SECRET_FIELDS.iter().any(|f| !s(row, f).is_empty())
+}
+
+/// Is the credential in this row ENCRYPTED AT REST?
+///
+/// `true` only when a credential field is non-empty AND every non-empty one carries the storage
+/// envelope. A value without the envelope is a legacy plaintext row — a restored dump, a manual SQL
+/// write, or a key-rotation tool that updates the row directly — which this app's boot backfill
+/// (`seal_legacy_config_secrets`) has not converged yet. The panel prints the answer, so "saved"
+/// is never read as "sealed": until 2026-10-16 the panel ASSERTED "Credentials are stored sealed"
+/// whether or not that was true, and the live row was plaintext while it said so.
+///
+/// The predicate is the same `provider_key_crypto::is_encrypted` the seal/open halves use, so the
+/// panel cannot disagree with the storage layer.
+pub fn stored_credential_sealed(row: &Value) -> bool {
+    let mut any = false;
+    for f in CONFIG_SECRET_FIELDS {
+        let v = s(row, f);
+        if v.is_empty() {
+            continue;
+        }
+        any = true;
+        if !provider_key_crypto::is_encrypted(&v) {
+            return false;
+        }
+    }
+    any
+}
+
 /// Seal every credential still sitting in the clear in the `admin_settings.email` row.
 ///
 /// `seal_config_secrets` covers both write paths, so a credential stored THROUGH this app is
@@ -586,6 +619,39 @@ mod tests {
         for key in ["from=", "&to=", "&subject=", "&text=", "&html="] {
             assert!(body.contains(key), "missing {key} in {body}");
         }
+    }
+
+    /// The at-rest posture the panel now prints (the rule CoreSwift's panel set, kanban t_d1fcda7e):
+    /// no credential is not "sealed", a plaintext credential is a FINDING, and only an enveloped
+    /// value reads as encrypted at rest. Until this, the panel asserted "Credentials are stored
+    /// sealed" unconditionally, so an operator could not tell a sealed row from a plaintext one.
+    #[test]
+    fn at_rest_posture_reads_the_storage_envelope() {
+        // Nothing saved: no credential, so not sealed either.
+        assert!(!stored_credential_present(&json!({})));
+        assert!(!stored_credential_sealed(&json!({})));
+        // A row that holds only routing fields carries no credential.
+        assert!(!stored_credential_present(&json!({
+            "provider": "mailgun",
+            "api_url": "https://api.mailgun.net/v3/mail.missedcallrespondr.com/messages",
+            "api_key": ""
+        })));
+        // A legacy plaintext credential is present and NOT sealed.
+        let plain = json!({"api_key": "key-0123456789abcdef"});
+        assert!(stored_credential_present(&plain));
+        assert!(!stored_credential_sealed(&plain));
+        // The envelope is the whole answer, not the field name.
+        let sealed =
+            json!({"api_key": format!("{}{}", provider_key_crypto::ENC_PREFIX, "Y2lwaGVy")});
+        assert!(stored_credential_present(&sealed));
+        assert!(stored_credential_sealed(&sealed));
+        // Every non-empty credential field must be enveloped: one plaintext field makes the row
+        // "stored in the clear", which is the state the operator has to see.
+        let mixed = json!({
+            "api_key": format!("{}{}", provider_key_crypto::ENC_PREFIX, "Y2lwaGVy"),
+            "smtp_password": "hunter2"
+        });
+        assert!(!stored_credential_sealed(&mixed));
     }
 
     #[test]

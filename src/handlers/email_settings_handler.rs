@@ -93,6 +93,16 @@ pub async fn get_email_config(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "config": config,
         "stored": stored.as_object().map(|o| !o.is_empty()).unwrap_or(false),
+        // At-rest posture of the stored credential (the rule CoreSwift's panel set, kanban
+        // t_d1fcda7e): `config.api_key_set` says there is a credential the SEND path can use, while
+        // `sealed` says whether the DATABASE holds it encrypted. The two differ only between a write
+        // made outside this panel (a manual SQL write, a restored dump, a rotation tool) and the next
+        // restart, whose boot backfill (`seal_legacy_config_secrets`) seals the row. The panel prints
+        // this instead of asserting "credentials are stored sealed", so "saved" is never read as
+        // "encrypted" — measured 2026-10-16: the live `smtp_password` was plaintext while the panel
+        // said sealed, until the boot backfill shipped.
+        "sealed": email_provider::stored_credential_sealed(&stored),
+        "credential_present": email_provider::stored_credential_present(&stored),
         "configured": live.is_some(),
         "provider": live.as_ref().map(|c| c.provider.clone()).unwrap_or_default(),
         "source": live.as_ref().map(|c| c.source).unwrap_or("none"),
