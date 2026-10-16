@@ -667,10 +667,17 @@ async fn create_stripe_session(
         .map_err(|e| AppError::Internal(format!("Failed to parse Stripe response: {}", e)))?;
 
     if !status.is_success() {
+        // The PROVIDER was reached and refused (bad/revoked/mis-scoped key): a failed dependency on
+        // another service, not this app breaking. AppError::UpstreamRefused (424) is already this
+        // app's answer for a provider refusal and every sibling app's checkout arm uses the 4xx
+        // class with Stripe's own sentence; a 500 told the customer the app was broken.
         let error_msg = response_body["error"]["message"]
             .as_str()
             .unwrap_or("Unknown Stripe error");
-        return Err(AppError::Internal(format!("Stripe error: {}", error_msg)));
+        return Err(AppError::UpstreamRefused(format!(
+            "Stripe refused the checkout session: {}",
+            error_msg
+        )));
     }
 
     Ok(json!({
@@ -752,11 +759,16 @@ async fn create_paypal_session(
         .map_err(|e| AppError::Internal(format!("Failed to parse PayPal order response: {}", e)))?;
 
     if !order_status.is_success() {
+        // Same class as the Stripe arm above: the provider answered and refused, so this is a
+        // failed dependency (424), not a 500.
         let error_msg = order_body["message"]
             .as_str()
             .or_else(|| order_body["error_description"].as_str())
             .unwrap_or("Unknown PayPal error");
-        return Err(AppError::Internal(format!("PayPal error: {}", error_msg)));
+        return Err(AppError::UpstreamRefused(format!(
+            "PayPal refused the checkout order: {}",
+            error_msg
+        )));
     }
 
     // Get the approval URL from the links
