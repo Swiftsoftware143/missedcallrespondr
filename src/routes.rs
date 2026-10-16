@@ -705,6 +705,16 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/payment-providers/:provider_type",
             delete(checkout_handler::delete_payment_provider),
         )
+        // kanban t_7bdfcc4a — the operator's own key check: ONE read-only provider call that
+        // answers whether a key works BEFORE a customer finds out for them. A supplied key is
+        // never stored, so a typo cannot overwrite a working credential. It rides the SAME
+        // `/api/v1/payment-providers` prefix the platform-admin gate already fronts
+        // (`crate::auth::middleware::is_admin_surface`), so an account_owner is refused here by
+        // that one gate rather than by a second check inside the handler.
+        .route(
+            "/api/v1/payment-providers/:provider_type/test",
+            post(checkout_handler::test_payment_provider),
+        )
         // Checkout Sessions
         .route(
             "/api/v1/checkout/create",

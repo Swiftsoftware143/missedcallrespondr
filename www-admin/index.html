@@ -45,7 +45,7 @@ window.appGuidePages = {
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] },
-  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are stored encrypted and are never shown back in full.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use"] },
+  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are stored encrypted and are never shown back in full.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
   "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your password", "See the plan you are on"] }
 };
 </script>
@@ -2532,16 +2532,47 @@ const PaymentProviders = () => {
     st.form = { open: true, edit: !!row, provider_type: row ? row.provider_type : 'stripe',
       api_key: '', webhook_secret: '', publishable_key: (row && row.publishable_key) || '',
       label: (row && row.label) || '', is_test_mode: row ? row.is_test_mode !== false : true,
-      is_active: row ? row.is_active !== false : true, err: null, busy: false };
+      is_active: row ? row.is_active !== false : true, err: null, msg: null, busy: false };
     st.msg = null; renderApp();
   };
   const closeForm = () => { st.form = null; renderApp(); };
+  // kanban t_7bdfcc4a — find out whether a payment key works BEFORE it matters. A raw fetch, NOT
+  // API.post: a refusal is a 424 whose BODY carries the provider's own sentence, while API.post's
+  // handle() throws on !res.ok and would show the operator the short code instead of the reason
+  // Stripe gave. The key itself is never echoed back — only the mask, and only when a key was
+  // actually used. `into` is the form state (the box's Test key) or the screen state (a row's
+  // Test stored key); the API's `key_source` in the sentence says which key was judged.
+  const test = async (pt, key, into) => {
+    const p = String(pt || '').trim().toLowerCase();
+    if (!p) { into.err = 'Choose a provider type first.'; renderApp(); return; }
+    // An empty api_key is the API's own 'test the STORED key' signal, so it is sent as an empty
+    // string rather than omitted: the body is always well-formed JSON, never a bare POST.
+    const usingBox = !!(key && String(key).trim());
+    into.busy = true; into.err = null; into.msg = null; renderApp();
+    try {
+      const res = await fetch(window.location.origin + '/api/v1/payment-providers/' + encodeURIComponent(p) + '/test', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, API.token ? { 'Authorization': 'Bearer ' + API.token } : {}),
+        body: JSON.stringify({ api_key: usingBox ? String(key).trim() : '' })
+      });
+      let j = {};
+      try { j = await res.json(); } catch (e) { j = {}; }
+      const tail = j.api_key_masked ? ' (key ' + j.api_key_masked + ')' : '';
+      const line = (j.message || (res.ok ? 'The key was accepted' : 'The test could not run')) + tail;
+      into.busy = false;
+      if (res.ok) { into.msg = line; } else { into.err = line; }
+    } catch (err) {
+      into.busy = false;
+      into.err = 'Could not run the key test: ' + ((err && err.message) ? err.message : err);
+    }
+    renderApp();
+  };
   const save = async () => {
     const f = st.form; if (!f) return;
     const pt = String(f.provider_type || '').trim().toLowerCase();
     if (PP_KINDS.map(k => k[0]).indexOf(pt) < 0) { f.err = 'Choose Stripe, PayPal, Square or Paddle.'; renderApp(); return; }
     if (!f.edit && !String(f.api_key || '').trim()) { f.err = 'The secret key is required the first time you connect a provider.'; renderApp(); return; }
-    f.busy = true; f.err = null; renderApp();
+    f.busy = true; f.err = null; f.msg = null; renderApp();
     const body = { provider_type: pt, label: (f.label || '').trim(), is_active: !!f.is_active,
       is_test_mode: !!f.is_test_mode, publishable_key: (f.publishable_key || '').trim() };
     // A BLANK credential is the "keep the stored value" signal the upsert's four arms key on, so a
@@ -2579,14 +2610,15 @@ const PaymentProviders = () => {
             <td class="font-mono text-xs text-gray-500">${r.publishable_key || 'not set'}</td>
             <td>${r.is_test_mode ? html`<span class="badge badge-blue">test</span>` : html`<span class="badge badge-purple">live</span>`}</td>
             <td>${r.is_active ? html`<span class="badge badge-green">Active</span>` : html`<span class="badge badge-red">Inactive</span>`}</td>
-            <td><button class="btn btn-sm" disabled=${st.busy} onClick=${() => openForm(r)}>Edit</button>
+            <td><button class="btn btn-sm" disabled=${st.busy} onClick=${() => test(r.provider_type, '', st)}>Test stored key</button>
+              <button class="btn btn-sm" style="margin-left:8px" disabled=${st.busy} onClick=${() => openForm(r)}>Edit</button>
               <button class="btn btn-sm btn-red" style="margin-left:8px" disabled=${st.busy} onClick=${() => remove(r)}>Delete</button></td>
           </tr>`)}</tbody></table></div>`}
-    ${st.form && st.form.open ? PaymentProviderModal({ st, closeForm, save }) : null}
+    ${st.form && st.form.open ? PaymentProviderModal({ st, closeForm, save, test }) : null}
   </div>`;
 };
 
-const PaymentProviderModal = ({ st, closeForm, save }) => {
+const PaymentProviderModal = ({ st, closeForm, save, test }) => {
   const f = st.form;
   return html`<div class="modal" onClick=${e => e.target === e.currentTarget && closeForm()}>
     <div class="modal-content" data-pp-form="1">
@@ -2614,10 +2646,13 @@ const PaymentProviderModal = ({ st, closeForm, save }) => {
         </div>
         <div class="text-xs text-gray-400">Only an active provider is used. A provider left inactive is kept but takes no part in checkout.</div>
       </div>
+      ${f.msg ? html`<p class="text-sm text-gray-700 mt-3">${f.msg}</p>` : null}
       ${f.err ? html`<p class="text-sm text-red-600 mt-3">${f.err}</p>` : null}
       <div class="flex gap-2 justify-end mt-4">
+        <button class="btn btn-outline" disabled=${f.busy} onClick=${() => test(f.provider_type, f.api_key, f)}>Test key</button>
         <button class="btn btn-outline" disabled=${f.busy} onClick=${() => closeForm()}>Cancel</button>
         <button class="btn" disabled=${f.busy} onClick=${() => save()}>${f.busy ? 'Saving...' : (f.edit ? 'Save changes' : 'Add provider')}</button>
+        <span style="font-size:12px;color:#64748b">Test key asks Stripe whether the key in the box works, without saving it.</span>
       </div>
     </div>
   </div>`;

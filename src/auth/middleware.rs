@@ -192,6 +192,9 @@ mod tests {
             "/api/v1/admin/site",
             "/api/v1/payment-providers",
             "/api/v1/payment-providers/stripe",
+            // the payment-key CHECK (kanban t_7bdfcc4a): three segments, and it reaches the
+            // provider with a credential, so it must be inside the surface, not beside it.
+            "/api/v1/payment-providers/stripe/test",
         ] {
             assert!(
                 admin_surface_denied(path, "account_owner"),

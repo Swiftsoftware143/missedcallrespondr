@@ -10,15 +10,20 @@
 //! only this module. Nothing else decides whether a route may be reached anonymously.
 //!
 //! # The census (measured 2026-10-06 from `src/routes.rs`, then verified live with an anonymous
-//! probe against 127.0.0.1:8088; re-measured 2026-10-08 after the account/profile card t_9cd2c8f2
+//! probe against 127.0.0.1:8088; re-measured 2026-10-16 after the payment-key check route
+//! joined (card t_7bdfcc4a — PROTECTED, so the two anonymous lists are untouched); the 119/104
+//! quoted here until then was one adrift of the code (the tenant plan catalogue of card
+//! t_a57ae7db had been added to the router and to the census TEST but not to this prose), so the
+//! numbers below are the measured ones: 121 = 15 anonymous + 106 protected.
+//! re-measured 2026-10-08 after the account/profile card t_9cd2c8f2
 //! added the two avatar routes; re-measured 2026-10-10 after the admin bulk-retire arm joined,
 //! card t_31951eca)
 //!
 //! ```text
-//!   119 mounted `.route(..)` entries in the one routing file, 119 distinct paths (every path is
+//!   121 mounted `.route(..)` entries in the one routing file, 121 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   104 entries reach `protected_routes`, which carries `auth_middleware`
+//!   106 entries reach `protected_routes`, which carries `auth_middleware`
 //!    15 entries reach the ANONYMOUS `public_routes`:
 //!        12 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
@@ -341,6 +346,7 @@ mod tests {
             "/api/v1/clients",
             "/api/v1/clients/client-one",
             "/api/v1/provider-keys/stripe/test",
+            "/api/v1/payment-providers/stripe/test",
             "/api/v1/integrations/coreswift/status",
             "/api/v1/integrations/coreswift/push",
             "/api/v1/admin/plans",
@@ -480,18 +486,21 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             15
         );
-        // 120 entries / 120 distinct paths (the avatar read + its private upload twin joined on
+        // 121 entries / 121 distinct paths (the payment-key check joined on 2026-10-16, card
+        // t_7bdfcc4a — a PROTECTED mount, so the two anonymous lists stay at 12 + 3; and the
+        // tenant plan catalogue of card t_a57ae7db was already counted). The avatar read + its
+        // private upload twin joined on
         // 2026-10-08, card t_9cd2c8f2; the email-branding logo read + its two private write twins
         // joined on 2026-10-09, card t_feab8aff; the admin bulk-retire arm joined on 2026-10-10,
         // card t_31951eca; the TENANT-facing plan catalogue joined on 2026-10-15, card
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 120, "mounted .route entries");
+        assert_eq!(lits.len(), 121, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 120, "distinct mounted paths");
+        assert_eq!(uniq.len(), 121, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
