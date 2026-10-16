@@ -711,10 +711,27 @@ async fn create_paypal_session(
         .await
         .map_err(|e| AppError::Internal(format!("PayPal auth error: {}", e)))?;
 
+    let token_status = token_resp.status();
     let token_body: Value = token_resp
         .json()
         .await
         .map_err(|e| AppError::Internal(format!("Failed to parse PayPal auth response: {}", e)))?;
+
+    // The PROVIDER was reached and refused the credential (bad / revoked / mis-scoped client id or
+    // secret): PayPal answers 401 with no `access_token` and its own `error` + `error_description`.
+    // Reading only the access token threw those words away and returned a bare 500, which told the
+    // operator the app had broken instead of quoting PayPal. Same class as the order-creation arm
+    // below: a failed dependency on another service is a 424.
+    if !token_status.is_success() {
+        let msg = token_body["error_description"]
+            .as_str()
+            .or_else(|| token_body["error"].as_str())
+            .unwrap_or("PayPal refused the credential");
+        return Err(AppError::UpstreamRefused(format!(
+            "PayPal refused the credential: {}",
+            msg
+        )));
+    }
 
     let access_token = token_body["access_token"]
         .as_str()
