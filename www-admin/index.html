@@ -1711,10 +1711,15 @@ const OpsPanel = ({ panel }) => {
 //    to the address arm alone: the nightly tenancy canary keys its fixtures at
 //    `probe-canary-a@swiftsoftware.dev`, so the two `Tenancy Canary A/B` workspaces sat in the
 //    operator's own Tenants list looking like unrecognised signups.
+//  * kanban t_56ad38a1: `maxxspace.com` joins this arm for the same reason. It is the fleet's
+//    mail.tm probe inbox and the tag-provision probe DOES mint account owners there
+//    (`probe-arm…@maxxspace.com`, measured live in ADASwift and WorkflowSwift 2026-10-16), so a
+//    workspace minted that way would otherwise read as a customer in this list. IncentiveSwift
+//    already carried the arm; this console did not.
 // `swiftsoftware.com` is deliberately NOT here: it is a real, routable domain and the operator's own.
 // Definition ported verbatim from the fleet standard (FunnelSwift www-admin/index.html).
 const RESERVED_ADDR_RE = /@(?:[^@]*\.)?(?:invalid|example|test|local)$|@(?:[^@]*\.)?example\.(?:com|net|org)$/i;
-const FLEET_PROBE_ADDR_RE = /@(?:[^@]*\.)?(?:swiftsoftware\.(?:dev|local)|sw\.dev)$|@local\.(?:funnelswift|coreswift|adaswift|incentiveswift|workflowswift|missedcallrespondr|multidirectory)$/i;
+const FLEET_PROBE_ADDR_RE = /@(?:[^@]*\.)?(?:swiftsoftware\.(?:dev|local)|sw\.dev|maxxspace\.com)$|@local\.(?:funnelswift|coreswift|adaswift|incentiveswift|workflowswift|missedcallrespondr|multidirectory)$/i;
 function isProbeAddress(addr) {
   const a = String(addr || '');
   return RESERVED_ADDR_RE.test(a) || FLEET_PROBE_ADDR_RE.test(a);
