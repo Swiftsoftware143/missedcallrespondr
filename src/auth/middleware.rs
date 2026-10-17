@@ -38,7 +38,22 @@ pub fn is_platform_admin(role: &str) -> bool {
 /// Matched by path SEGMENT, never by bare string prefix: `/api/v1/administrators` and
 /// `/api/v1/payment-providers-public` must stay outside the surface.
 fn is_admin_surface(path: &str) -> bool {
-    const ADMIN_SURFACE: &[&str] = &["/api/v1/admin", "/api/v1/payment-providers"];
+    // `/api/v1/email-templates` is the third member of this class, measured 2026-10-17: the
+    // handlers behind it take NO tenant context at all (`aid IS NULL` on every row they create,
+    // and `list` selects the whole table), i.e. they are the PLATFORM's email wording — the same
+    // platform-global surface as the two above. It sat on the ordinary protected router, so a
+    // tenant token could read, create, update and delete the app-wide templates, including the
+    // welcome mail that carries a new customer's password (probe: a `team_member` token answered
+    // `GET /api/v1/email-templates` 200 with the 3 rows and `POST` 200 with a new row, while
+    // `GET /api/v1/admin/tenants` correctly answered 403). The tenant app never calls it
+    // (`grep -rl email-templates` over `www-app/missedcall` and `www/missedcall` = no hits), and
+    // CoreSwift-CRM's own module documents the same route family as "platform admin only", so
+    // closing it here leaves no tenant-facing caller behind.
+    const ADMIN_SURFACE: &[&str] = &[
+        "/api/v1/admin",
+        "/api/v1/payment-providers",
+        "/api/v1/email-templates",
+    ];
     ADMIN_SURFACE.iter().any(|base| {
         path.strip_prefix(base)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
@@ -195,6 +210,9 @@ mod tests {
             // the payment-key CHECK (kanban t_7bdfcc4a): three segments, and it reaches the
             // provider with a credential, so it must be inside the surface, not beside it.
             "/api/v1/payment-providers/stripe/test",
+            // the platform email-template family (2026-10-17): global rows, no tenant context
+            "/api/v1/email-templates",
+            "/api/v1/email-templates/7b0f",
         ] {
             assert!(
                 admin_surface_denied(path, "account_owner"),
@@ -209,6 +227,8 @@ mod tests {
         for path in [
             "/api/v1/administrators",
             "/api/v1/payment-providers-public",
+            // a lookalike of the newly-closed family must NOT ride in on the prefix
+            "/api/v1/email-templates-public",
             "/api/v1/contacts",
             "/api/v1/me/usage",
             "/api/v1/auth/me",
