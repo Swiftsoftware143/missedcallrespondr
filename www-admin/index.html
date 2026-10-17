@@ -45,6 +45,7 @@ window.appGuidePages = {
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour"] },
+  "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, and the password-reset mail. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
   "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your password", "See the plan you are on"] }
 };
@@ -440,6 +441,100 @@ const ResponseRules = () => {
             <div class="flex gap-2 justify-end mt-4">
               <button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button>
               <button class="btn" onClick=${() => save({ name: f.name, trigger_condition: f.trigger, response_type: f.type, response_content: { text: f.text }, schedule: ruleScheduleOf(f), priority: f.priority, is_active: f.active })}>${st.editItem ? 'Save' : 'Add'}</button>
+            </div>
+          </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+// ---- EMAIL TEMPLATES (the PLATFORM's mail wording) ----
+// GET|POST /api/v1/email-templates and GET|PUT|DELETE /api/v1/email-templates/:id existed with NO
+// screen in this console: the operator could restyle the mail (Email Branding) but had no way to
+// change a word of it — the welcome and credentials mails were editable only from psql. A backend
+// route with no UI is a defect. The rows are platform-global (the handler writes `aid = NULL`, and
+// `list` selects the whole table), so this screen is adminOnly and the API family is inside the
+// platform-admin surface (src/auth/middleware.rs).
+// `template_type` is what the sender looks up: welcome, welcome_credentials and password_reset are
+// the three this app's own senders use; the field stays free-text so a new type needs no deploy.
+const EMAIL_TEMPLATE_TYPES = ['welcome', 'welcome_credentials', 'password_reset'];
+const EmailTemplates = () => {
+  const st = viewState('email-templates', { list: null, note: null, showModal: false, editItem: null, busy: false });
+  const load = async () => {
+    try {
+      const d = await API.get('/email-templates');
+      st.list = Array.isArray(d) ? d : ((d && d.items) || []);
+      st.note = null;
+    } catch (e) { st.list = []; st.note = e.message; }
+    renderApp();
+  };
+  if (st.list === null) { st.list = []; load(); }
+  const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    st.busy = true; renderApp();
+    try {
+      if (st.editItem) await API.put('/email-templates/' + st.editItem.id, data);
+      else await API.post('/email-templates', data);
+      st.showModal = false; st.busy = false; load();
+    } catch (e) { st.busy = false; renderApp(); alert(e.message); }
+  };
+  const remove = async (t) => {
+    if (!confirm('Delete the template "' + t.name + '"? Mail of that type falls back to the built-in copy.')) return;
+    try { await API.del('/email-templates/' + t.id); load(); } catch (e) { alert(e.message); }
+  };
+  const when = (v) => { if (!v) return 'never'; try { return new Date(v).toLocaleString(); } catch (e) { return String(v); } };
+  return html`<div>
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-xl font-bold">Email Templates</h2>
+        <p class="text-sm text-gray-500 mt-1">The words of the mail this app sends. A template's type is what the sender looks up; the default for a type is the one used when a workspace has none of its own.</p>
+      </div>
+      <button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ New Template</button>
+    </div>
+    ${st.note && html`<div class="card"><p class="text-sm text-red-500">Could not read the templates: ${st.note}</p></div>`}
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Type</th><th>Subject</th><th>Default</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody>${(st.list || []).map(t => html`<tr>
+          <td class="font-medium">${t.name || '-'}</td>
+          <td class="text-gray-500 font-mono" style="font-size:12px">${t.template_type || html`<span class="text-gray-400">not linked</span>`}</td>
+          <td class="text-gray-600">${t.subject || '-'}</td>
+          <td>${t.is_default ? html`<span class="badge badge-green">default</span>` : html`<span class="text-gray-400" style="font-size:12px">-</span>`}</td>
+          <td class="text-gray-500" style="font-size:12px">${when(t.updated_at)}</td>
+          <td><button class="btn btn-sm btn-outline" style="margin-right:8px" onClick=${() => show(t)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t)}>Delete</button></td>
+        </tr>`)}
+        ${(st.list || []).length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400" style="padding:28px">No templates yet. Every mail falls back to the app's built-in copy.</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && hide()}>
+      <div class="modal-content">
+        <h3 class="text-lg font-bold mb-1">${st.editItem ? 'Edit Template' : 'New Template'}</h3>
+        <p class="text-xs text-gray-500 mb-4">Placeholders use single braces, e.g. {name}, {email}, {password}, {app_name}.</p>
+        ${(() => {
+          const f = viewState('email_templates_form', { name: '', type: '', subject: '', body: '', html_body: '', is_default: false });
+          if (!st.formSeeded) {
+            f.name = (st.editItem && st.editItem.name) || '';
+            f.type = (st.editItem && st.editItem.template_type) || '';
+            f.subject = (st.editItem && st.editItem.subject) || '';
+            f.body = (st.editItem && st.editItem.body) || '';
+            f.html_body = (st.editItem && st.editItem.html_body) || '';
+            f.is_default = !!(st.editItem && st.editItem.is_default);
+            st.formSeeded = true;
+          }
+          return html`<div class="space-y-3">
+            <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} placeholder="Welcome" /></div>
+            <div><label class="text-sm font-medium block mb-1">Type (what the sender looks up)</label>
+              <input class="input" list="et-types" value=${f.type} onInput=${e => { f.type = e.target.value; }} placeholder="welcome" />
+              <datalist id="et-types">${EMAIL_TEMPLATE_TYPES.map(x => html`<option value=${x}></option>`)}</datalist>
+              <p class="text-xs text-gray-400 mt-1">${EMAIL_TEMPLATE_TYPES.join(', ')} are the types this app's senders use. A row with no type is never sent.</p></div>
+            <div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div>
+            <div><label class="text-sm font-medium block mb-1">Plain text body</label><textarea class="input" rows="6" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div>
+            <div><label class="text-sm font-medium block mb-1">HTML body (optional)</label><textarea class="input" rows="5" value=${f.html_body} onInput=${e => { f.html_body = e.target.value; }}></textarea>
+              <p class="text-xs text-gray-400 mt-1">Leave empty to send the plain text body only.</p></div>
+            <label class="text-sm flex items-center gap-2"><input type="checkbox" checked=${f.is_default} onChange=${e => { f.is_default = e.target.checked; }} />Default for this type</label>
+            <div class="flex gap-2 justify-end mt-4">
+              <button class="btn btn-outline" onClick=${() => hide()}>Cancel</button>
+              <button class="btn" disabled=${st.busy} onClick=${() => save({ name: f.name.trim(), subject: f.subject.trim(), body: f.body, html_body: f.html_body || null, template_type: f.type.trim() || null, is_default: !!f.is_default, is_html: true })}>${st.editItem ? 'Save' : 'Create Template'}</button>
             </div>
           </div>`; })()}
       </div>
@@ -2027,6 +2122,10 @@ const App = () => {
     { id: 'calendar', label: 'Calendar', icon: '📅' },
       { id: 'site-config', label: 'Site Config', icon: '🌐', adminOnly: true },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    // The platform's OWN mail wording (GET|POST /api/v1/email-templates). The route family
+    // existed with no screen at all, so an operator could change the branding on the mail but
+    // never the words in it. adminOnly: every row is platform-global (aid IS NULL).
+    { id: 'email-templates', label: 'Email Templates', icon: '📧', adminOnly: true },
     // The system mail provider (GET/PUT /admin/email-config) plus whether the last customer mail
     // actually left — the route had no screen (2026-10-14) and the ops catalogue only showed raw JSON.
     { id: 'email-provider', label: 'Email Provider', icon: '📧', adminOnly: true },
@@ -2697,7 +2796,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
   </div>`;
 };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">

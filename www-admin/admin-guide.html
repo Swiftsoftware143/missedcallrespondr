@@ -171,6 +171,14 @@
   </ul>
   <h2 id="email-templates">Email Templates</h2>
   <p>All transactional emails use the <code>email_templates</code> table with <code>{{variable}}</code> placeholder support.</p>
+  <h3>Editing the wording</h3>
+  <p>Open <strong>Email Templates</strong> in the admin console: the screen lists every template with its type, its subject and whether it is the default for that type, and a row can be created, edited or deleted there without touching the database. The same family is available over the API below.</p>
+  <ul>
+    <li><strong>Placeholders</strong> are written either as <code>{name}</code> or as <code>{{name}}</code> — the renderer accepts both, and only keys it actually knows are substituted, so anything else is sent exactly as typed.</li>
+    <li><strong>A row with no type is never sent.</strong> The sender looks a template up by <code>template_type</code>, so a template that is not linked to a type is decoration.</li>
+    <li><strong>One default per type.</strong> The default row is the one used for a mail of that type when a workspace has no template of its own; saving a second default for the same type is refused with a message that names the field.</li>
+    <li><strong>Operator only.</strong> These rows are the platform's own mail wording (every row is written with no account attached), so the screen and the API family are limited to platform-admin sessions — a workspace's own login is refused.</li>
+  </ul>
   <h3>Template Types</h3>
   <table>
     <thead><tr><th>Type</th><th>When Sent</th><th>Merge Fields</th></tr></thead>
@@ -184,7 +192,7 @@
   <table>
     <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/email-templates</code></td><td>List all templates</td></tr>
+      <tr><td>GET</td><td><code>/api/email-templates</code></td><td>List all templates (platform admin only)</td></tr>
       <tr><td>POST</td><td><code>/api/email-templates</code></td><td>Create a template</td></tr>
       <tr><td>GET</td><td><code>/api/email-templates/:id</code></td><td>Get a template</td></tr>
       <tr><td>PUT</td><td><code>/api/email-templates/:id</code></td><td>Update a template</td></tr>
