@@ -38,6 +38,13 @@ pub async fn register(
     // ever be delivered to. Normalises (trim + lowercase) as well as validates, and the normalised
     // value is what is checked, stored, put in the token and mailed.
     let email = email_addr::normalize(&req.email).map_err(AppError::Unprocessable)?;
+    // ── Display-name boundary (measured 2026-10-17) ──────────────────────────────────────
+    // This door had NO length rule while the profile screen capped at 200, and every name
+    // column here is `text` — so a 4000-character pasted paragraph was stored with a 200
+    // and became the customer's name, the derived workspace label and the welcome-mail
+    // greeting. ONE rule now, shared with `update_profile` below.
+    let name =
+        crate::security::display_name::normalize(&req.name).map_err(AppError::Unprocessable)?;
 
     // The duplicate check runs FIRST, before the Argon2 work: `register` is reachable without a
     // credential, and a hash nobody will store must not be computed for a duplicate (the shared
@@ -72,16 +79,22 @@ pub async fn register(
     let account_name = {
         let a = req.account_name.trim();
         if a.is_empty() {
-            format!("{}'s Workspace", req.name)
+            format!("{name}'s Workspace")
         } else {
-            a.to_string()
+            // The explicit label is customer-visible and was equally unbounded.
+            crate::security::display_name::normalize_capped(
+                a,
+                crate::security::display_name::MAX_NAME_CHARS,
+                "account_name",
+            )
+            .map_err(AppError::Unprocessable)?
         }
     };
     let ids = super::signup::create_account(
         &state,
         super::signup::NewAccount {
             email: &email,
-            name: &req.name,
+            name: &name,
             password_hash: &password_hash,
             // The server-minted plaintext is the ONLY delivery of that password, so the
             // `welcome_credentials` template carries it (the tag door's existing posture).
@@ -120,7 +133,7 @@ pub async fn register(
         team_member: TeamMemberResponse {
             id: ids.user_id,
             email,
-            name: req.name,
+            name: name.clone(),
             tenant_id: ids.account_id,
             role: "account_owner".into(),
         },
@@ -277,9 +290,11 @@ pub async fn change_password(
 ///
 /// The rules, in the words the console depends on. An ABSENT key leaves the stored value untouched,
 /// so a save that only sends `name` cannot blank a company the account already set. `name`, when
-/// present, must be non-blank (400) — it is the account's display name. `username` and `company`
-/// may be CLEARED by sending an empty string, because both columns are nullable. Over-long values
-/// are a 400, never a 500. Answers `{"status":"ok"}` — the shape the fleet profile contract names.
+/// present, goes through the SAME guard the signup door uses (`security::display_name`): trimmed,
+/// non-blank, at most 200 characters, no control characters — over-long or blank is a 422 naming the
+/// field, never a 500. `username` and `company` may be CLEARED by sending an empty string, because
+/// both columns are nullable; over-long values there are a 400. Answers `{"status":"ok"}` — the
+/// shape the fleet profile contract names.
 pub async fn update_profile(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
@@ -292,12 +307,13 @@ pub async fn update_profile(
     let username = req.get("username").and_then(|v| v.as_str());
     let company = req.get("company").and_then(|v| v.as_str());
 
-    if let Some(n) = name {
-        if n.trim().is_empty() {
-            return Err(AppError::BadRequest("name cannot be empty".into()));
+    let normalised_name = match name {
+        Some(n) => {
+            Some(crate::security::display_name::normalize(n).map_err(AppError::Unprocessable)?)
         }
-    }
-    for (label, v) in [("name", name), ("username", username), ("company", company)] {
+        None => None,
+    };
+    for (label, v) in [("username", username), ("company", company)] {
         if let Some(v) = v {
             if v.chars().count() > MAX_FIELD {
                 return Err(AppError::BadRequest(format!("{label} is too long")));
@@ -305,9 +321,9 @@ pub async fn update_profile(
         }
     }
 
-    if let Some(n) = name {
+    if let Some(n) = normalised_name {
         sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
-            .bind(n.trim())
+            .bind(n)
             .bind(claims.sub)
             .execute(&state.pool)
             .await?;

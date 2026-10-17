@@ -1,6 +1,7 @@
 //! Security primitives (at-rest encryption for stored credentials, inbound-webhook signature
 //! verification).
 
+pub mod display_name;
 pub mod email_addr;
 pub mod payment_provider_secrets;
 pub mod probe_addr;
