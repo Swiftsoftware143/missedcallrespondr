@@ -381,6 +381,41 @@ pub async fn top_plan(db: &PgPool) -> Result<(Uuid, String), AppError> {
     row.ok_or_else(|| AppError::NotFound("No active plan is defined".into()))
 }
 
+/// Seat THIS app's highest ACTIVE plan on a portfolio tenant.
+///
+/// David's standing rule (2026-10-04): every portfolio tenant is a sister company he owns, so it
+/// always gets the highest level of each software. Measured live 2026-10-17: NEITHER portfolio door
+/// wrote a `tenant_plans` row at all — the fleet's own pushed company "Giraudy Capital" sat on no
+/// tier — so a sister company arrived with only the free defaults while the operator believed it
+/// held the top plan, and every feature gate read that default.
+///
+/// The write itself is `seat_plan_for_tenant` (the one seat every other door uses). Best-effort ON
+/// PURPOSE: the account being provisioned is the deliverable, so an empty catalogue must never fail
+/// a provision.
+pub async fn seat_top_plan_on(state: &AppState, tenant_id: Uuid) -> Option<String> {
+    match top_plan(&state.pool).await {
+        Ok((plan_id, slug)) => {
+            match seat_plan_for_tenant(state, tenant_id, plan_id, Some("manual")).await {
+                Ok(()) => {
+                    tracing::info!(tenant = %tenant_id, plan = %slug,
+                        "portfolio tenant seated on the top plan");
+                    Some(slug)
+                }
+                Err(e) => {
+                    tracing::warn!(tenant = %tenant_id, error = ?e,
+                        "portfolio tenant: seating the top plan failed");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(tenant = %tenant_id, error = ?e,
+                "portfolio tenant: no active plan exists to seat");
+            None
+        }
+    }
+}
+
 /// GET /api/v1/admin/plan-registry — the plan × feature CATALOGUE (kanban t_dd2f7e32).
 ///
 /// One row per registry key, one column per live plan, plus the resolved value and its SOURCE for

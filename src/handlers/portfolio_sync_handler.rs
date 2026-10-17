@@ -128,6 +128,12 @@ pub async fn portfolio_sync_internal(
                     .bind(pid).bind(tid).bind(&name).bind(&tenant_slug)
                     .execute(&mut *tx).await?;
                 tx.commit().await?;
+                // One of David's own companies always gets this app's HIGHEST level (his rule,
+                // 2026-10-04). The mirror used to write only `tenants` + `portfolio_companies`, so
+                // the pushed sister company arrived on no tier at all (measured live 2026-10-17:
+                // "Giraudy Capital" had no `tenant_plans` row). Best-effort: a provision is never
+                // failed over the catalogue. See `plans_handler::seat_top_plan_on`.
+                crate::handlers::plans_handler::seat_top_plan_on(&state, tid).await;
             }
         }
         "update" => {
@@ -160,6 +166,9 @@ pub async fn portfolio_sync_internal(
                         .bind(pid).bind(tid).bind(&name).bind(&tenant_slug)
                         .execute(&mut *tx).await?;
                     tx.commit().await?;
+                    // The catch-up mirror is a portfolio company too — same rule, same best-effort
+                    // seat (see `plans_handler::seat_top_plan_on`).
+                    crate::handlers::plans_handler::seat_top_plan_on(&state, tid).await;
                 }
             }
         }

@@ -206,6 +206,13 @@ pub async fn portfolio_sync(
     .execute(&state.pool)
     .await?;
 
+    // A portfolio tenant is one of David's own companies, so it always gets this app's HIGHEST level
+    // (his rule, 2026-10-04). This door used to mint the workspace with no `tenant_plans` row at all,
+    // so the sister companies the fleet pushes here landed on the free defaults — measured live
+    // 2026-10-17 on the app's own "Giraudy Capital" tenant, which had no tier. See
+    // `plans_handler::seat_top_plan_on` (best-effort: a provision is never failed over a catalogue).
+    crate::handlers::plans_handler::seat_top_plan_on(&state, tenant_id).await;
+
     Ok(Json(json!({
         "status": "synced",
         "id": sync_id.to_string(),
