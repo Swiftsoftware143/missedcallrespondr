@@ -269,7 +269,7 @@ const Overview = () => {
       // the sentence sent a stopped customer looking for a control that does not exist. The real
       // route is the operator: `admin_handler`'s manual add (POS / adjust credits). It is named here
       // with a mail link so the only instruction on the panel is one the customer can carry out.
-      return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">No call credits left \u2014 incoming calls are being refused. Credits are added by our team, not from this screen: email <a href="mailto:support&#64;missedcallrespondr.com?subject=Add%20call%20credits" style="color:#b91c1c;text-decoration:underline">support&#64;missedcallrespondr.com</a> to top them up.</p>`;
+      return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">No call credits left \u2014 incoming calls are being refused. Credits are added by our team, not from this screen: email <a href="mailto:support@missedcallrespondr.com?subject=Add%20call%20credits" style="color:#b91c1c;text-decoration:underline">support@missedcallrespondr.com</a> to top them up.</p>`;
     }
     const cap = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al.included_credits) : null;
     const of = (cap !== null && isFinite(cap) && cap > 0) ? ' of ' + cap : '';
