@@ -25,12 +25,6 @@ pub async fn register(
     headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    // Attribution for the workspace this route is about to mint, from the `X-Swift-Harness`
-    // request HEADER only — never the body (client-controlled data the flow writes into
-    // customer-visible columns) and never a query field (kanban t_4a744754). `None` for every
-    // ordinary customer signup, so a real workspace is byte-identical to what it was before the
-    // column existed.
-    let probe_harness = crate::probe_harness::from_headers(&headers);
     // ── Address boundary (kanban t_54b1ffab) ────────────────────────────────────────────────
     // FIRST, before any SELECT and long before any INSERT. `users.email` is both the login identity
     // and the only address the welcome/credentials mail can ever reach; the handler used to bind
@@ -38,6 +32,18 @@ pub async fn register(
     // ever be delivered to. Normalises (trim + lowercase) as well as validates, and the normalised
     // value is what is checked, stored, put in the token and mailed.
     let email = email_addr::normalize(&req.email).map_err(AppError::Unprocessable)?;
+    // Attribution for the workspace this route is about to mint (kanban t_4a744754, extended
+    // 2026-10-17). The `X-Swift-Harness` HEADER names the harness when the caller sends one; the
+    // ADDRESS is the fallback, because every domain in `crate::security::probe_addr` is fleet-
+    // owned / non-routable — the same predicate that suppresses their mail — so a workspace minted
+    // on one is fleet machinery by construction. Neither arm reads the request body (client data
+    // the flow writes into customer-visible columns), and `None` leaves an ordinary customer's row
+    // byte-identical to what it was before the column existed.
+    //
+    // Measured 2026-10-17: a sweep of all six app databases found 35 probe workspaces minted in
+    // the previous hour with this column NULL on every one, so the only detector left was the
+    // workspace NAME — which is why innocuously-named ones survived sweep after sweep.
+    let probe_harness = crate::probe_harness::for_signup(&headers, &email);
     // ── Display-name boundary (measured 2026-10-17) ──────────────────────────────────────
     // This door had NO length rule while the profile screen capped at 200, and every name
     // column here is `text` — so a 4000-character pasted paragraph was stored with a 200

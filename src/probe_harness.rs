@@ -68,10 +68,81 @@ fn normalise(raw: &str) -> Option<String> {
     Some(marker)
 }
 
+/// The marker to store for the workspace the SIGNUP route is about to mint (kanban `t_4a744754`
+/// follow-up, measured 2026-10-17).
+///
+/// Two arms, in order:
+///
+/// 1. the `X-Swift-Harness` request header, exactly as [`from_headers`] reads it; then
+/// 2. a SERVER-DERIVED marker when the recipient's own address is on a fleet harness / reserved
+///    domain (`crate::security::probe_addr::harness_domain` — the same predicate the mail layer
+///    uses to suppress those sends).
+///
+/// WHY THE SECOND ARM EXISTS. A sweep of all six app databases on 2026-10-17 found 35 probe
+/// workspaces minted inside the previous hour, and NOT ONE carried this column: the harnesses
+/// that mint them do not send the header, so the only detector left was guessing at the workspace
+/// NAME — and a harness that names its workspace innocuously ("Credit Note Probe's Workspace",
+/// "Len Probe") then survives every sweep until the name pattern happens to grow a matching word.
+/// Attribution is supposed to be DATA, and this is the one data the request cannot fake: the
+/// address decides the mail destination anyway, and every domain in `harness_domain` is
+/// fleet-owned / non-routable, so a workspace created on one is fleet machinery by construction.
+///
+/// A real customer is untouched: their domain is not in that list, so the answer is `None` and the
+/// row is written exactly as it was before this column existed. The marker cannot be used to
+/// mislabel a real workspace either — it is derived from the recipient domain, never from a
+/// client-supplied string, and a customer on a reserved domain could not receive the credentials
+/// mail in the first place.
+pub fn for_signup(headers: &HeaderMap, email: &str) -> Option<String> {
+    if let Some(marker) = from_headers(headers) {
+        return Some(marker);
+    }
+    crate::security::probe_addr::harness_domain(email).map(|domain| format!("auto-{domain}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn a_signup_on_a_fleet_harness_domain_is_attributed_without_a_header() {
+        // Measured defect 2026-10-17: probe workspaces minted through this route carried no marker
+        // at all, so the only detector was guessing at their NAME.
+        let none = HeaderMap::new();
+        assert_eq!(
+            for_signup(&none, "probe-tagproof1792235151@example.invalid").as_deref(),
+            Some("auto-example.invalid")
+        );
+        assert_eq!(
+            for_signup(&none, "mcrsweep1791551633@swiftsoftware.dev").as_deref(),
+            Some("auto-swiftsoftware.dev")
+        );
+        // a subdomain classifies like its parent, because harness_domain() does
+        assert_eq!(
+            for_signup(&none, "x@mail.swiftsoftware.net").as_deref(),
+            Some("auto-swiftsoftware.net")
+        );
+    }
+
+    #[test]
+    fn a_real_customer_address_is_still_null() {
+        // The whole point of the second arm: an ordinary domain writes the row byte-identically.
+        let none = HeaderMap::new();
+        assert_eq!(for_signup(&none, "customer@gmail.com"), None);
+        assert_eq!(for_signup(&none, "owner@their-business.com"), None);
+        assert_eq!(for_signup(&none, "not an address"), None);
+        // a domain that merely CONTAINS the harness name is not the harness class
+        assert_eq!(for_signup(&none, "x@notswiftsoftware.dev"), None);
+    }
+
+    #[test]
+    fn the_header_wins_over_the_address_arm() {
+        // A harness that names itself keeps its own attribution, even from a harness domain.
+        assert_eq!(
+            for_signup(&headers_with("verify-x"), "probe@example.invalid").as_deref(),
+            Some("verify-x")
+        );
+    }
 
     fn headers_with(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
