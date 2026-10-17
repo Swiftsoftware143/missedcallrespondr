@@ -398,8 +398,17 @@ pub async fn add_credits(
             // row the planner happened to return first — the same inconsistent-sort_order class as
             // the Plans list. The tie now breaks on price, then name, so a credit grant can never
             // seat the $199 tier by accident.
+            //
+            // ACTIVE ONLY, cheapest first (measured live 2026-10-17): the operator RETIRED "Pro"
+            // (is_active=false, sort_order 0, $49) when "Pro Monthly" replaced it, and the old
+            // ordering still picked the retired row for a credit grant — so a tenant with no plan
+            // silently received 100 leads / 50 tags / dual routing, i.e. a paid tier's entitlements,
+            // from a grant that only ever promises credits. A grant is not a purchase: seat the
+            // cheapest plan the operator still offers (the free tier, when there is one) and never
+            // one they have switched off.
             let plan = sqlx::query_scalar::<_, Uuid>(
-                "SELECT id FROM plans ORDER BY sort_order ASC, price_monthly ASC, name ASC LIMIT 1",
+                "SELECT id FROM plans WHERE is_active = true \
+                 ORDER BY price_monthly ASC NULLS LAST, sort_order ASC, name ASC LIMIT 1",
             )
             .fetch_optional(&state.pool)
             .await?;
