@@ -113,8 +113,25 @@ const API = (() => {
   const post = (p, b) => send(p, { method: 'POST', headers: headers(), body: JSON.stringify(b) });
   const put = (p, b) => send(p, { method: 'PUT', headers: headers(), body: JSON.stringify(b) });
   const del = (p) => send(p, { method: 'DELETE', headers: headers() });
+  // A WRONG CURRENT PASSWORD IS A 401 BY CONTRACT, NOT A DEAD SESSION (2026-10-17). PUT /auth/password
+  // answers 401 "Current password is incorrect" NAMING the field (src/auth/handlers.rs:275), while
+  // send() ends the session on ANY 401 that carried a token — so a mistyped current password signed
+  // the customer out and the sentence never appeared (measured in real Chromium, PRE arm of
+  // browser-run/mcr-pw401-1017.js). This call keeps the two apart: only a 401 that is NOT the field's
+  // own refusal ends the session; the field's sentence is thrown back with `field: true`.
+  const changePassword = (current_password, new_password) => fetch(base + '/auth/password', {
+    method: 'PUT', headers: headers(), body: JSON.stringify({ current_password, new_password })
+  }).then(async (r) => {
+    let d = {};
+    try { d = await r.json(); } catch (e) { /* a non-JSON refusal still has a status */ }
+    if (r.ok) return d;
+    const msg = (d && (d.error || d.message)) || ('Request failed (' + r.status + ')');
+    const fieldRefusal = r.status === 401 && /current password/i.test(String(msg));
+    if (r.status === 401 && !fieldRefusal) sessionEnded();
+    const err = new Error(msg); err.status = r.status; err.field = fieldRefusal; throw err;
+  });
   return {
-    get, post, put, del,
+    get, post, put, del, changePassword,
     get token() { return token; },
     get user() { return user; },
     setAuth(t, u) { token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
@@ -540,9 +557,13 @@ const Profile = () => {
     if (st.next !== st.confirm) { st.error = 'The two new passwords do not match'; renderApp(); return; }
     st.busy = true; renderApp();
     try {
-      await API.put('/auth/password', { current_password: st.cur, new_password: st.next });
+      await API.changePassword(st.cur, st.next);
       st.notice = 'Password updated'; st.cur = ''; st.next = ''; st.confirm = '';
-    } catch (e) { st.error = 'Password change failed: ' + e.message; }
+    } catch (e) {
+      // A field refusal is the server's sentence about the box, not a failed request: show it as
+      // written (the card below the heading is where this view reports results) and stay signed in.
+      st.error = (e && e.field) ? e.message : ('Password change failed: ' + e.message);
+    }
     st.busy = false; renderApp();
   };
 
