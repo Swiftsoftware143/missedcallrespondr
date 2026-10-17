@@ -180,6 +180,7 @@ const LoginView = () => {
         ${S.sessionEnded && html`<div class="text-amber-800 text-sm bg-amber-50 p-2 rounded-lg">Your session ended, so you were signed out. Sign in again to carry on.</div>`}
         ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
         <button type="submit" class="btn w-full">Sign In</button>
+        <a href="https://app.missedcallrespondr.com/forgot-password.html" class="block text-center text-sm text-indigo-600 hover:underline mt-3">Forgot password?</a>
       </form>
     </div>
   </div>`;
