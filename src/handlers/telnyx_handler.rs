@@ -104,26 +104,32 @@ async fn tenant_id_for_number(pool: &sqlx::PgPool, called_number: &str) -> Resul
         .ok_or_else(|| AppError::NotFound(format!("No tenant found for number: {}", called_number)))
 }
 
-/// Deduct one credit from the tenant; returns `false` if balance <= 0 after deduction.
+/// Take ONE credit for this call; `true` when the call may proceed.
+///
+/// Measured defect (2026-10-17): this used to decrement FIRST and then answer `balance > 0`, so a
+/// tenant holding exactly one credit had it taken and was hung up on — fifty starter credits bought
+/// forty-nine handled calls, and the refused call still incremented `lifetime_credits`. The
+/// condition now lives in the UPDATE itself: a row is returned only when a credit was actually
+/// there to spend, so "no credit" spends nothing (no balance move, no lifetime bump, no charge for
+/// a call we refuse) and the LAST credit is spent on the last call it can pay for.
 async fn deduct_credit(pool: &sqlx::PgPool, tenant_id: Uuid) -> Result<bool, AppError> {
     let result = sqlx::query_scalar::<_, Option<i32>>(
         "UPDATE tenant_plans
-         SET credit_balance = GREATEST(credit_balance - 1, 0),
+         SET credit_balance = credit_balance - 1,
              lifetime_credits = lifetime_credits + 1,
              updated_at = NOW()
-         WHERE tenant_id = $1
+         WHERE tenant_id = $1 AND credit_balance > 0
          RETURNING credit_balance",
     )
     .bind(tenant_id)
     .fetch_optional(pool)
     .await?;
 
+    // A returned row means the UPDATE matched and applied; `None` means the tenant had no active
+    // plan row OR no credit left, and in both cases nothing was written above.
     match result {
-        Some(Some(balance)) => Ok(balance > 0),
-        _ => {
-            // No plan row exists or NULL — treat as insufficient credits
-            Ok(false)
-        }
+        Some(Some(_)) => Ok(true),
+        _ => Ok(false),
     }
 }
 
@@ -456,7 +462,7 @@ async fn process_webhook_event(state: &AppState, body: &Value) -> ApiResult<Json
     let byok = tenant_has_own_telnyx(&state.pool, tenant_id).await?;
 
     if !byok {
-        // -- 5. Deduct a credit
+        // -- 5. Spend a credit, if one is left (see `deduct_credit`: the last credit pays for a call)
         let has_credits = deduct_credit(&state.pool, tenant_id).await?;
         if !has_credits {
             tracing::warn!(

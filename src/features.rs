@@ -505,12 +505,32 @@ pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value
             "max_users",
             "max_leads",
             "max_tags",
+            // The plan's call-credit grant. Read through the SAME resolver as the ceilings above so
+            // the console can say "12 of 50" without a second source of truth.
+            "included_credits",
         ] {
             if let Ok((Some(v), _)) = resolve_limit(pool, &slug, key).await {
                 allowances.insert(key.to_string(), serde_json::json!(v));
             }
         }
     }
+    // ── Call credits left (measured defect, 2026-10-17) ─────────────────────────────────────────
+    // Every inbound call handled on the platform's own Telnyx number spends one credit
+    // (`telnyx_handler::deduct_credit`), and a tenant with none is hung up on — but the balance lived
+    // ONLY in `tenant_plans.credit_balance`, so the customer whose automatic replies had stopped had
+    // no screen anywhere telling them why. This is that read: the live balance beside the plan that
+    // granted it. A tenant with no active plan row reports 0, which is exactly what the deduction
+    // sees.
+    let credits: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(credit_balance, 0) FROM tenant_plans \
+         WHERE tenant_id = $1 AND status = 'active' LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(0);
     serde_json::json!({
         "contacts": contacts,
         "leads": leads,
@@ -518,6 +538,7 @@ pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value
         "phone_numbers": phone_numbers,
         "rules": rules,
         "users": users,
+        "credits": credits,
         "allowances": allowances
     })
 }

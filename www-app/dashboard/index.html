@@ -255,6 +255,20 @@ const Overview = () => {
     if (cap === 0) return base + ' \u2014 not on this plan';
     return base + ' of ' + cap + ((typeof used === 'number' && used > cap) ? ' \u26a0' : '');
   };
+  // The call credits this account has LEFT (measured gap, 2026-10-17). Every inbound call handled
+  // on the platform's own number spends one, and at zero the call is hung up — so the balance is
+  // shown beside the plan that granted it instead of living only in the database. A tenant on its
+  // own Telnyx key is never charged, so its balance simply stays put.
+  const creditNote = (u) => {
+    const n = u && u.credits;
+    if (typeof n !== 'number' || !isFinite(n)) return '';
+    if (n <= 0) {
+      return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">No call credits left \u2014 incoming calls are being refused. Add credits to resume automatic replies.</p>`;
+    }
+    const cap = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al.included_credits) : null;
+    const of = (cap !== null && isFinite(cap) && cap > 0) ? ' of ' + cap : '';
+    return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">${n}${of} call credit${n === 1 ? '' : 's'} left</p>`;
+  };
   // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
   // is honest rather than invisible.
   const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added' };
@@ -284,7 +298,7 @@ const Overview = () => {
           : (rate === null ? 'Not measured yet' : rate + '% of calls answered or sent an automatic reply')}</p></div>
       <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
         <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || 'Free'}</span></p>
-        <p class="text-sm text-gray-600 mt-2">${withCap(u.rules, 'max_rules', 'response rule', 'response rules')} · ${withCap(u.phone_numbers, 'max_phone_numbers', 'phone number', 'phone numbers')} · ${withCap(u.contacts, 'max_contacts', 'contact', 'contacts')}</p></div>
+        <p class="text-sm text-gray-600 mt-2">${withCap(u.rules, 'max_rules', 'response rule', 'response rules')} · ${withCap(u.phone_numbers, 'max_phone_numbers', 'phone number', 'phone numbers')} · ${withCap(u.contacts, 'max_contacts', 'contact', 'contacts')}</p>${creditNote(u)}</div>
     </div>
     <div class="card mt-4"><h3 class="font-semibold mb-2">Recent activity</h3>
       ${(st.activity && st.activity.length)
