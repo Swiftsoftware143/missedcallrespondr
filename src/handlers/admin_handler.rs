@@ -302,7 +302,7 @@ pub async fn list_all_tenants(
     // member. NULL only when the workspace has no user row at all (e.g. a portfolio-sync row).
     let rows = sqlx::query(
         r#"SELECT 
-            t.id, t.name, t.slug, t.created_at, t.probe_harness,
+            t.id, t.name, t.slug, t.created_at, COALESCE(t.probe_harness, '') AS probe_harness,
             tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
             tp.credit_balance,
             p.name as plan_name, p.price_monthly, p.price_yearly,

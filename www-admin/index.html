@@ -1746,8 +1746,12 @@ const ownerCell = (t) => {
   const oe = String((t && (t.owner_email || t.email)) || '').trim();
   const tag = String((t && t.probe_harness) || '').trim();
   const probe = Boolean(tag) || isProbeAddress(oe);
+  // The tooltip names the harness the COLUMN recorded (fleet shape, kanban t_c13803ad): the column
+  // is authoritative and the address arms are only the fallback for rows minted before it existed.
   const badge = probe
-    ? html` <span class="badge badge-yellow" title=${'a fleet probe, not a customer' + (tag ? ' (' + tag + ')' : '')}>probe</span>`
+    ? html` <span class="badge badge-yellow" title=${tag
+        ? 'minted by the "' + tag + '" test harness — a probe, not a customer'
+        : 'a reserved or fleet-probe address — a probe, not a customer'}>probe</span>`
     : '';
   if (!oe) return html`<span class="text-gray-400">—</span>${badge}`;
   return html`<span class="text-gray-500">${oe}</span>${badge}`;
