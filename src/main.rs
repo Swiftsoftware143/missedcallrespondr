@@ -10,6 +10,7 @@ mod error;
 mod feature_registry;
 mod features;
 mod handlers;
+mod image_store;
 mod models;
 // Attribution for a workspace a test harness mints through the public signup
 // (`X-Swift-Harness`, kanban t_4a744754) — see `probe_harness`.

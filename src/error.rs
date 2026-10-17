@@ -16,6 +16,10 @@ pub enum AppError {
     Internal(String),
     Conflict(String),
     UpgradeRequired(String),
+    /// 413 — the upload is bigger than the envelope. Carries the sentence the file picker shows, so
+    /// an operator who chose a large photo is told what to do instead of being handed the body
+    /// reader's words ("length limit exceeded").
+    PayloadTooLarge(String),
     /// Well-formed JSON whose *content* is invalid — the one refusal the request-body layer cannot
     /// make for us. Added by kanban t_54b1ffab for the email-format boundary: 422 with
     /// `{"error": "email: …"}`. The distinction from `BadRequest` is deliberate and narrow: the
@@ -54,6 +58,7 @@ impl IntoResponse for AppError {
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::UpgradeRequired(msg) => (StatusCode::PAYMENT_REQUIRED, msg),
+            AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
             AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
             AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             AppError::UpstreamRefused(msg) => (StatusCode::FAILED_DEPENDENCY, msg),

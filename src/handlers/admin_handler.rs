@@ -485,6 +485,7 @@ fn refusal_message(e: &AppError) -> String {
         | AppError::Internal(m)
         | AppError::Conflict(m)
         | AppError::UpgradeRequired(m)
+        | AppError::PayloadTooLarge(m)
         | AppError::Unprocessable(m)
         | AppError::ServiceUnavailable(m)
         | AppError::UpstreamRefused(m) => m.clone(),
