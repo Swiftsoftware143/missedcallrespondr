@@ -318,6 +318,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000038_tenants_probe_harness",
             include_str!("../migrations/000038_tenants_probe_harness.sql"),
         ),
+        // The legacy $49 `pro` row went live beside `pro-monthly`, so the customer's Plan &
+        // Billing screen offered TWO identical "$49 / month" tiles and the legacy one carried no
+        // credit grant (measured live 2026-10-17: GET /api/v1/plans -> 2 active $49 plans).
+        // `pro` is the pre-credit-system row, no tenant sits on it, and the marketing page sells
+        // `pro-monthly`. Data-only + idempotent, because this runner re-executes every file each
+        // boot and keeps no ledger.
+        (
+            "000039_retire_duplicate_pro_plan",
+            include_str!("../migrations/000039_retire_duplicate_pro_plan.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
