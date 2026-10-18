@@ -587,3 +587,217 @@ pub async fn get_usage(
     let usage = crate::features::get_usage_json(&state.pool, tid).await;
     Ok(Json(usage))
 }
+
+// ── SIGN-IN ADDRESS CHANGE (kanban t_0d1aa081) ──────────────────────────────────────────────────
+//
+// Ported from the fleet's proven flow (IncentiveSwift t_6b2702e3; FunnelSwift/WorkflowSwift carried
+// it first) — same two routes, same table name, the same sentences. The app-specific translation is
+// only the identity table: MCR's sign-in row is `users`, so the owner key is `user_id`.
+//
+// Two arms, and the split is the safety property:
+//   * REQUEST is authenticated and writes the SESSION's own row (no path id to spoof, the rule
+//     `upload_avatar` already follows), mails a link to the NEW address, and moves nothing;
+//   * CONFIRM is anonymous because a link opened from a mailbox carries no session — the token IS
+//     the credential. It is listed in `auth::route_policy::PUBLIC_ROUTES`; the request twin is
+//     deliberately NOT, and a test asserts both.
+
+/// Body of `POST /api/v1/auth/email-change`.
+#[derive(serde::Deserialize)]
+pub struct EmailChangeInput {
+    pub new_email: String,
+}
+
+/// Body of `POST /api/v1/auth/email-change/confirm`. The token IS the credential the customer just
+/// received by mail.
+#[derive(serde::Deserialize)]
+pub struct ConfirmEmailChangeInput {
+    pub token: String,
+}
+
+/// `POST /api/v1/auth/email-change` — ask to move the caller's OWN sign-in address.
+///
+/// Writes ONE pending `email_changes` row and mails a confirmation link to the NEW address;
+/// `users.email` does not move until that link is opened. That is what stops a typo (or a hostile
+/// edit by someone holding a borrowed session) from locking a customer out of their own account.
+///
+/// Uniqueness is checked here so a clash reads as a sentence rather than a 500 out of the
+/// `users_email_key` constraint, and again at confirm time because the address can be taken in
+/// between.
+pub async fn request_email_change(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(body): Json<EmailChangeInput>,
+) -> Result<Json<Value>, AppError> {
+    // Normalises (trim + lowercase) as well as validates — the stored value must be the address
+    // that can actually receive the link, the same rule `register` follows. A malformed value is a
+    // 400 with the boundary's own sentence (the fleet contract this flow answers), not a 422.
+    let new_email = email_addr::normalize(&body.new_email).map_err(AppError::BadRequest)?;
+
+    let current: Option<(String, String)> =
+        sqlx::query_as("SELECT email, COALESCE(name, '') FROM users WHERE id = $1")
+            .bind(claims.sub)
+            .fetch_optional(&state.pool)
+            .await?;
+    let (current_email, name) =
+        current.ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if current_email.eq_ignore_ascii_case(&new_email) {
+        return Err(AppError::BadRequest(
+            "That is already your sign-in address".to_string(),
+        ));
+    }
+
+    if super::signup::email_taken(&state.pool, &new_email).await? {
+        return Err(AppError::BadRequest(
+            "That address is already used by another account".to_string(),
+        ));
+    }
+
+    let token = uuid::Uuid::new_v4().to_string();
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(2);
+
+    // One live request per user: retire the previous row before inserting the new one, so a
+    // customer who mistyped once cannot redeem the older link afterwards.
+    sqlx::query("UPDATE email_changes SET used = true WHERE user_id = $1 AND used = false")
+        .bind(claims.sub)
+        .execute(&state.pool)
+        .await
+        .ok();
+
+    sqlx::query(
+        "INSERT INTO email_changes (user_id, new_email, token, expires_at)
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(claims.sub)
+    .bind(&new_email)
+    .bind(&token)
+    .bind(expires_at)
+    .execute(&state.pool)
+    .await?;
+
+    let app_url = crate::branding::APP_URL;
+    let link = format!("{app_url}/confirm-email-change?token={token}");
+    let greeting = if name.trim().is_empty() {
+        "there"
+    } else {
+        name.trim()
+    };
+    let vars = serde_json::json!({
+        "name": greeting,
+        "new_email": new_email,
+        "link": link,
+        "token": token,
+        "app_url": app_url,
+    });
+    // `claims.aid` is the tenant the account belongs to: it selects the per-account branding and
+    // the account's own template row (or the app default), exactly as the welcome/reset mails do.
+    if let Err(e) = crate::email::send_template_email(
+        &state.pool,
+        claims.aid,
+        &new_email,
+        "email_change",
+        &vars,
+    )
+    .await
+    {
+        tracing::error!(
+            "email-change: the confirmation mail could not be handed to the provider for {}: {}",
+            new_email,
+            e
+        );
+        // No link reached the customer, so the pending row must not look redeemable.
+        sqlx::query("UPDATE email_changes SET used = true WHERE token = $1")
+            .bind(&token)
+            .execute(&state.pool)
+            .await
+            .ok();
+        return Err(AppError::BadRequest(
+            "We could not send the confirmation link, so nothing was changed. Try again in a moment."
+                .to_string(),
+        ));
+    }
+
+    // A reserved test address (RFC-2606, or a domain the fleet harness owns) is withheld at the
+    // sender — `email::send_email_request` never hands it to a relay — so say that plainly instead
+    // of telling the caller to check a mailbox that can never receive mail.
+    let withheld = crate::security::probe_addr::harness_domain(&new_email).is_some();
+
+    Ok(Json(serde_json::json!({
+        "status": "pending",
+        "delivered": !withheld,
+        "new_email": new_email,
+        "message": if withheld {
+            "This address is a reserved test address, so no mail was sent. Nothing has been changed."
+        } else {
+            "Check the new address for a confirmation link. Your sign-in email stays the same until you open it."
+        },
+    })))
+}
+
+/// `POST /api/v1/auth/email-change/confirm` — anonymous by necessity: the token IS the credential
+/// the customer just received, and a link opened in a browser carries no session.
+///
+/// Reads ONE unexpired `email_changes` row, moves that user's OWN `users.email` and nothing else,
+/// and marks the row used so a forwarded link cannot be replayed.
+pub async fn confirm_email_change(
+    State(state): State<AppState>,
+    Json(body): Json<ConfirmEmailChangeInput>,
+) -> Result<Json<Value>, AppError> {
+    let token = body.token.trim().to_string();
+    if token.is_empty() {
+        return Err(AppError::BadRequest(
+            "The confirmation link is missing its code".to_string(),
+        ));
+    }
+
+    let row: Option<(uuid::Uuid, uuid::Uuid, String)> = sqlx::query_as(
+        "SELECT id, user_id, new_email FROM email_changes
+         WHERE token = $1 AND used = false AND expires_at > NOW()",
+    )
+    .bind(&token)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (change_id, user_id, new_email) = row.ok_or_else(|| {
+        AppError::BadRequest("That confirmation link is invalid or has expired".to_string())
+    })?;
+
+    // The address may have been taken between the request and this confirmation.
+    let taken: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = $1 AND id <> $2 LIMIT 1")
+            .bind(&new_email)
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if taken.is_some() {
+        return Err(AppError::BadRequest(
+            "That address has since been used by another account, so nothing was changed"
+                .to_string(),
+        ));
+    }
+
+    let moved: Option<String> = sqlx::query_scalar(
+        "UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 RETURNING email",
+    )
+    .bind(&new_email)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let moved = moved.ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    sqlx::query("UPDATE email_changes SET used = true WHERE id = $1")
+        .bind(change_id)
+        .execute(&state.pool)
+        .await?;
+
+    tracing::info!(
+        "email-change: user {} moved its sign-in address to {}",
+        user_id,
+        moved
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "email": moved,
+        "message": "Your sign-in address has been changed. Use it the next time you sign in.",
+    })))
+}

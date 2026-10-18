@@ -37,6 +37,17 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/auth/reset-password",
             post(auth_handlers::reset_password),
         )
+        // The CONFIRM half of the sign-in-address change (kanban t_0d1aa081). Anonymous by
+        // necessity: it is opened from a mailbox link, which carries no session, so the token in
+        // the body IS the credential. Named in `crate::auth::route_policy::PUBLIC_ROUTES`; it reads
+        // ONE unexpired `email_changes` row, moves that row's own `users.email` and marks the row
+        // used (so a forwarded link cannot be replayed). The REQUEST twin below stays on the gated
+        // router and must never be added to that list — asking to move an address acts on the
+        // caller's own session.
+        .route(
+            "/api/v1/auth/email-change/confirm",
+            post(auth_handlers::confirm_email_change),
+        )
         // The profile picture READ (kanban t_9cd2c8f2). An `<img src>` cannot carry a bearer token,
         // so this ONE route is anonymous and is named in `crate::auth::route_policy::PUBLIC_ROUTES`.
         // It returns only the bytes one uuid-keyed user uploaded, under the content type sniffed at
@@ -148,6 +159,16 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
+        // The REQUEST half of the sign-in-address change (kanban t_0d1aa081). Authenticated on
+        // purpose: it writes the SESSION's own `users` row (no path id to spoof) and only a pending
+        // `email_changes` row — the address itself moves when the link mailed to the NEW address is
+        // opened, which is the confirm arm on the public router above. This path is NOT in
+        // `auth::route_policy::PUBLIC_ROUTES` and must never be (asserted by
+        // `the_deliberate_public_surfaces_stay_public`).
+        .route(
+            "/api/v1/auth/email-change",
+            post(auth_handlers::request_email_change),
+        )
         // The profile picture UPLOAD (kanban t_9cd2c8f2): the body IS the raw image. The effective
         // cap is axum's own `DefaultBodyLimit` (2 MiB), enforced upstream by the body-read deadline
         // middleware — which buffers through the same `Bytes` extractor and therefore refuses an

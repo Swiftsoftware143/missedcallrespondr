@@ -336,6 +336,13 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000040_email_send_log",
             include_str!("../migrations/000040_email_send_log.sql"),
         ),
+        // The pending half of the sign-in-address change (kanban t_0d1aa081): one row per request,
+        // redeemed or retired by the two `/api/v1/auth/email-change` arms. Catalog-only and
+        // idempotent, because this runner keeps NO ledger and re-executes every file each boot.
+        (
+            "000041_email_changes",
+            include_str!("../migrations/000041_email_changes.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

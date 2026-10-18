@@ -14,20 +14,21 @@
 //! joined (card t_7bdfcc4a — PROTECTED, so the two anonymous lists are untouched); the 119/104
 //! quoted here until then was one adrift of the code (the tenant plan catalogue of card
 //! t_a57ae7db had been added to the router and to the census TEST but not to this prose), so the
-//! numbers below are the measured ones: 122 = 15 anonymous + 107 protected (re-measured
-//! 2026-10-18 after the admin email send-history read joined — PROTECTED, so the two anonymous
-//! lists are untouched).
+//! numbers below are the measured ones: 124 = 16 anonymous + 108 protected (re-measured 2026-10-18
+//! after the sign-in-address change joined, card t_0d1aa081 — its CONFIRM arm is anonymous so the
+//! deliberate-public list went 12 → 13; the admin email send-history read before it was PROTECTED,
+//! so the two anonymous lists were untouched by that one).
 //! re-measured 2026-10-08 after the account/profile card t_9cd2c8f2
 //! added the two avatar routes; re-measured 2026-10-10 after the admin bulk-retire arm joined,
 //! card t_31951eca)
 //!
 //! ```text
-//!   122 mounted `.route(..)` entries in the one routing file, 122 distinct paths (every path is
+//!   124 mounted `.route(..)` entries in the one routing file, 124 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   107 entries reach `protected_routes`, which carries `auth_middleware`
-//!    15 entries reach the ANONYMOUS `public_routes`:
-//!        12 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   108 entries reach `protected_routes`, which carries `auth_middleware`
+//!    16 entries reach the ANONYMOUS `public_routes`:
+//!        13 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -106,6 +107,14 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     "/api/v1/auth/login",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
+    // --- the token IS the credential: sign-in-address change CONFIRM (kanban t_0d1aa081) -------
+    // This arm is opened from a LINK IN A MAILBOX, so it carries no session and cannot: the token
+    // in its body is the whole credential. It reads ONE unexpired `email_changes` row, moves that
+    // row's own `users.email`, marks the row used (a forwarded link cannot be replayed) and
+    // re-checks uniqueness because the address can be taken between request and confirm. The
+    // REQUEST twin (`/api/v1/auth/email-change`) acts on the SESSION's own row and is deliberately
+    // NOT here — it answers an anonymous caller with the boundary's 401.
+    "/api/v1/auth/email-change/confirm",
     // --- public catalogue ----------------------------------------------------------------------
     // Read BEFORE a session exists: the signup wizard and the integrations screen populate their
     // provider picker from it. Returns the platform integration vocabulary (key, name, icon) and is
@@ -396,6 +405,14 @@ mod tests {
         assert!(!is_public_route("/api/v1/auth/avatar"));
         assert!(!is_public_route("/api/v1/auth/avatar/x/extra"));
 
+        // The sign-in-address change (kanban t_0d1aa081): ONLY the CONFIRM arm is anonymous — the
+        // token in its body IS the credential a mailbox link carries. The REQUEST twin acts on the
+        // caller's session and must answer an anonymous caller with 401, and a longer path under
+        // the confirm arm is a different route.
+        assert!(is_public_route("/api/v1/auth/email-change/confirm"));
+        assert!(!is_public_route("/api/v1/auth/email-change"));
+        assert!(!is_public_route("/api/v1/auth/email-change/confirm/x"));
+
         // The per-account email-branding logo READ (kanban t_feab8aff): one segment, and ONLY the
         // read — the write twins have no trailing segment and must stay private.
         assert!(is_public_route("/api/v1/branding/logo/account-one"));
@@ -481,15 +498,18 @@ mod tests {
     /// from the code without a test failing.
     #[test]
     fn the_census_shape_is_what_the_docs_say() {
-        assert_eq!(super::PUBLIC_ROUTES.len(), 12, "PUBLIC_ROUTES size");
+        assert_eq!(super::PUBLIC_ROUTES.len(), 13, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
-        // The 15 anonymous mounts the census found: 12 deliberate + 3 key receivers.
+        // The 16 anonymous mounts the census found: 13 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            15
+            16
         );
-        // 122 entries / 122 distinct paths (the admin email send-history read joined on 2026-10-18 —
-        // a PROTECTED mount, so the two anonymous lists stay at 12 + 3; the payment-key check joined
+        // 124 entries / 124 distinct paths (the sign-in-address change joined on 2026-10-18, card
+        // t_0d1aa081 — its CONFIRM arm is an anonymous mount, so PUBLIC_ROUTES went 12 → 13 and the
+        // anonymous total 15 → 16; its REQUEST twin is a PROTECTED mount, so protected went
+        // 107 → 108. The admin email send-history read joined on 2026-10-18 — a PROTECTED mount, so
+        // the two anonymous lists stayed at 12 + 3; the payment-key check joined
         // on 2026-10-16, card t_7bdfcc4a — a PROTECTED mount, so the two anonymous lists stay at
         // 12 + 3; and the tenant plan catalogue of card t_a57ae7db was already counted). The avatar
         // read + its private upload twin joined on
@@ -499,11 +519,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 122, "mounted .route entries");
+        assert_eq!(lits.len(), 124, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 122, "distinct mounted paths");
+        assert_eq!(uniq.len(), 124, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

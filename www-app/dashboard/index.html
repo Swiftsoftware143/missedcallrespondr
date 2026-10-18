@@ -478,7 +478,10 @@ const Profile = () => {
   const st = viewState('profile', {
     name: null, company: null, username: null, picture: null,
     notice: null, error: null, busy: false, bust: null,
-    cur: '', next: '', confirm: ''
+    cur: '', next: '', confirm: '',
+    // The sign-in-address change (kanban t_0d1aa081): the draft address, the server's sentence
+    // (an error or a confirmation), and its own busy flag so a send cannot lock the whole card.
+    ecNew: '', ecMsg: null, ecErr: null, ecBusy: false
   });
   // Seed the drafts ONCE from the account row (never on every render — that is what wiped typed
   // values in the sibling consoles).
@@ -551,6 +554,34 @@ const Profile = () => {
     st.busy = false; renderApp();
   };
 
+  // ── SIGN-IN EMAIL (kanban t_0d1aa081) ─────────────────────────────────────────────────────────
+  // The address field above stays READ-ONLY, and this is the block that can move it. Moving is a
+  // TWO-ARM flow on purpose: this form only ASKS — `POST /auth/email-change` writes ONE pending
+  // `email_changes` row and mails a confirmation link to the NEW address — and nothing moves until
+  // the person who controls that mailbox opens the link. That is what stops a typo (or someone
+  // holding a borrowed session) from locking a customer out of their own account.
+  //
+  // The refusals (not an address / already your address / address taken / mail could not be sent)
+  // are 400s carrying the server's own sentence, so they land beside the field rather than as a
+  // failed save. A reserved test address answers `delivered:false`: the sender withheld the mail,
+  // and the sentence it returns says exactly that — nothing was sent, nothing changed.
+  const sendEmailChange = async () => {
+    const next = (st.ecNew || '').trim();
+    st.ecMsg = null; st.ecErr = null;
+    if (!next) { st.ecErr = 'Enter the new email address.'; renderApp(); return; }
+    st.ecBusy = true; renderApp();
+    try {
+      const d = await API.post('/auth/email-change', { new_email: next });
+      if (d && d.delivered === false) {
+        st.ecErr = d.message || 'That address cannot receive mail, so nothing was sent.';
+      } else {
+        st.ecNew = '';
+        st.ecMsg = (d && d.message) || 'Check the new address for the confirmation link.';
+      }
+    } catch (e) { st.ecErr = (e && e.message) || 'Could not start the change.'; }
+    st.ecBusy = false; renderApp();
+  };
+
   const changePw = async () => {
     st.notice = null; st.error = null;
     if (!st.next || st.next.length < 8) { st.error = 'New password must be at least 8 characters'; renderApp(); return; }
@@ -597,6 +628,20 @@ const Profile = () => {
             <div style="padding:8px 0"><span id="profile-level" class="badge badge-blue">${c.plan_name || 'Free'}</span></div></div>
           <button id="save-profile" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save changes</button>
         </div>
+      </div>
+    </div>
+    <!-- SIGN-IN EMAIL (kanban t_0d1aa081). The read-only field above shows the address the SERVER
+         holds; this block is the only way to move it, and it moves nothing until the mailed link is
+         opened. -->
+    <div class="card" id="email-change-card">
+      <h3 class="font-semibold mb-3">Sign-in email</h3>
+      <div class="space-y-3" style="max-width:420px">
+        <p class="text-sm text-gray-600">Your current sign-in address is <b id="ec-current">${c.email || '—'}</b>. To move it, enter the new address below and we will email a confirmation link to it. Your current address keeps working until you open that link.</p>
+        ${st.ecErr && html`<p class="text-sm text-red-700" id="ec-msg" role="status" aria-live="polite">${st.ecErr}</p>`}
+        ${!st.ecErr && st.ecMsg && html`<p class="text-sm" style="color:#15803d" id="ec-msg" role="status" aria-live="polite">${st.ecMsg}</p>`}
+        <div><label class="text-sm font-medium block mb-1">New email address</label>
+          <input id="ec-new" class="input" type="email" maxlength="254" autocomplete="email" placeholder="you@yourcompany.com" value=${st.ecNew || ''} onInput=${e => { st.ecNew = e.target.value; }} /></div>
+        <button id="ec-send" class="btn btn-sm" disabled=${st.ecBusy} onClick=${sendEmailChange}>Send confirmation link</button>
       </div>
     </div>
     <div class="card">
