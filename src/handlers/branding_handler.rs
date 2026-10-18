@@ -49,7 +49,7 @@ fn logo_url_for(tenant_id: Uuid) -> String {
 
 /// Read the stored branding document for this account, defaulting to `{}`.
 async fn read_doc(state: &AppState, tenant_id: Uuid) -> Value {
-    sqlx::query_scalar::<_, Option<Value>>(
+    let mut doc = sqlx::query_scalar::<_, Option<Value>>(
         "SELECT value FROM tenant_settings WHERE tenant_id = $1 AND key = $2",
     )
     .bind(tenant_id)
@@ -59,7 +59,24 @@ async fn read_doc(state: &AppState, tenant_id: Uuid) -> Value {
     .ok()
     .flatten()
     .flatten()
-    .unwrap_or_else(|| json!({}))
+    .unwrap_or_else(|| json!({}));
+
+    // A `logo_url` is a POINTER into `tenant_logos` and the panel renders it as the brand thumbnail
+    // while every sender embeds it in the mail header. The pointer and the bytes are written by
+    // different paths, so a row removed on its own (restore, hand-run DELETE, residue sweep) would
+    // otherwise leave a broken image in both places. `put_branding` preserves `logo_url` from this
+    // same read, so stripping it here also stops a dead pointer being re-saved.
+    let points_at_logo = doc
+        .get("logo_url")
+        .and_then(Value::as_str)
+        .map(|u| !u.trim().is_empty())
+        .unwrap_or(false);
+    if points_at_logo && !branding::logo_exists(&state.pool, tenant_id).await {
+        if let Some(obj) = doc.as_object_mut() {
+            obj.insert("logo_url".to_string(), json!(""));
+        }
+    }
+    doc
 }
 
 /// Write the whole branding document for this account (upsert on the composite key).
