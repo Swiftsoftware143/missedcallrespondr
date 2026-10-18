@@ -264,6 +264,14 @@
     <li><strong>An ownerless probe still badges.</strong> A row can read <code>&#8212; probe</code>: the harness marker is doing the work there, because no address is left to recognise. Hovering the badge names the harness tag that created the workspace.</li>
     <li><strong>Endpoints the panel calls:</strong> <code>GET /api/v1/admin/tenants</code> (every row carries <code>owner_email</code> and <code>probe_harness</code>), <code>DELETE /api/v1/admin/tenants/:id</code>, and <code>POST /api/v1/admin/tenants/bulk-delete</code>.</li>
   </ul>
+  <h2 id="contact-custom-fields">Contact custom fields (admin console)</h2>
+  <p><strong>Contacts</strong> &rarr; <strong>Custom fields</strong> is where a workspace defines the extra pieces of information its team records on a contact — an account number, a gate code, a date. Defining a field is what makes a box for it appear on every contact (Contacts &rarr; the row&rsquo;s <strong>Fields</strong> button), and that is where the value is typed and saved. Leave a box blank to clear it.</p>
+  <ul>
+    <li><strong>What the screen calls:</strong> <code>GET|POST /api/v1/contacts/custom-fields</code>, <code>PUT|DELETE /api/v1/contacts/custom-fields/:id</code>, <code>GET /api/v1/contacts/:id/fields</code> and <code>PUT /api/v1/contacts/:id/fields/:field_id</code>.</li>
+    <li><strong>Types:</strong> Text, Long text, Number and Date. The value is stored as text either way, so the type is a label the panel and any export can rely on.</li>
+    <li><strong>Removing a field deletes every value stored in it</strong> — the database cascade does it — which is exactly what the confirmation asks you to accept. It cannot be undone.</li>
+    <li><strong>Fixed 2026-10-18:</strong> the two field readers used to build their answer from stored VALUES, so a field that had never been filled in was invisible. An operator could define a field and then find no box to type its first value into. They now list every field the workspace defines, with a blank value until one is saved.</li>
+  </ul>
   <h2 id="provisioning-a-funnelswift-tag-can-create-a-free-account-here">Provisioning: a FunnelSwift tag can create a free account here</h2>
   <p>A lead captured in FunnelSwift can be tagged with <strong>MissedCall Respondr — Free</strong>. When this app's provisioning switch is ON, that tag creates a real, log-in-able free account for the business here: its own workspace, an owner login whose password is emailed to the contact address, and a plan row they can upgrade from inside the app.</p>
   <p><strong>Where:</strong> the admin panel (<code>admin.missedcallrespondr.com</code>) → <strong>Provisioning</strong> in the left navigation. Two controls:</p>
