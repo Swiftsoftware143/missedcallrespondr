@@ -18,6 +18,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sqlx::Row;
 
 use crate::config::Claims;
 use crate::email_provider;
@@ -312,4 +313,37 @@ pub async fn test_email_config(
             }))
         }
     }
+}
+
+/// `GET /api/v1/admin/email-log` — the last 50 transactional sends this installation attempted,
+/// newest first (migration 000040).
+///
+/// The panel's `last_send` field answers "what happened to the MOST RECENT message?" and is
+/// overwritten by the next mail — so a credentials mail the provider refused at signup disappeared
+/// the moment any later send succeeded, and "did this customer ever get their password?" had no
+/// answer. This is the history behind that one-line status: `withheld` = nothing was attempted
+/// (reserved/harness recipient), `failed` = the transport refused it, `sent` = the provider
+/// accepted it. Platform-admin only, inherited from the `/api/v1/admin/*` prefix.
+pub async fn email_log(State(state): State<AppState>) -> Json<Value> {
+    let rows = sqlx::query(
+        "SELECT to_email, template, provider, status, detail, created_at \
+         FROM email_send_log ORDER BY created_at DESC LIMIT 50",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+    let sends: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "to": r.get::<String, _>("to_email"),
+                "template": r.get::<Option<String>, _>("template"),
+                "provider": r.get::<Option<String>, _>("provider"),
+                "status": r.get::<String, _>("status"),
+                "detail": r.get::<Option<String>, _>("detail"),
+                "at": r.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+            })
+        })
+        .collect();
+    Json(json!({ "sends": sends }))
 }

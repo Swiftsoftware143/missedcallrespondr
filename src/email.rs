@@ -409,22 +409,33 @@ pub async fn record_last_send(
     // this line exists to prevent (measured 2026-10-14 on the admin test route), so the withheld
     // receipt is recorded as the non-send it is.
     let suppressed = matches!(outcome, Ok(receipt) if receipt.starts_with("suppressed"));
+    let detail = if suppressed {
+        format!(
+            "withheld: '{to}' is a reserved test address, so nothing was sent (no provider request)"
+        )
+    } else {
+        match outcome {
+            Ok(receipt) => receipt.clone(),
+            Err(e) => e.clone(),
+        }
+    };
+    // `withheld` is a status of its own, not a failure: nothing was attempted. The admin test route
+    // hands this function `Err("withheld: …")` rather than the transport's `suppressed` receipt, so
+    // the detail prefix is the second signal — both call sites then classify identically.
+    let status = if suppressed || detail.starts_with("withheld:") {
+        "withheld"
+    } else if outcome.is_ok() {
+        "sent"
+    } else {
+        "failed"
+    };
     let payload = json!({
         "at": chrono::Utc::now().to_rfc3339(),
         "kind": kind,
         "to": to,
         "provider": provider,
-        "ok": outcome.is_ok() && !suppressed,
-        "detail": if suppressed {
-            format!(
-                "withheld: '{to}' is a reserved test address, so nothing was sent (no provider request)"
-            )
-        } else {
-            match outcome {
-                Ok(receipt) => receipt.clone(),
-                Err(e) => e.clone(),
-            }
-        },
+        "ok": status == "sent",
+        "detail": detail,
     });
     if let Err(e) = sqlx::query(
         "INSERT INTO admin_settings (key, value, description, updated_at) \
@@ -437,6 +448,25 @@ pub async fn record_last_send(
     .await
     {
         tracing::warn!("could not record the last mail-send outcome: {e}");
+    }
+
+    // Append the SAME outcome to the HISTORY (migration 000040). The row above is overwritten by the
+    // next send, so without this a credentials mail the provider refused at signup vanished behind
+    // any later success and "did this customer ever get their password?" had no answer. Best-effort
+    // like the write above: a bookkeeping failure must never change the send's own result.
+    if let Err(e) = sqlx::query(
+        "INSERT INTO email_send_log (to_email, template, provider, status, detail) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(to)
+    .bind(kind)
+    .bind(provider)
+    .bind(status)
+    .bind(&detail)
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("could not append the mail-send history (email_send_log): {e}");
     }
 }
 

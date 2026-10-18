@@ -679,6 +679,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/email-config/test",
             post(crate::handlers::email_settings_handler::test_email_config),
         )
+        // The send HISTORY behind the one-line `last_send` status on the Email Provider panel
+        // (migration 000040, 2026-10-18): a refused credentials mail used to be erased by the next
+        // successful send. Platform-admin only via the `/api/v1/admin/*` middleware gate.
+        .route(
+            "/api/v1/admin/email-log",
+            get(crate::handlers::email_settings_handler::email_log),
+        )
         // Admin: the tag → free-account switch and entry-plan picker (kanban t_1d08bd9a, design
         // §3.3). On the PROTECTED router under `/api/v1/admin/*`, which `auth_middleware` closes to
         // platform admins only (403 for a tenant token — `middleware::admin_surface_denied`), so the

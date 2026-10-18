@@ -328,6 +328,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000039_retire_duplicate_pro_plan",
             include_str!("../migrations/000039_retire_duplicate_pro_plan.sql"),
         ),
+        // The send HISTORY behind the panel's one-line `email_last_send` status: that single row is
+        // overwritten by the next mail, so a credentials mail the provider refused at signup was
+        // erased by any later success (parity with the sibling apps, migration 091/…). Catalog-only
+        // and idempotent, because this runner keeps NO ledger and re-executes every file each boot.
+        (
+            "000040_email_send_log",
+            include_str!("../migrations/000040_email_send_log.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

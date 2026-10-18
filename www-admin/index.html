@@ -1985,7 +1985,7 @@ const TenantsScreen = () => {
 // actually left, and a "Send test email" press recorded nothing at all. A backend route with no UI is
 // a defect: this is the screen.
 const EmailProviderScreen = () => {
-  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, to: '', busy: false, msg: null });
+  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, sends: [], to: '', busy: false, msg: null });
   const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   const load = async () => {
     try {
@@ -2003,6 +2003,13 @@ const EmailProviderScreen = () => {
       st.sealed = !!(r && r.sealed); st.credential_present = !!(r && r.credential_present);
       st.msg = null;
     } catch (e) { st.msg = { ok: false, text: (e && e.message) || 'Could not read the email config' }; }
+    // The send HISTORY behind `last_send` (GET /admin/email-log, migration 000040). Read in its own
+    // try so a history failure cannot make the config screen report "could not read the email
+    // config" — the two are different surfaces.
+    try {
+      const lg = await API.get('/admin/email-log');
+      st.sends = (lg && lg.sends) || [];
+    } catch (e) { st.sends = st.sends || []; }
     renderApp();
   };
   if (!st._loaded && isAdmin) { st._loaded = true; load(); }
@@ -2076,6 +2083,27 @@ const EmailProviderScreen = () => {
         ${last.detail ? html`<div class="text-xs text-gray-500 mt-1">${last.detail}</div>` : null}`
       : html`<div class="text-sm text-gray-400" id="email-last-send-line">No system email has been sent yet — press "Send test email" to record one.</div>`}
       <div class="text-xs text-gray-400 mt-1">Every transactional mail this install sends is recorded here, so "the customer never got it" is answerable without opening the server logs.</div>
+    </div>
+    <div class="card mt-4" id="email-send-history" data-email-provider="history">
+      <div class="flex items-center justify-between mb-1">
+        <span class="font-semibold">Recent sends</span>
+        <button class="btn btn-outline btn-sm" data-email-provider="refresh-history" disabled=${st.busy} onClick=${load}>Refresh</button>
+      </div>
+      <p class="text-xs text-gray-400 mb-2">The last 50 transactional sends, newest first. The line above answers "what happened to the most recent one"; this list keeps the ones before it, so a credentials mail the provider refused at signup is still visible after a later send succeeds. <b>withheld</b> means nothing was attempted (a reserved test address), <b>failed</b> means the provider refused it, <b>sent</b> means the provider accepted it.</p>
+      ${(st.sends && st.sends.length) ? html`<div class="overflow-x-auto"><table class="w-full text-sm" id="email-send-history-table">
+        <thead><tr class="text-left text-xs text-gray-500"><th class="py-1 pr-3">When</th><th class="py-1 pr-3">To</th><th class="py-1 pr-3">What</th><th class="py-1 pr-3">Result</th><th class="py-1">Detail</th></tr></thead>
+        <tbody>${st.sends.map(s => {
+          const lbl = s.status === 'sent' ? '\u2705 sent' : (s.status === 'withheld' ? '\u26d4 withheld' : '\u274c failed');
+          const cls = s.status === 'sent' ? 'text-green-700' : 'text-red-600';
+          return html`<tr class="border-t border-gray-100" data-send-status=${s.status}>
+            <td class="py-1 pr-3 text-xs text-gray-500 whitespace-nowrap">${utcStamp(s.at)}</td>
+            <td class="py-1 pr-3 text-xs">${s.to || '-'}</td>
+            <td class="py-1 pr-3 text-xs">${s.template || '-'}</td>
+            <td class="py-1 pr-3 text-xs ${cls} whitespace-nowrap">${lbl}</td>
+            <td class="py-1 text-xs text-gray-500">${(s.detail || '').slice(0, 160)}</td>
+          </tr>`;
+        })}</tbody></table></div>`
+      : html`<div class="text-sm text-gray-400" id="email-send-history-empty">No sends recorded yet — press "Send test email" to record one.</div>`}
     </div>
   </div>`;
 };
