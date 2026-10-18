@@ -51,12 +51,31 @@ pub async fn get_dashboard_stats(
         0.0
     };
 
+    // The four counts the dashboard tiles render, in ONE round trip. Each is scoped to the caller's
+    // own tenant: rules and contacts by `tenant_id`, templates by `aid` (that table's column for the
+    // owning account), and auto-responses = the outbound messages this tenant has sent.
+    let (total_rules, total_templates, total_contacts, total_responses): (i64, i64, i64, i64) =
+        sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1), \
+                    (SELECT COUNT(*) FROM email_templates WHERE aid = $1), \
+                    (SELECT COUNT(*) FROM contacts WHERE tenant_id = $1), \
+                    (SELECT COUNT(*) FROM messages WHERE tenant_id = $1 AND direction = 'outbound')",
+        )
+        .bind(claims.aid)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or((0, 0, 0, 0));
+
     Ok(Json(DashboardResponse {
         total_calls,
         missed_calls,
         answered_calls,
         follow_ups_pending,
         response_rate,
+        total_rules,
+        total_templates,
+        total_contacts,
+        total_responses,
     }))
 }
 

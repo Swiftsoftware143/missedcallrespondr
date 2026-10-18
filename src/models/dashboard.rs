@@ -21,4 +21,10 @@ pub struct DashboardResponse {
     pub answered_calls: i64,
     pub follow_ups_pending: i64,
     pub response_rate: f64,
+    // Counts the panel's tiles read. Added 2026-10-18: the console rendered the four "..." tiles
+    // from these fields and the handler never sent them, so every tile stayed on "..." for ever.
+    pub total_rules: i64,
+    pub total_templates: i64,
+    pub total_contacts: i64,
+    pub total_responses: i64,
 }

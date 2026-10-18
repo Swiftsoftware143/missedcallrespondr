@@ -280,12 +280,15 @@ const Dashboard = () => {
   }
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Dashboard</h2>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
       <div class="stat-card"><div class="stat-value">${st.total_rules ?? '...'}</div><div class="stat-label">Response Rules</div></div>
       <div class="stat-card"><div class="stat-value">${st.total_templates ?? '...'}</div><div class="stat-label">Templates</div></div>
       <div class="stat-card"><div class="stat-value">${st.total_contacts ?? '...'}</div><div class="stat-label">Contacts</div></div>
-      <div class="stat-card"><div class="stat-value">${st.total_responses ?? '...'}</div><div class="stat-label">Auto-Responses</div></div>
+      <div class="stat-card"><div class="stat-value">${st.total_responses ?? '...'}</div><div class="stat-label">Auto-Responses Sent</div></div>
+      <div class="stat-card"><div class="stat-value">${st.missed_calls ?? '...'}</div><div class="stat-label">Missed Calls</div></div>
+      <div class="stat-card"><div class="stat-value">${st.response_rate == null ? '...' : Number(st.response_rate).toFixed(0) + '%'}</div><div class="stat-label">Response Rate</div></div>
     </div>
+    <p class="text-xs text-gray-500 mt-4">Counts are this workspace's own. Response Rate is answered calls as a share of all calls received.</p>
   </div>`;
 };
 
