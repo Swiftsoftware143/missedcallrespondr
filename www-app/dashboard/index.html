@@ -1573,7 +1573,11 @@ const App = () => {
       <div class="flex-1 space-y-1">
         ${nav.map(n => html`<div class="nav-item ${S.view===n.id?'active':''}" onClick=${() => { S.view = n.id; renderApp(); }}><span>${n.icon}</span><span class="nav-txt">${n.label}</span></div>`)}
       </div>
-      <div class="text-xs text-gray-400 px-3 py-2 truncate">${c.email || ''}</div>
+      <!-- The signed-in person, by NAME like every other app's sidebar (cron 2026-10-18). This used
+           to print the raw email address here while the overview said "Welcome back, <name>", so the
+           one place a customer looks to confirm who they are showed an address instead of their name.
+           The email stays reachable as the tooltip, and remains the fallback when no name is set. -->
+      <div class="text-xs text-gray-400 px-3 py-2 truncate" title=${c.email || ''}>${c.name || c.email || ''}</div>
       <!-- The account LEVEL (kanban t_9cd2c8f2): the REAL plan tier from GET /auth/me, never the
            literal word "User" (the FunnelSwift defect). Falls back to "Free" only when the server
            has not answered yet. -->
