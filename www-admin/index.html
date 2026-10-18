@@ -600,26 +600,123 @@ const Templates = () => {
 };
 
 // ---- CONTACTS ----
+// Contact CUSTOM FIELDS (2026-10-18 cron). The backend has served these routes since before this
+// screen existed — GET|POST /contacts/custom-fields, PUT|DELETE /contacts/custom-fields/:id,
+// GET /contacts/:id/fields, PUT /contacts/:id/fields/:field_id — and this console had NO screen
+// calling any of them, so an operator could neither define an extra field nor fill one in on a
+// contact. David's rule: a backend route with no UI is a DEFECT, not a feature.
+const CF_TYPES = [['text','Text'],['textarea','Long text'],['number','Number'],['date','Date']];
 const Contacts = () => {
-  const st = viewState('contacts', { list: [], search: '' });
+  const st = viewState('contacts', { list: [], search: '', showFields: false, editing: null });
+  const cf = viewState('contacts_fields', { list: null, err: null, open: false, busy: false, msg: null, loaded: false });
+  const cfForm = viewState('contacts_fields_form', { name: '', type: 'text', required: false, order: 0 });
+  const cv = viewState('contacts_values', { rows: null, busy: false, msg: null });
+
   const load = async () => { try { const data = await API.get('/contacts'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  const loadFields = async () => {
+    try { const d = await API.get('/contacts/custom-fields'); cf.list = Array.isArray(d) ? d : []; cf.err = null; }
+    catch (e) { cf.err = e.message || 'Could not list the fields'; }
+    cf.loaded = true; renderApp();
+  };
   if (!st._loaded) { st._loaded = true; load(); }
+  if (!cf.loaded) { loadFields(); }
+
+  const addField = async () => {
+    const name = String(cfForm.name || '').trim();
+    if (!name) { cf.msg = { ok: false, text: 'Give the field a name first' }; renderApp(); return; }
+    cf.busy = true; cf.msg = null; renderApp();
+    try {
+      await API.post('/contacts/custom-fields', {
+        field_name: name,
+        field_type: cfForm.type || 'text',
+        is_required: !!cfForm.required,
+        field_order: parseInt(cfForm.order, 10) || 0
+      });
+      cfForm.name = ''; cfForm.required = false;
+      cf.msg = { ok: true, text: 'Field "' + name + '" added' };
+      await loadFields();
+    } catch (e) { cf.msg = { ok: false, text: e.message || 'Could not add the field' }; }
+    cf.busy = false; renderApp();
+  };
+
+  const dropField = async (f) => {
+    if (!confirm('Remove the "' + f.field_name + '" field? Every value stored in it is deleted with it.')) return;
+    cf.busy = true; cf.msg = null; renderApp();
+    try { await API.del('/contacts/custom-fields/' + f.id); cf.msg = { ok: true, text: 'Field removed' }; await loadFields(); }
+    catch (e) { cf.msg = { ok: false, text: e.message || 'Could not remove the field' }; }
+    cf.busy = false; renderApp();
+  };
+
+  // Fill in ONE contact's extra fields: GET /contacts/:id/fields answers the contact WITH its
+  // custom_fields (name, type, current value); each box saves through PUT …/fields/:field_id.
+  const openFields = async (c) => {
+    st.showFields = true; st.editing = c; cv.rows = null; cv.msg = null; renderApp();
+    try {
+      const d = await API.get('/contacts/' + c.id + '/fields');
+      const rows = (d && Array.isArray(d.custom_fields)) ? d.custom_fields : [];
+      cv.rows = rows.map(r => ({ field_id: r.field_id, field_name: r.field_name, field_type: r.field_type, value: r.value == null ? '' : String(r.value) }));
+    } catch (e) { cv.msg = { ok: false, text: e.message || 'Could not load this contact' }; cv.rows = []; }
+    renderApp();
+  };
+
+  const saveValues = async () => {
+    cv.busy = true; cv.msg = null; renderApp();
+    let failed = 0;
+    for (const r of (cv.rows || [])) {
+      try { await API.put('/contacts/' + st.editing.id + '/fields/' + r.field_id, { value: r.value }); }
+      catch (e) { failed++; }
+    }
+    cv.msg = failed ? { ok: false, text: failed + ' value(s) could not be saved' } : { ok: true, text: 'Saved' };
+    cv.busy = false; renderApp();
+  };
 
   const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.phone||'').toLowerCase().includes(st.search.toLowerCase()) || (c.email||'').toLowerCase().includes(st.search.toLowerCase()));
 
   return html`<div>
-    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Contacts</h2><input class="input" style="width:280px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /></div>
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold">Contacts</h2>
+      <div class="flex gap-2 items-center">
+        <input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} />
+        <button class="btn btn-sm btn-outline" id="cfToggle" data-contacts="fields-toggle" onClick=${() => { cf.open = !cf.open; renderApp(); }}>Custom fields (${cf.list ? cf.list.length : 0})</button>
+      </div>
+    </div>
+    ${cf.open && html`<div class="card mb-4" id="cfCard" data-contacts="fields-card">
+      <div class="font-semibold mb-2">Contact custom fields</div>
+      <p class="text-xs text-gray-500 mb-3">Extra information your team records on a contact — an account number, a gate code, a date. Each field appears on every contact under “Fields”.</p>
+      ${cf.err && html`<div class="text-sm text-red-600 mb-2">${cf.err}</div>`}
+      ${(cf.list && cf.list.length) ? html`<table class="table mb-3"><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Order</th><th></th></tr></thead><tbody>
+        ${cf.list.map(f => html`<tr data-contacts="field-row"><td class="font-medium">${f.field_name}</td><td class="text-gray-500">${f.field_type}</td><td>${f.is_required ? 'Yes' : 'No'}</td><td class="text-gray-500">${f.field_order}</td><td><button class="btn btn-sm btn-red" disabled=${cf.busy} onClick=${() => dropField(f)}>Remove</button></td></tr>`)}
+      </tbody></table>` : html`<p class="text-sm text-gray-500 mb-3">No custom fields yet — add the first one below.</p>`}
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <div><label class="text-sm font-medium block mb-1">Field name</label><input class="input" id="cfName" data-contacts="field-name" placeholder="e.g. Account number" value=${cfForm.name} onInput=${e => { cfForm.name = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" id="cfType" data-contacts="field-type" value=${cfForm.type} onChange=${e => { cfForm.type = e.target.value; }}>${CF_TYPES.map(t => html`<option value=${t[0]}>${t[1]}</option>`)}</select></div>
+        <div><label class="text-sm font-medium block mb-1">Order</label><input class="input" type="number" value=${cfForm.order} onInput=${e => { cfForm.order = e.target.value; }} /></div>
+        <div class="flex items-center gap-3"><label class="text-sm flex items-center gap-1"><input type="checkbox" checked=${cfForm.required ? true : false} onChange=${e => { cfForm.required = e.target.checked; }} /> Required</label><button class="btn btn-sm" id="cfAdd" data-contacts="field-add" disabled=${cf.busy} onClick=${addField}>Add field</button></div>
+      </div>
+      ${cf.msg && html`<div class="text-sm mt-2 ${cf.msg.ok ? 'text-green-700' : 'text-red-600'}" id="cfMsg" data-contacts="fields-msg">${cf.msg.text}</div>`}
+    </div>`}
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Created</th></tr></thead>
+      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Created</th><th></th></tr></thead>
         <tbody>${filtered.slice(0, 100).map(c => html`<tr>
           <td class="font-medium">${c.name || c.full_name || '-'}</td>
           <td class="text-gray-500">${c.phone || '-'}</td>
           <td class="text-gray-500">${c.email || '-'}</td>
           <td class="text-gray-500 text-sm">${utcDate(c.created_at)}</td>
+          <td><button class="btn btn-sm btn-outline" data-contacts="contact-fields" onClick=${() => openFields(c)}>Fields</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.showFields && html`<div class="modal" onClick=${e => { if (e.target === e.currentTarget) { st.showFields = false; renderApp(); } }}>
+      <div class="modal-content" id="cvCard" data-contacts="values-card"><h3 class="text-lg font-bold mb-1">Fields — ${(st.editing && (st.editing.name || st.editing.phone)) || 'contact'}</h3>
+        <p class="text-xs text-gray-500 mb-3">These are the custom fields this workspace defines. Leave one blank to clear it.</p>
+        ${cv.rows === null ? html`<p class="text-sm text-gray-500">Loading...</p>`
+          : (cv.rows.length === 0 ? html`<p class="text-sm text-gray-500">This workspace has no custom fields yet — add one under “Custom fields”.</p>`
+             : html`<div class="space-y-3">${cv.rows.map(r => html`<div><label class="text-sm font-medium block mb-1">${r.field_name}${(r.field_type && r.field_type !== 'text') ? html` <span class="text-xs text-gray-400">(${r.field_type})</span>` : null}</label><input class="input" data-contacts="value" value=${r.value} onInput=${e => { r.value = e.target.value; }} /></div>`)}</div>`)}
+        ${cv.msg && html`<div class="text-sm mt-2 ${cv.msg.ok ? 'text-green-700' : 'text-red-600'}" id="cvMsg" data-contacts="values-msg">${cv.msg.text}</div>`}
+        <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { st.showFields = false; renderApp(); }}>Close</button>${(cv.rows && cv.rows.length) ? html`<button class="btn" id="cvSave" data-contacts="values-save" disabled=${cv.busy} onClick=${saveValues}>Save</button>` : null}</div>
+      </div>
+    </div>`}
   </div>`;
 };
 

@@ -152,13 +152,18 @@ pub async fn get_contact_with_fields(
     .ok_or_else(|| AppError::NotFound("Contact not found".into()))?;
 
     let fields = sqlx::query_as::<_, CustomFieldEntry>(
-        "SELECT cfv.field_id, ccf.field_name, ccf.field_type, cfv.value \
-         FROM contact_field_values cfv \
-         JOIN contact_custom_fields ccf ON ccf.id = cfv.field_id \
-         WHERE cfv.contact_id = $1 \
+        // Driven by the workspace's DEFINITIONS, not by the values: a field that has never been
+        // filled in must still be listed (value = NULL), or an operator can define a field and
+        // never be able to set its first value — the UI has nothing to render an input for.
+        "SELECT ccf.id AS field_id, ccf.field_name, ccf.field_type, cfv.value \
+         FROM contact_custom_fields ccf \
+         LEFT JOIN contact_field_values cfv \
+                ON cfv.field_id = ccf.id AND cfv.contact_id = $1 \
+         WHERE ccf.tenant_id = $2 \
          ORDER BY ccf.field_order ASC, ccf.field_name ASC",
     )
     .bind(contact.id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
 
@@ -201,13 +206,15 @@ pub async fn list_contacts_with_fields(
     let mut result: Vec<ContactWithFields> = Vec::new();
     for contact in contacts {
         let fields = sqlx::query_as::<_, CustomFieldEntry>(
-            "SELECT cfv.field_id, ccf.field_name, ccf.field_type, cfv.value \
-             FROM contact_field_values cfv \
-             JOIN contact_custom_fields ccf ON ccf.id = cfv.field_id \
-             WHERE cfv.contact_id = $1 \
+            "SELECT ccf.id AS field_id, ccf.field_name, ccf.field_type, cfv.value \
+             FROM contact_custom_fields ccf \
+             LEFT JOIN contact_field_values cfv \
+                    ON cfv.field_id = ccf.id AND cfv.contact_id = $1 \
+             WHERE ccf.tenant_id = $2 \
              ORDER BY ccf.field_order ASC, ccf.field_name ASC",
         )
         .bind(contact.id)
+        .bind(claims.aid)
         .fetch_all(&state.pool)
         .await?;
 
