@@ -1928,7 +1928,13 @@ const TenantsScreen = () => {
 
   const list = Array.isArray(st.list) ? st.list : [];
   const picked = list.filter(t => st.picked[t.id]);
+  // Rows this install itself minted from a fleet harness (`probe_harness`, recorded from the
+  // X-Swift-Harness header). The API has returned this since migration 000038, but the table never
+  // showed it — so a leftover probe workspace read exactly like a customer's and clearing them out
+  // meant guessing from the owner's domain. The badge and the picker below are the surface.
+  const probes = list.filter(t => !!t.probe_harness);
   const allPicked = list.length > 0 && picked.length === list.length;
+  const pickProbes = () => { st.picked = {}; probes.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
   const toggle = (id, on) => { if (on) st.picked[id] = true; else delete st.picked[id]; renderApp(); };
   const toggleAll = (on) => { st.picked = {}; if (on) list.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
   const del = async () => {
@@ -1953,11 +1959,12 @@ const TenantsScreen = () => {
     <div class="flex items-center justify-between mb-1">
       <h2 class="text-base font-bold text-gray-800">🗂️ Tenants</h2>
       <div class="flex items-center gap-2">
+        <button class="btn btn-sm btn-outline" data-tenants="select-probes" disabled=${probes.length === 0 ? true : false} onClick=${pickProbes}>Select probes (${probes.length})</button>
         <button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button>
         <button class="btn btn-sm btn-red" id="tnDel" data-tenants="delete" disabled=${(picked.length === 0 || st.busy === 'del') ? true : false} onClick=${del}>${picked.length ? 'Delete selected (' + picked.length + ')' : 'Delete selected'}</button>
       </div>
     </div>
-    <p class="text-xs text-gray-500 mb-2">Every workspace on the platform. Tick the rows to retire, then delete them in one call. The workspace you are signed in as and the portfolio companies are refused by the API.</p>
+    <p class="text-xs text-gray-500 mb-2">Every workspace on the platform. Tick the rows to retire, then delete them in one call. The workspace you are signed in as and the portfolio companies are refused by the API. A workspace a probe run minted carries a <span class="badge badge-yellow">probe</span> badge — "Select probes" ticks exactly those, so clearing test workspaces out does not mean guessing from the owner's address.</p>
     ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}" data-tenants="status">${st.msg}</div>`}
     ${st.err && html`<div class="text-sm text-red-600 mb-2" data-tenants="status">Could not list tenants: ${st.err}</div>`}
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
@@ -1967,7 +1974,7 @@ const TenantsScreen = () => {
       </tr></thead>
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
-        <td class="font-medium">${t.name || '-'}</td>
+        <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}</td>
         <td>${ownerCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
