@@ -610,6 +610,9 @@ const Contacts = () => {
   const st = viewState('contacts', { list: [], search: '', showFields: false, editing: null });
   const cf = viewState('contacts_fields', { list: null, err: null, open: false, busy: false, msg: null, loaded: false });
   const cfForm = viewState('contacts_fields_form', { name: '', type: 'text', required: false, order: 0 });
+  // `cf.edit` is the in-place editor's draft (null = no row is being edited). It is the only caller
+  // of PUT /contacts/custom-fields/:id, which the API has always served.
+  if (cf.edit === undefined) cf.edit = null;
   const cv = viewState('contacts_values', { rows: null, busy: false, msg: null });
 
   const load = async () => { try { const data = await API.get('/contacts'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
@@ -636,6 +639,23 @@ const Contacts = () => {
       cf.msg = { ok: true, text: 'Field "' + name + '" added' };
       await loadFields();
     } catch (e) { cf.msg = { ok: false, text: e.message || 'Could not add the field' }; }
+    cf.busy = false; renderApp();
+  };
+
+  const saveEdit = async (f) => {
+    const name = String(cf.edit.name || '').trim();
+    if (!name) { cf.msg = { ok: false, text: 'Give the field a name first' }; renderApp(); return; }
+    cf.busy = true; cf.msg = null; renderApp();
+    try {
+      await API.put('/contacts/custom-fields/' + f.id, {
+        field_name: name,
+        field_type: cf.edit.type || 'text',
+        is_required: !!cf.edit.required,
+        field_order: parseInt(cf.edit.order, 10) || 0
+      });
+      cf.edit = null; cf.msg = { ok: true, text: 'Field updated' };
+      await loadFields();
+    } catch (e) { cf.msg = { ok: false, text: e.message || 'Could not update the field' }; }
     cf.busy = false; renderApp();
   };
 
@@ -685,8 +705,13 @@ const Contacts = () => {
       <p class="text-xs text-gray-500 mb-3">Extra information your team records on a contact — an account number, a gate code, a date. Each field appears on every contact under “Fields”.</p>
       ${cf.err && html`<div class="text-sm text-red-600 mb-2">${cf.err}</div>`}
       ${(cf.list && cf.list.length) ? html`<table class="table mb-3"><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Order</th><th></th></tr></thead><tbody>
-        ${cf.list.map(f => html`<tr data-contacts="field-row"><td class="font-medium">${f.field_name}</td><td class="text-gray-500">${f.field_type}</td><td>${f.is_required ? 'Yes' : 'No'}</td><td class="text-gray-500">${f.field_order}</td><td><button class="btn btn-sm btn-red" disabled=${cf.busy} onClick=${() => dropField(f)}>Remove</button></td></tr>`)}
-      </tbody></table>` : html`<p class="text-sm text-gray-500 mb-3">No custom fields yet — add the first one below.</p>`}
+        ${cf.list.map(f => (cf.edit && cf.edit.id === f.id) ? html`<tr data-contacts="field-row" data-editing="1">
+          <td><input class="input" id="cfEditName" data-contacts="edit-name" value=${cf.edit.name} onInput=${e => { cf.edit.name = e.target.value; }} /></td>
+          <td><select class="input" id="cfEditType" data-contacts="edit-type" value=${cf.edit.type} onChange=${e => { cf.edit.type = e.target.value; }}>${CF_TYPES.map(t => html`<option value=${t[0]}>${t[1]}</option>`)}</select></td>
+          <td><input type="checkbox" checked=${cf.edit.required ? true : false} onChange=${e => { cf.edit.required = e.target.checked; }} /></td>
+          <td><input class="input" type="number" value=${cf.edit.order} onInput=${e => { cf.edit.order = e.target.value; }} /></td>
+          <td><button class="btn btn-sm" id="cfEditSave" data-contacts="edit-save" disabled=${cf.busy} onClick=${() => saveEdit(f)}>Save</button><button class="btn btn-sm btn-outline" disabled=${cf.busy} onClick=${() => { cf.edit = null; renderApp(); }}>Cancel</button></td></tr>`
+        : html`<tr data-contacts="field-row"><td class="font-medium">${f.field_name}</td><td class="text-gray-500">${f.field_type}</td><td>${f.is_required ? 'Yes' : 'No'}</td><td class="text-gray-500">${f.field_order}</td><td><button class="btn btn-sm btn-outline" data-contacts="edit" disabled=${cf.busy} onClick=${() => { cf.edit = { id: f.id, name: f.field_name, type: f.field_type, required: !!f.is_required, order: f.field_order }; cf.msg = null; renderApp(); }}>Edit</button><button class="btn btn-sm btn-red" data-contacts="remove" disabled=${cf.busy} onClick=${() => dropField(f)}>Remove</button></td></tr>`)}</tbody></table>` : html`<p class="text-sm text-gray-500 mb-3">No custom fields yet — add the first one below.</p>`}
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div><label class="text-sm font-medium block mb-1">Field name</label><input class="input" id="cfName" data-contacts="field-name" placeholder="e.g. Account number" value=${cfForm.name} onInput=${e => { cfForm.name = e.target.value; }} /></div>
         <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" id="cfType" data-contacts="field-type" value=${cfForm.type} onChange=${e => { cfForm.type = e.target.value; }}>${CF_TYPES.map(t => html`<option value=${t[0]}>${t[1]}</option>`)}</select></div>
