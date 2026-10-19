@@ -1429,10 +1429,26 @@ const Integrations = () => {
 // no provider configured, provider declined, plan not on sale — is shown in the server's own words,
 // never replaced by a generic failure, so an unconfigured install says what is missing instead of
 // looking broken.
+// The customer's own PLAN REQUESTS -- the tickets this screen files when checkout is closed.
+// GET /api/v1/tickets is credential-scoped (the handler reads tenant_id from the session), so this
+// lists THIS workspace's tickets only; the filter keeps the ones filed from Plan & Billing. A
+// transient "request sent" notice was the whole record before this: a reload lost it, and the
+// customer could not tell whether anything had been filed.
+const loadPlanRequests = async (st) => {
+  try {
+    const d = await API.get('/tickets');
+    const list = Array.isArray(d) ? d : ((d && d.tickets) || []);
+    st.requests = list.filter(t => String(t.source || '') === 'billing');
+  } catch (e) { st.requests = []; }
+  st.requestsLoaded = true;
+  renderApp();
+};
+
 const Billing = () => {
-  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null });
+  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false });
   if (!st.loaded && !st.busy) {
     st.busy = true;
+    loadPlanRequests(st);
     API.get('/plans').then(d => {
       const list = (d && d.plans) || d || [];
       st.plans = (Array.isArray(list) ? list : []).filter(p => p.is_active !== false);
@@ -1466,7 +1482,7 @@ const Billing = () => {
     return Object.keys(f).map(k => k.replace(/_/g, ' ') + ': ' + f[k]);
   };
   const buy = async p => {
-    st.busy = true; st.buying = keyOf(p); st.notice = null; st.error = null; renderApp();
+    st.busy = true; st.buying = keyOf(p); st.notice = null; st.error = null; st.requestFor = null; renderApp();
     try {
       // The handler REFUSES a plan checkout without `amount` (measured live 2026-10-15:
       // POST /checkout/create {purchasable_type, purchasable_id} answers 400 "amount is
@@ -1495,17 +1511,60 @@ const Billing = () => {
       // creates a session (measured on this leg: checkout_sessions 0 -> 0), so "nothing was
       // charged" holds on every refusal arm.
       const detail = (e && e.message) ? String(e.message) : '';
-      st.error = (/provider|not configured/i.test(detail)
+      const noProvider = /provider|not configured/i.test(detail);
+      // A refused checkout must not dead-end the customer. IncentiveSwift shipped this path on
+      // 2026-10-18: when the install has no payment provider, the screen files a billing request
+      // and the team performs the switch by hand. Same shape here, on this app's own ticket route
+      // (POST /api/v1/tickets), so a tenant can still move plan while checkout is closed.
+      st.requestFor = noProvider ? { key: keyOf(p), name: nameOf(p), price: monthly(p) } : null;
+      st.error = (noProvider
         ? 'Upgrades are not open on this workspace yet \u2014 nothing was charged.'
         : 'The upgrade could not be started \u2014 nothing was charged.')
         + (detail ? ' ' + detail : '');
     }
     st.busy = false; st.buying = null; renderApp();
   };
+  const requestPlan = async () => {
+    const want = st.requestFor;
+    if (!want || st.busy) return;
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      await API.post('/tickets', {
+        subject: 'Upgrade request: ' + want.name + ' plan',
+        description: 'This workspace asked to move to the ' + want.name + ' plan ($' + want.price
+          + '/month) from Plan & Billing. Self-serve checkout is not open on this install, so the'
+          + ' request has to be completed by the team.',
+        priority: 'normal',
+        source: 'billing'
+      });
+      st.notice = 'Request sent \u2014 our team will move this workspace to the ' + want.name
+        + ' plan and confirm here.';
+      st.requestFor = null;
+      loadPlanRequests(st);
+    } catch (e) {
+      st.error = 'The request could not be sent' + ((e && e.message) ? ': ' + e.message : '')
+        + '. Please try again.';
+    }
+    st.busy = false; renderApp();
+  };
   return html`<div data-billing="screen">
     <h2 class="text-xl font-bold mb-4">Plan & Billing</h2>
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700" id="billing-error">${st.error}</p></div>`}
+    ${st.requestFor && html`<div class="card" style="border-left:4px solid #2563eb" id="billing-request">
+      <p class="text-sm text-gray-700">You can still move plan: send the request and our team completes the switch for you.</p>
+      <button class="btn mt-2" id="billing-request-btn" disabled=${st.busy} onClick=${() => requestPlan()}>Request the ${st.requestFor.name} plan</button>
+    </div>`}
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700" id="billing-notice">${st.notice}</p></div>`}
+    ${st.requestsLoaded && st.requests.length ? html`<div class="card" id="plan-requests">
+      <h3 class="font-semibold mb-1">Your plan requests</h3>
+      <p class="text-sm text-gray-600 mb-2">Our team completes these by hand. The state below is the live one.</p>
+      <ul class="text-sm text-gray-700" style="list-style:none;padding:0;margin:0">
+        ${st.requests.map(t => html`<li class="flex items-center justify-between" style="border-top:1px solid #eee;padding:6px 0" data-request=${t.id}>
+          <span>${String(t.subject || 'Plan request')}</span>
+          <span class="badge badge-blue" data-request-state=${String(t.status || 'open')}>${String(t.status || 'open').replace(/_/g, ' ')}</span>
+        </li>`)}
+      </ul>
+    </div>` : null}
     <div class="card">
       <h3 class="font-semibold mb-1">Your current plan</h3>
       <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || 'Free'}</span></p>
