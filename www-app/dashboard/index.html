@@ -667,6 +667,32 @@ const Profile = () => {
 // byte-identical mail to before. The logo is POSTed as `multipart/form-data` (field `file`) — the
 // fleet-wide upload convention, matching the avatar upload in this same file — to
 // /api/v1/settings/branding/logo.
+// What a RECIPIENT sees — mirrors Branding::header_html in the app (src/branding.rs) and the pane's
+// own admin twin: a centred logo (max 56px high / 240px wide, alt = the display name); otherwise the
+// display name in 20px bold #111827; then a 3px rule in the effective brand colour; and nothing at
+// all (just the note) when neither is set. Reads this pane's OWN controls and the logo the template
+// already rendered, so it sends nothing and cannot disagree with what Save would store.
+const brandEffColor = (c) => /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(String(c || '').trim())
+  ? String(c).trim() : '#4f46e5';
+function syncBrandPreview() {
+  const wrap = document.getElementById('brand-bp-header');
+  const blank = document.getElementById('brand-bp-blank');
+  if (!wrap || !blank) return;
+  const img = document.getElementById('brand-bp-logo');
+  const logo = (img && img.getAttribute('src')) ? img.getAttribute('src') : '';
+  const nameEl = document.getElementById('brand-name-input');
+  const colourEl = document.getElementById('brand-color-input');
+  const name = ((nameEl && nameEl.value) || '').trim();
+  const colour = brandEffColor(colourEl && colourEl.value);
+  const branded = !!(logo || name);
+  wrap.style.display = branded ? 'block' : 'none';
+  blank.style.display = branded ? 'none' : 'block';
+  if (img) { img.style.display = logo ? 'block' : 'none'; img.setAttribute('alt', name); }
+  const nm = document.getElementById('brand-bp-name');
+  if (nm) { nm.textContent = name; nm.style.display = (branded && !logo) ? 'block' : 'none'; }
+  const rule = document.getElementById('brand-bp-rule');
+  if (rule) rule.style.borderTop = '3px solid ' + colour;
+}
 const Branding = () => {
   const st = viewState('branding', {
     loaded: false, brand_name: '', brand_color: '', logo_url: '',
@@ -733,6 +759,7 @@ const Branding = () => {
   };
 
   const logo = logoUrl();
+  setTimeout(syncBrandPreview, 0);
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Email Branding</h2>
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
@@ -755,13 +782,27 @@ const Branding = () => {
         </div>
         <div class="space-y-3" style="flex:1;max-width:420px">
           <div><label class="text-sm font-medium block mb-1">Brand display name</label>
-            <input id="brand-name-input" class="input" maxlength="60" placeholder="Your business name" value=${st.brand_name || ''} onInput=${e => { st.brand_name = e.target.value; }} /></div>
+            <input id="brand-name-input" class="input" maxlength="60" placeholder="Your business name" value=${st.brand_name || ''} onInput=${e => { st.brand_name = e.target.value; syncBrandPreview(); }} /></div>
           <div><label class="text-sm font-medium block mb-1">Brand colour</label>
-            <input id="brand-color-input" class="input" placeholder="#4f46e5" value=${st.brand_color || ''} onInput=${e => { st.brand_color = e.target.value; }} /></div>
+            <input id="brand-color-input" class="input" placeholder="#4f46e5" value=${st.brand_color || ''} onInput=${e => { st.brand_color = e.target.value; syncBrandPreview(); }} /></div>
           <button id="brand-save-btn" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save branding</button>
         </div>
       </div>
       <p class="text-xs text-gray-500 mt-3">Your logo and business name open every transactional email we send for your account (welcome, password reset, receipts). Leave them blank to keep our default look.</p>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e2e8f0">
+        <div class="text-xs text-gray-500 mb-2">Preview &mdash; the header every email from this account opens with</div>
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px;background:#fff">
+          <div id="brand-bp-header" style="display:none">
+            ${logo
+              ? html`<img id="brand-bp-logo" src=${logo} alt=${st.brand_name || ''} style="display:block;margin:0 auto 8px;max-height:56px;max-width:240px" />`
+              : html`<img id="brand-bp-logo" alt=${st.brand_name || ''} style="display:none;margin:0 auto 8px;max-height:56px;max-width:240px" />`}
+            <div id="brand-bp-name" style="display:none;text-align:center;font-size:20px;font-weight:700;color:#111827;margin:0 0 8px"></div>
+            <div id="brand-bp-rule" style="border-top:3px solid #4f46e5;margin:0 0 10px"></div>
+          </div>
+          <div id="brand-bp-blank" class="text-xs text-gray-500">Nothing is set yet, so mail keeps the MissedCall Respondr header.</div>
+          <div style="font-size:13.5px;color:#111827;line-height:1.5">Hi Alex &mdash; this is a sample of the message body. Only the header above comes from your branding.</div>
+        </div>
+      </div>
     </div>
   </div>`;
 };
