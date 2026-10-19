@@ -185,13 +185,23 @@ pub async fn add_message(
         req.sender_type.as_deref(),
         max::TICKET_MESSAGES_SENDER_TYPE,
     )?;
-    let _existing =
+    let ticket =
         sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
             .bind(id)
             .bind(claims.aid)
             .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Ticket not found".into()))?;
+    // How many messages the thread already held BEFORE this one. `create()` stores the opening
+    // description as the first message, so a non-zero count is what separates a genuine REPLY from
+    // that description being stored again — without it, filing a ticket would email the customer a
+    // "we answered your request" notice about their own words.
+    let prior: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM ticket_messages WHERE ticket_id = $1")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
+    let sender_type = req.sender_type.as_deref().unwrap_or("agent");
     let mid = Uuid::new_v4();
     let now = chrono::Utc::now();
     sqlx::query(
@@ -199,7 +209,7 @@ pub async fn add_message(
     )
     .bind(mid)
     .bind(id)
-    .bind(req.sender_type.as_deref().unwrap_or("agent"))
+    .bind(sender_type)
     .bind(req.sender_id)
     .bind(&req.body)
     .bind(now)
@@ -209,7 +219,75 @@ pub async fn add_message(
         .bind(mid)
         .fetch_one(&state.pool)
         .await?;
+    // The customer hears when the OPERATOR answers. The customer's own messages never notify: they
+    // are the person who just typed, and this tenant's address is the only mailbox involved.
+    let customer_sender = matches!(
+        sender_type,
+        "customer" | "user" | "client" | "business_user"
+    );
+    if !customer_sender && prior > 0 {
+        notify_customer_of_reply(&state, &ticket, &req.body).await;
+    }
     Ok(Json(item))
+}
+
+/// Tell the CUSTOMER that an operator answered their ticket.
+///
+/// MEASURED before this existed (2026-10-19): `ticket_messages` was written only by `create()` —
+/// the opening description — so neither console could hold a conversation at all, and a customer who
+/// asked for a plan change (the Plan & Billing screen files exactly this ticket) had no way to hear
+/// back except reloading the screen and guessing whether anything had happened. Every sibling app
+/// already tells its customer (ADASwift, FunnelSwift, WorkflowSwift all shipped it), which is what
+/// makes this a gap rather than a design choice.
+///
+/// Sends through `email::send_template_email` — the ONE funnel that carries per-tenant branding, the
+/// tenant's editable template and the reserved-address suppression — so a probe account's address is
+/// recorded `withheld` in `email_send_log` and no message is attempted. Best-effort by construction:
+/// a mail failure is logged and never turns a saved reply into an error the operator sees.
+async fn notify_customer_of_reply(state: &AppState, ticket: &Ticket, body: &str) {
+    let owner: Option<(Option<String>, String)> = match sqlx::query_as(
+        "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
+    )
+    .bind(ticket.tenant_id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(
+                "tickets.add_message: owner lookup failed (tenant_id={}): {e}",
+                ticket.tenant_id
+            );
+            return;
+        }
+    };
+    let Some((name, email)) = owner else {
+        tracing::warn!(
+            "tickets.add_message: no user to notify for tenant {}",
+            ticket.tenant_id
+        );
+        return;
+    };
+    let vars = serde_json::json!({
+        "name": name.unwrap_or_else(|| "there".to_string()),
+        "ticket_subject": ticket.subject,
+        "reply_body": body,
+        "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
+    });
+    if let Err(e) = crate::email::send_template_email(
+        &state.pool,
+        ticket.tenant_id,
+        &email,
+        "ticket_reply",
+        &vars,
+    )
+    .await
+    {
+        tracing::warn!(
+            "tickets.add_message: reply notice to {email} failed (ticket {}): {e}",
+            ticket.id
+        );
+    }
 }
 
 pub async fn delete(

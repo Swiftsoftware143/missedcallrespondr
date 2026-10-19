@@ -564,7 +564,7 @@ const Templates = () => {
       <table class="table"><thead><tr><th>Name</th><th>Actions</th></tr></thead>
         <tbody>${st.list.map(t => html`<tr>
           <td class="font-medium">${t.name || '-'}</td>
-          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
+          <td><button class="btn btn-sm" onClick=${() => openThread(t)}>Open</button><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
         </tr>`)}
         ${st.list.length === 0 && html`<tr><td colspan="2" class="text-center text-gray-400 py-8">No templates yet.</td></tr>`}
       </tbody></table>
@@ -921,7 +921,7 @@ const Campaigns = () => {
 
 // ---- TICKETS ----
 const Tickets = () => {
-  const st = viewState('tickets', { list: [], showModal: false, editItem: null });
+  const st = viewState('tickets', { list: [], showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
   const load = async () => { try { const data = await API.get('/tickets'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
   const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
@@ -930,6 +930,30 @@ const Tickets = () => {
     try { if(st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
   };
   const remove = async (id) => { if(!confirm('Delete this ticket?')) return; await API.del('/tickets/' + id); load(); };
+  // ── Conversation (2026-10-19) ──────────────────────────────────────────────────────────────────
+  // MEASURED before this: the screen could file, re-status and delete a ticket, but it had no reply
+  // box and `ticket_messages` was written only by create() — so an operator could not ANSWER the
+  // customer at all, and a Plan & Billing request sat in a list saying nothing. The thread is the
+  // app's own `GET /tickets/:id` (ticket + messages); the reply is `POST /tickets/:id/messages`
+  // with sender_type 'agent', which is also what mails the customer their answer.
+  const openThread = async (t) => {
+    try {
+      const d = await API.get('/tickets/' + t.id);
+      st.threadId = t.id; st.thread = d; st.reply = ''; renderApp();
+    } catch (e) { alert('Could not open the ticket: ' + e.message); }
+  };
+  const closeThread = () => { st.threadId = null; st.thread = null; st.reply = ''; renderApp(); };
+  const sendReply = async () => {
+    const body = (st.reply || '').trim();
+    if (!body) { alert('Type your reply first.'); return; }
+    if (st.busy) return;
+    st.busy = true; renderApp();
+    try {
+      await API.post('/tickets/' + st.threadId + '/messages', { sender_type: 'agent', body: body });
+      st.thread = await API.get('/tickets/' + st.threadId);
+      st.reply = ''; st.busy = false; load();
+    } catch (e) { st.busy = false; renderApp(); alert('The reply was not saved: ' + e.message); }
+  };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Tickets</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ New Ticket</button></div>
     <div class="card p-0 overflow-hidden">
@@ -944,6 +968,22 @@ const Tickets = () => {
         ${st.list.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No tickets yet.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.threadId && html`<div id="tk-thread" class="card mt-4 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold">Conversation${st.thread && st.thread.ticket && st.thread.ticket.subject ? ' · ' + st.thread.ticket.subject : ''}</h3>
+        <button class="btn btn-sm btn-outline" onClick=${closeThread}>Close</button>
+      </div>
+      <div class="space-y-2 mb-3">
+        ${((st.thread && st.thread.messages) || []).map(m => html`<div class="p-2 rounded" style="background:#f9fafb">
+          <div class="text-xs text-gray-500 mb-1">${m.sender_type === 'customer' ? 'Customer' : 'Your team'} · ${m.created_at ? new Date(m.created_at).toLocaleString() : ''}</div>
+          <div style="white-space:pre-wrap">${m.body}</div>
+        </div>`)}
+        ${((st.thread && st.thread.messages) || []).length === 0 && html`<div class="text-sm text-gray-400">No messages on this ticket yet.</div>`}
+      </div>
+      <label class="text-sm font-medium block mb-1">Reply to the customer</label>
+      <textarea id="tk-reply" class="input" rows="3" value=${st.reply || ''} onInput=${e => { st.reply = e.target.value; }} placeholder="This is emailed to the customer and shown on their dashboard."></textarea>
+      <div class="flex justify-end mt-2"><button id="tk-send" class="btn" disabled=${st.busy} onClick=${sendReply}>${st.busy ? 'Sending…' : 'Send reply'}</button></div>
+    </div>`}
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
       <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'New'} Ticket</h3>
         ${(() => {

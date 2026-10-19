@@ -343,6 +343,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000041_email_changes",
             include_str!("../migrations/000041_email_changes.sql"),
         ),
+        // The notice the CUSTOMER gets when an operator answers their ticket (2026-10-19). Without
+        // this row the reply still mails — the compiled fallback carries it — but the operator could
+        // not edit the wording, and every sibling app lets them. Data-only + idempotent, because this
+        // runner re-executes every file each boot and keeps no ledger.
+        (
+            "000042_ticket_reply_template",
+            include_str!("../migrations/000042_ticket_reply_template.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

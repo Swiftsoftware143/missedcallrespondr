@@ -1208,7 +1208,7 @@ const Contacts = () => {
 
 // ===== TICKETS =====
 const Tickets = () => {
-  const st = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null });
+  const st = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
   // The list AND the counts. GET /api/v1/tickets/stats had no caller anywhere in this console, so
   // "see what is still open" was a question the screen could not answer. Its own catch keeps a
   // stats hiccup from blanking the list, and the strip renders only what the API answered.
@@ -1227,6 +1227,29 @@ const Tickets = () => {
   const show = (i) => { st.editItem = i; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
   const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  // ── The conversation (2026-10-19) ─────────────────────────────────────────────────────────────
+  // This screen files a ticket (Plan & Billing sends one when checkout is closed) and then showed
+  // nothing but its status, so an answer from the team was invisible unless the customer guessed to
+  // reload. The thread is `GET /tickets/:id`; a reply is `POST /tickets/:id/messages` with
+  // sender_type 'customer', which the team reads on the same ticket in their console.
+  const openThread = async (t) => {
+    try {
+      const d = await API.get('/tickets/' + t.id);
+      st.threadId = t.id; st.thread = d; st.reply = ''; renderApp();
+    } catch (e) { alert('Could not open the ticket: ' + e.message); }
+  };
+  const closeThread = () => { st.threadId = null; st.thread = null; st.reply = ''; renderApp(); };
+  const sendReply = async () => {
+    const body = (st.reply || '').trim();
+    if (!body) { alert('Type your message first.'); return; }
+    if (st.busy) return;
+    st.busy = true; renderApp();
+    try {
+      await API.post('/tickets/' + st.threadId + '/messages', { sender_type: 'customer', body: body });
+      st.thread = await API.get('/tickets/' + st.threadId);
+      st.reply = ''; st.busy = false; load();
+    } catch (e) { st.busy = false; renderApp(); alert('Your message was not saved: ' + e.message); }
+  };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Tickets</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ New Ticket</button></div>
     ${st.stats && html`<div id="tk-stats" class="card p-3 mb-4 flex flex-wrap gap-4 text-sm text-gray-600">
@@ -1238,10 +1261,26 @@ const Tickets = () => {
     </div>`}
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Subject</th><th>Status</th><th>Priority</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.subject||'-'}</td><td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td><td class="text-gray-500">${t.priority||'medium'}</td><td><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button></td></tr>`)}
+        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.subject||'-'}</td><td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td><td class="text-gray-500">${t.priority||'medium'}</td><td><button class="btn btn-sm" onClick=${() => openThread(t)}>Open</button><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button></td></tr>`)}
         ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No tickets yet.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.threadId && html`<div id="tk-thread" class="card mt-4 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold">Conversation${st.thread && st.thread.ticket && st.thread.ticket.subject ? ' · ' + st.thread.ticket.subject : ''}</h3>
+        <button class="btn btn-sm btn-outline" onClick=${closeThread}>Close</button>
+      </div>
+      <div class="space-y-2 mb-3">
+        ${((st.thread && st.thread.messages) || []).map(m => html`<div class="p-2 rounded" style="background:#f9fafb">
+          <div class="text-xs text-gray-500 mb-1">${m.sender_type === 'customer' ? 'You' : 'The team'} · ${m.created_at ? new Date(m.created_at).toLocaleString() : ''}</div>
+          <div style="white-space:pre-wrap">${m.body}</div>
+        </div>`)}
+        ${((st.thread && st.thread.messages) || []).length === 0 && html`<div class="text-sm text-gray-400">No messages on this ticket yet.</div>`}
+      </div>
+      <label class="text-sm font-medium block mb-1">Add to this ticket</label>
+      <textarea id="tk-reply" class="input" rows="3" value=${st.reply || ''} onInput=${e => { st.reply = e.target.value; }} placeholder="Ask a question or add a detail for the team."></textarea>
+      <div class="flex justify-end mt-2"><button id="tk-send" class="btn" disabled=${st.busy} onClick=${sendReply}>${st.busy ? 'Sending…' : 'Send'}</button></div>
+    </div>`}
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'New'} Ticket</h3>
       ${(() => {
         // kanban t_13330c68 — the draft lives in the SHARED view object (S.views['tickets_form']), seeded ON

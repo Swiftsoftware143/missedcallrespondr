@@ -227,6 +227,10 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
         // The sign-in address change (kanban t_0d1aa081). Named for what the recipient must DO,
         // because the account has not moved yet — the link is the only thing that moves it.
         "email_change" => "Confirm your new sign-in email".to_string(),
+        // The operator answered a ticket (inbox ticket-reply notice). Named for what the customer
+        // asked about, because "MissedCall Respondr Notification" tells them nothing and reads like
+        // marketing on a thread they started.
+        "ticket_reply" => "We answered your request".to_string(),
         _ => format!("{} Notification", app_name),
     }
 }
@@ -333,6 +337,32 @@ async fn send_inline(
                 template_type,
                 to,
                 "Confirm your new sign-in email",
+                &body,
+                "",
+            )
+            .await
+        }
+        // The reply notice. Reached whenever the tenant has no `ticket_reply` template row (or the
+        // query failed), which is the normal state until an operator edits one — so this body is the
+        // REAL mail most customers get, not a placeholder: it repeats the operator's own words.
+        "ticket_reply" => {
+            let subject_line = vars
+                .get("ticket_subject")
+                .and_then(|v| v.as_str())
+                .unwrap_or("your request");
+            let reply = vars
+                .get("reply_body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no message body)");
+            let body = format!(
+                "Hi {name},\n\nWe answered your request \"{subject_line}\".\n\n{reply}\n\nOpen {app_url}/dashboard and go to Tickets to reply or see the whole thread.\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("We answered your request: {subject_line}"),
                 &body,
                 "",
             )
