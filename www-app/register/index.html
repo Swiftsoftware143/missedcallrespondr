@@ -68,7 +68,14 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
     });
     const data = await res.json();
     if (res.ok) {
-      ok.innerHTML = '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + email.replace(/[<>&]/g, '') + '.<br><br>You can change your password any time in your profile settings.';
+      var escEmail = email.replace(/[<>&"]/g, '');
+      var qEmail = encodeURIComponent(email);
+      ok.innerHTML = '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + escEmail + '.<br><br>You can change your password any time in your profile settings.'
+        + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
+        + 'Nothing in your inbox after a minute? Check your spam folder, then '
+        + '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
+        + ' or <a href="/login" style="color:#2563eb;font-weight:600">sign in</a>.'
+        + '</div>';
       ok.style.display = 'block';
       btn.textContent = 'Check your email';
       btn.disabled = true;
