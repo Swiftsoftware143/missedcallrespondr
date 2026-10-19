@@ -920,9 +920,7 @@ const Campaigns = () => {
 };
 
 // ---- TICKETS ----
-// ---- CLIENTS ----
-const Clients = () => {
-  const st = viewState('clconst Tickets = () => {
+const Tickets = () => {
   const st = viewState('tickets', { list: [], showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
   const load = async () => { try { const data = await API.get('/tickets'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
@@ -1011,7 +1009,9 @@ const Clients = () => {
   </div>`;
 };
 
-ients', { list: [], showModal: false, editItem: null, search: '' });
+// ---- CLIENTS ----
+const Clients = () => {
+  const st = viewState('clients', { list: [], showModal: false, editItem: null, search: '' });
   const load = async () => { try { const data = await API.get('/clients'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
   const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
