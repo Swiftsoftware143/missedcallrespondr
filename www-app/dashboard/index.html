@@ -1559,10 +1559,17 @@ const Billing = () => {
       // and the team performs the switch by hand. Same shape here, on this app's own ticket route
       // (POST /api/v1/tickets), so a tenant can still move plan while checkout is closed.
       st.requestFor = noProvider ? { key: keyOf(p), name: nameOf(p), price: monthly(p) } : null;
-      st.error = (noProvider
+      // The customer line stands ALONE on the no-provider arm. It used to have the server's own
+      // sentence appended, which is how a buyer came to read "No active none provider configured"
+      // (measured live 2026-10-19) — `none` is the placeholder `plans.payment_provider` carries on a
+      // tier that is not on sale, not a provider name. The server now answers that arm in plain
+      // words, and repeating it after the customer line adds nothing a buyer can act on. The cause
+      // still reaches whoever needs it: the hand-off request below is what the team acts on, and
+      // the refusal is in the server log with the plan and provider it tried.
+      st.error = noProvider
         ? 'Upgrades are not open on this workspace yet \u2014 nothing was charged.'
-        : 'The upgrade could not be started \u2014 nothing was charged.')
-        + (detail ? ' ' + detail : '');
+        : 'The upgrade could not be started \u2014 nothing was charged.'
+          + (detail ? ' ' + detail : '');
     }
     st.busy = false; st.buying = null; renderApp();
   };
