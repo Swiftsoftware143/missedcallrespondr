@@ -78,6 +78,31 @@ fn money(row: &sqlx::postgres::PgRow, col: &str) -> f64 {
 pub async fn list_plans(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    plans_payload(state, false).await
+}
+
+/// The TENANT-facing catalogue: `GET /api/v1/plans`.
+///
+/// WHY THIS IS A SEPARATE HANDLER (measured live 2026-10-18, cron `default`):
+/// this route shared `list_plans` with the operator's `/api/v1/admin/plans`, so a signed-in
+/// customer's own catalogue carried RETIRED plans. A fresh tenant's `GET /api/v1/plans` answered
+/// four tiers, one of them `Pro ($49, is_active=false)` sitting next to the live
+/// `Pro Monthly ($49)` — the "two $49 tiles" defect David reported, seen at the API rather than
+/// only in the console. Each dashboard hid it with a client-side `.filter(p => p.is_active !==
+/// false)`, which is a band-aid: every other client of the payload (the mobile app, any new
+/// screen, any integration) shows the duplicate. The operator DOES need inactive rows (its Plans
+/// table renders an Active/Inactive badge and can re-activate one), so the admin route keeps
+/// `list_plans` and only this one filters.
+pub async fn list_active_plans(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    plans_payload(state, true).await
+}
+
+async fn plans_payload(
+    state: AppState,
+    only_active: bool,
+) -> Result<Json<serde_json::Value>, AppError> {
     use sqlx::Row;
     // NOTE: price_monthly/price_yearly are `numeric`; the ::float8 cast is what
     // makes them decodable as f64 (see `money`).
@@ -88,13 +113,19 @@ pub async fn list_plans(
     // rendered [Pro $49, Enterprise $199, Free $0, Pro Monthly $49]. Cheapest-first is the fleet
     // convention for a plan catalogue (ADASwift: `ORDER BY price ASC`), so the ladder is driven by
     // the price and ties break on the name. Same defect class as IncentiveSwift d5aed10b.
-    let rows = sqlx::query(
+    // One catalogue query, two visibility rules: the tenant arm appends `WHERE is_active = true`
+    // so a retired tier never reaches a buyer; the operator arm keeps every row.
+    let sql = if only_active {
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
          price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
-         created_at, updated_at FROM plans ORDER BY price_monthly ASC NULLS LAST, name ASC",
-    )
-    .fetch_all(&state.pool)
-    .await?;
+         created_at, updated_at FROM plans WHERE is_active = true \
+         ORDER BY price_monthly ASC NULLS LAST, name ASC"
+    } else {
+        "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
+         price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
+         created_at, updated_at FROM plans ORDER BY price_monthly ASC NULLS LAST, name ASC"
+    };
+    let rows = sqlx::query(sql).fetch_all(&state.pool).await?;
 
     let plans: Vec<serde_json::Value> = rows.iter().map(|r| {
         json!({

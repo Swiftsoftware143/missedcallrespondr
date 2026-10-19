@@ -149,13 +149,17 @@ pub fn create_router(state: AppState) -> Router {
         // https://coreswiftcrm.com/pricing — a DIFFERENT app's pricing page — which answers
         // 404 (measured live 2026-10-15). This app's ladder was reachable only through the
         // platform-admin table at /api/v1/admin/plans, so a tenant had no shipped screen on
-        // which to see or buy it. Same read-only handler the operator table uses; the checkout
-        // arm the console drives (`POST /api/v1/checkout/create`) already sits on this router,
-        // and every plan comes back with its `is_active` flag so the console offers only what
-        // the operator has left on.
+        // which to see or buy it. The checkout arm the console drives
+        // (`POST /api/v1/checkout/create`) already sits on this router.
+        //
+        // NOT the operator's handler (measured live 2026-10-18): sharing `list_plans` meant a
+        // signed-in customer's catalogue carried RETIRED tiers — a fresh tenant answered four
+        // plans including `Pro ($49, inactive)` beside `Pro Monthly ($49)`, the "two $49 tiles"
+        // defect. The tenant arm now serves ACTIVE plans only; `/api/v1/admin/plans` keeps every
+        // row because its table renders an Active/Inactive badge and can re-activate one.
         .route(
             "/api/v1/plans",
-            get(crate::handlers::plans_handler::list_plans),
+            get(crate::handlers::plans_handler::list_active_plans),
         )
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
