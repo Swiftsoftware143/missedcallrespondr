@@ -2079,12 +2079,16 @@ const ImpersonateTenants = () => {
    are signed in as, a portfolio company) keeps its reason on screen instead of vanishing behind a
    generic failure. The button is inert until a row is picked and is armed with the count. */
 const TenantsScreen = () => {
-  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true });
+  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true, plans: [] });
   const load = async () => {
     try {
       const d = await API.get('/admin/tenants');
       st.list = Array.isArray(d) ? d : ((d && d.tenants) || []);
       st.err = null;
+      // The plan picker's vocabulary: read from the SAME catalogue the Plans screen edits, so a
+      // plan created there appears here at the next render and nothing is hard-coded.
+      try { const p = await API.get('/admin/plans'); st.plans = (p && p.plans) || []; }
+      catch (e) { st.plans = []; }
     } catch (e) { st.err = e.message; st.list = null; }
     st.busy = null; renderApp();
   };
@@ -2120,6 +2124,36 @@ const TenantsScreen = () => {
     await load();
   };
 
+  // ── the PLAN cell (2026-10-19) ──
+  // It used to be a static `plan_name || '—'`: a workspace with no subscription row showed a bare
+  // dash, and the operator had no way to put it on a plan from the screen where the problem is
+  // seen — the only assign control lived on the Plans screen, keyed by a raw tenant uuid. It is a
+  // picker now: the REAL plan when there is one, "— no plan —" when there is none, and a change
+  // writes through POST /admin/plans/assign (plans_handler::admin_assign_plan), the same writer the
+  // Plans screen uses, so the customer's limits and mail follow from one place.
+  const assignPlan = async (t, planId) => {
+    if (!planId) return;
+    const p = (st.plans || []).find(x => x.id === planId);
+    const label = p ? p.name : 'that plan';
+    if (!confirm('Put "' + (t.name || t.slug || t.id) + '" on ' + label + '?')) return;
+    st.busy = 'plan:' + t.id; st.msg = null; st.ok = true; renderApp();
+    try {
+      await API.post('/admin/plans/assign', { tenant_id: t.id, plan_id: planId, billing_cycle: 'monthly' });
+      st.msg = 'Assigned ' + label + ' to ' + (t.name || t.slug || t.id);
+    } catch (e) { st.ok = false; st.msg = 'Not assigned: ' + e.message; }
+    st.busy = null;
+    await load();
+  };
+  const planCell = (t) => html`<select class="input plan-pick" data-tenant=${t.id || ''} style="min-width:140px"
+      title="This workspace's active plan. Changing it assigns the plan — the customer's limits and mail follow."
+      value=${t.plan_id || ''}
+      disabled=${st.busy === 'plan:' + t.id}
+      onChange=${e => assignPlan(t, e.target.value)}>
+      <option value="">— no plan —</option>
+      ${(st.plans || []).filter(p => p.is_active !== false || p.id === t.plan_id)
+        .map(p => html`<option value=${p.id}>${p.name}</option>`)}
+    </select>`;
+
   return html`<div class="card" data-tenants="screen">
     <div class="flex items-center justify-between mb-1">
       <h2 class="text-base font-bold text-gray-800">🗂️ Tenants</h2>
@@ -2143,7 +2177,7 @@ const TenantsScreen = () => {
         <td>${ownerCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
-        <td class="text-gray-500">${t.plan_name || '—'}</td>
+        <td>${planCell(t)}</td>
         <td class="text-gray-500 text-xs">${t.created_at ? String(t.created_at).slice(0, 10) : '-'}</td>
       </tr>`)}</tbody></table></div>`
       : (st.err ? '' : html`<div class="text-xs text-gray-400">loading tenants...</div>`)}

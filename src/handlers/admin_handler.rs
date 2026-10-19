@@ -312,7 +312,7 @@ pub async fn list_all_tenants(
             t.id, t.name, t.slug, t.created_at, COALESCE(t.probe_harness, '') AS probe_harness,
             tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
             tp.credit_balance,
-            p.name as plan_name, p.price_monthly, p.price_yearly,
+            p.name as plan_name, p.slug as plan_slug, p.price_monthly, p.price_yearly,
             p.features->>'included_credits' as included_credits,
             (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count,
             (SELECT u.email FROM users u WHERE u.tenant_id = t.id
@@ -321,7 +321,7 @@ pub async fn list_all_tenants(
                       u.created_at ASC
              LIMIT 1) as owner_email
         FROM tenants t
-        LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id
+        LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id AND tp.status = 'active'
         LEFT JOIN plans p ON p.id = tp.plan_id
         ORDER BY t.created_at DESC"#,
     )
@@ -339,6 +339,9 @@ pub async fn list_all_tenants(
             "billing_cycle": r.try_get::<Option<String>,_>("billing_cycle").ok().flatten(),
             "expires_at": r.try_get::<Option<chrono::DateTime<Utc>>,_>("expires_at").ok().flatten().map(|d| d.to_string()),
             "plan_name": r.try_get::<Option<String>,_>("plan_name").ok().flatten(),
+            // The plan's SLUG alongside its name (2026-10-19): the Tenants screen's plan cell is a
+            // picker now, so it needs the stable key the assign writer takes, not just a label.
+            "plan_slug": r.try_get::<Option<String>,_>("plan_slug").ok().flatten(),
             "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
