@@ -31,6 +31,12 @@ pub struct TicketMessage {
 pub struct CreateTicketRequest {
     pub subject: String,
     pub description: Option<String>,
+    /// Who is FILING this ticket. `create()` used to store the description as `agent`
+    /// unconditionally, so a customer's own words were labelled "The team" in the thread view
+    /// (2026-10-19). Optional and defaulting to `agent`, which keeps every existing caller and the
+    /// admin console's "+ New Ticket" exactly as they were.
+    #[serde(default)]
+    pub sender_type: Option<String>,
     pub priority: Option<String>,
     pub assigned_to: Option<Uuid>,
     pub contact_id: Option<Uuid>,

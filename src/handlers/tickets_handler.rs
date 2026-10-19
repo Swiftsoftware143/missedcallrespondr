@@ -79,6 +79,11 @@ pub async fn create(
 ) -> Result<Json<Ticket>, AppError> {
     check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
     check_opt_len("source", req.source.as_deref(), max::TICKETS_SOURCE)?;
+    check_opt_len(
+        "sender_type",
+        req.sender_type.as_deref(),
+        max::TICKET_MESSAGES_SENDER_TYPE,
+    )?;
     crate::features::check_feature_limit(&state.pool, claims.aid, "max_tickets", "Tickets").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
@@ -105,8 +110,14 @@ pub async fn create(
             sqlx::query(
                 "INSERT INTO ticket_messages (id, ticket_id, sender_type, sender_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)",
             )
-            .bind(mid).bind(id).bind("agent").bind(None::<Uuid>).bind(&desc).bind(now)
-            .execute(&state.pool).await?;
+            .bind(mid)
+            .bind(id)
+            .bind(req.sender_type.as_deref().unwrap_or("agent"))
+            .bind(None::<Uuid>)
+            .bind(&desc)
+            .bind(now)
+            .execute(&state.pool)
+            .await?;
         }
     }
     let item = sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1")

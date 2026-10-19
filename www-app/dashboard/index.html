@@ -1226,7 +1226,10 @@ const Tickets = () => {
   if (!st._loaded) { st._loaded = true; load(); }
   const show = (i) => { st.editItem = i; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
-  const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  // A ticket the CUSTOMER files is stored with sender_type 'customer', so the thread attributes the
+  // opening words to them rather than to the team. The admin console's own "+ New Ticket" keeps the
+  // default ('agent') — it is filed on the workspace's behalf.
+  const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', Object.assign({ sender_type: 'customer' }, data)); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   // ── The conversation (2026-10-19) ─────────────────────────────────────────────────────────────
   // This screen files a ticket (Plan & Billing sends one when checkout is closed) and then showed
   // nothing but its status, so an answer from the team was invisible unless the customer guessed to
