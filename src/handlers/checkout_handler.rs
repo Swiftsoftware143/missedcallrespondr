@@ -292,6 +292,40 @@ pub async fn delete_payment_provider(
 // Checkout Session Creation
 // ──────────────────────────────────────────────
 
+/// The value `plans.payment_provider` holds on a tier that is not sold through a provider (the Free
+/// tier, and any tier the operator has not wired up yet). It is a placeholder, never a provider
+/// name — see the refusal this produced before 2026-10-19: "No active none provider configured".
+const NO_PROVIDER_SENTINEL: &str = "none";
+
+/// A normalised provider name, or `None` when the recorded value names no provider at all.
+///
+/// Pure on purpose: the rule is what stopped an internal placeholder reaching a buyer's screen, so
+/// it is pinned by `provider_sentinel_tests` without needing a database. Trimming and lower-casing
+/// happen in one place, which also makes the provider lookup case-insensitive.
+fn recorded_provider(raw: &str) -> Option<String> {
+    let value = raw.trim().to_ascii_lowercase();
+    if value.is_empty() || value == NO_PROVIDER_SENTINEL {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Every provider_type this install has switched on, ordered so the choice is deterministic.
+///
+/// The fallback for a plan whose own `payment_provider` is the [`NO_PROVIDER_SENTINEL`]: with
+/// exactly one active provider there is no ambiguity about what the customer meant, and the
+/// checkout proceeds instead of refusing forever. With zero or several, the caller refuses rather
+/// than guessing which account the money should reach.
+async fn active_provider_types(pool: &sqlx::PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT provider_type FROM payment_providers \
+         WHERE is_active = true ORDER BY provider_type",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// Get active payment provider configuration
 async fn get_active_provider(
     pool: &sqlx::PgPool,
@@ -481,6 +515,27 @@ pub async fn create_checkout_session(
         return Err(AppError::BadRequest(
             "provider_type is required (stripe, paypal)".into(),
         ));
+    };
+
+    // A plan carries the sentinel `none` in `payment_provider` when it is not sold through a
+    // provider (the Free tier, and any tier the operator has not wired up yet). Handing that value
+    // to the provider lookup produced the refusal the BUYER read on Plan & Billing — the live
+    // string "No active none provider configured" (measured 2026-10-19 in a real browser on
+    // app.missedcallrespondr.com). Two things were wrong with it: `none` is an internal
+    // placeholder, not a provider, and the sentence blames the install for a plan that simply is
+    // not on sale. `none`/empty now means "no provider chosen for this plan": fall back to the
+    // install's one active provider, and when there is none, refuse in words a customer can act
+    // on — the console offers the hand-off request on any refusal that names a provider.
+    let provider_type = match recorded_provider(&provider_type) {
+        Some(named) => named,
+        None => match active_provider_types(&state.pool).await?.as_slice() {
+            [only] => only.clone(),
+            _ => {
+                return Err(AppError::BadRequest(
+                    "No payment provider is connected on this install yet".to_string(),
+                ))
+            }
+        },
     };
 
     let amount = req
@@ -2452,4 +2507,44 @@ pub async fn test_payment_provider(
             "message": format!("Stripe refused the key: {msg}"),
         })),
     ))
+}
+
+#[cfg(test)]
+mod provider_sentinel_tests {
+    //! A plan's `payment_provider` may hold the placeholder `none` (the Free tier, and any tier the
+    //! operator has not wired up yet). Before 2026-10-19 that placeholder was handed straight to the
+    //! provider lookup and its name was read back to the buyer on Plan & Billing:
+    //! `No active none provider configured` — measured live in a browser on
+    //! app.missedcallrespondr.com. These tests pin the rule that stops it.
+    use super::*;
+
+    #[test]
+    fn the_placeholder_never_reads_as_a_provider_name() {
+        for raw in ["none", "NONE", "None", "  none  ", "\tnone\n", "", "   "] {
+            assert_eq!(
+                recorded_provider(raw),
+                None,
+                "{raw:?} must not name a provider"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_provider_survives_normalised() {
+        assert_eq!(recorded_provider("stripe").as_deref(), Some("stripe"));
+        assert_eq!(recorded_provider(" Stripe ").as_deref(), Some("stripe"));
+        assert_eq!(recorded_provider("PAYPAL").as_deref(), Some("paypal"));
+        assert_eq!(recorded_provider("square").as_deref(), Some("square"));
+        assert_eq!(recorded_provider("paddle").as_deref(), Some("paddle"));
+    }
+
+    #[test]
+    fn the_refusal_a_customer_reads_names_no_placeholder() {
+        // The sentence the customer's own screen renders when the fallback finds no active provider.
+        // It has to keep the word "provider": the console keys its "request the plan by hand" offer
+        // on /provider|not configured/i, so dropping the word would dead-end the upgrade instead.
+        let sentence = "No payment provider is connected on this install yet";
+        assert!(sentence.contains("provider"));
+        assert!(!sentence.to_ascii_lowercase().contains(NO_PROVIDER_SENTINEL));
+    }
 }
