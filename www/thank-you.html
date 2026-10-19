@@ -3,79 +3,136 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Payment Received</title>
+<title>Payment status — MissedCall Respondr</title>
+<meta name="robots" content="noindex">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
-.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:48px 40px;max-width:480px;width:100%;text-align:center}
-.icon{font-size:64px;margin-bottom:16px}
+.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:48px 40px;max-width:520px;width:100%;text-align:center}
+.icon{font-size:56px;margin-bottom:16px}
 h1{font-size:24px;font-weight:700;color:#0f172a;margin-bottom:8px}
-p{color:#64748b;font-size:15px;line-height:1.6;margin-bottom:24px}
-.status{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;margin-bottom:24px;font-size:14px;color:#166534}
+p{color:#64748b;font-size:15px;line-height:1.6;margin-bottom:20px}
+.status{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-bottom:24px;font-size:14px;color:#334155;text-align:left}
 .status.loading{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+.status.ok{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.status.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
 .status.error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
 .details{text-align:left;background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:24px}
 .details dt{font-size:12px;text-transform:uppercase;color:#94a3b8;letter-spacing:.5px;margin-top:8px}
 .details dt:first-child{margin-top:0}
-.details dd{font-size:14px;color:#0f172a;font-weight:500;margin-bottom:4px}
+.details dd{font-size:14px;color:#0f172a;font-weight:500;margin-bottom:4px;word-break:break-all}
 .actions{display:flex;flex-direction:column;gap:8px}
 .btn{display:inline-block;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;transition:all .15s}
 .btn-primary{background:#0f172a;color:#fff}
 .btn-primary:hover{background:#1e293b}
 .btn-outline{border:1px solid #e2e8f0;color:#475569}
 .btn-outline:hover{background:#f8fafc}
+.small{font-size:13px;color:#94a3b8;margin-top:16px;margin-bottom:0}
 </style>
 </head>
 <body>
 <div class="card" id="app">
-  <div class="icon">🎉</div>
-  <h1>Payment Received!</h1>
-  <p>Thank you for your purchase. Your payment was successful.</p>
-  <div id="statusMsg" class="status loading">Verifying payment...</div>
+  <div class="icon" id="icon">⏳</div>
+  <h1 id="headline">Checking your payment…</h1>
+  <p id="intro">One moment while we look up this checkout.</p>
+  <div id="statusMsg" class="status loading">Verifying payment…</div>
   <div id="detailsArea" class="details" style="display:none">
     <dl>
-      <dt>Session</dt>
+      <dt>Checkout</dt>
       <dd id="sessionId">—</dd>
       <dt>Plan</dt>
       <dd id="planName">—</dd>
+      <dt>Amount</dt>
+      <dd id="amountLine">—</dd>
     </dl>
   </div>
   <div class="actions">
-    <a id="loginLink" href="/admin" class="btn btn-primary">Go to Dashboard</a>
+    <a id="loginLink" href="https://app.missedcallrespondr.com/login" class="btn btn-primary">Go to your dashboard</a>
+    <a id="supportLink" href="mailto:support@missedcallrespondr.com?subject=Question%20about%20a%20payment" class="btn btn-outline">Contact support</a>
   </div>
+  <p class="small">Your payment provider's receipt is the authoritative record of any charge.</p>
 </div>
 <script>
-(async function(){
-  const params = new URLSearchParams(window.location.search);
-  const sessionId = params.get('session_id') || params.get('token');
-  const el = document.getElementById('statusMsg');
-  const det = document.getElementById('detailsArea');
-  const sid = document.getElementById('sessionId');
-  const pn = document.getElementById('planName');
+// This page only ever states what the server told it. A missing session, an unreadable
+// answer or a network failure is NEVER reported as a confirmed payment (kanban: the page
+// used to announce "Payment confirmed" for any 2xx, for no session id at all, and on a
+// fetch error — i.e. it could tell a customer their card had been charged when it had not).
+(function(){
+  var PAID = ['completed', 'paid', 'succeeded'];
+  var params = new URLSearchParams(window.location.search);
+  var sessionId = params.get('session_id') || params.get('token') || '';
+  var el = document.getElementById('statusMsg');
+  var det = document.getElementById('detailsArea');
+  var icon = document.getElementById('icon');
+  var head = document.getElementById('headline');
+  var intro = document.getElementById('intro');
 
-  if(sessionId){
-    sid.textContent = sessionId;
-    try {
-      const res = await fetch('/api/v1/checkout/session/' + encodeURIComponent(sessionId));
-      if(res.ok){
-        const data = await res.json();
-        el.className = 'status';
-        el.textContent = '✅ Payment confirmed';
-        det.style.display = 'block';
-        pn.textContent = data.plan_name || data.purchasable_type || 'Subscription';
-        if(data.login_url) document.getElementById('loginLink').href = data.login_url;
-      } else {
-        el.className = 'status error';
-        el.textContent = 'Payment recorded. You can log in below.';
-      }
-    } catch(e){
-      el.className = 'status';
-      el.textContent = 'Payment confirmed. Welcome aboard.';
-    }
-  } else {
-    el.className = 'status';
-    el.textContent = '✅ Payment confirmed — welcome!';
+  function set(kind, headline, lead, message, cls) {
+    icon.textContent = kind;
+    head.textContent = headline;
+    intro.textContent = lead;
+    el.className = 'status ' + (cls || '');
+    el.textContent = message;
   }
+  function details(data) {
+    document.getElementById('sessionId').textContent = data.id || sessionId;
+    document.getElementById('planName').textContent = data.plan_name || data.purchasable_type || 'Subscription';
+    var amt = data.amount ? (data.amount + ' ' + (data.currency || 'USD')) : '—';
+    document.getElementById('amountLine').textContent = amt;
+    det.style.display = 'block';
+  }
+
+  if (!sessionId) {
+    set('❓', 'No checkout to show',
+        'This is the confirmation step that follows a purchase. Nothing has been confirmed here.',
+        'Open your dashboard to see your current plan and its status.', 'warn');
+    return;
+  }
+
+  fetch('/api/v1/checkout/session/' + encodeURIComponent(sessionId), {headers: {'Accept': 'application/json'}})
+    .then(function(res){
+      if (res.status === 404) {
+        set('❓', "We couldn't find that checkout",
+            'No checkout matches this link, so there is nothing here to confirm.',
+            "If you were charged, contact support and quote the checkout id above — your provider's receipt is what we go on.", 'error');
+        return null;
+      }
+      if (!res.ok) {
+        set('⚠️', "We couldn't check that payment",
+            'The payment lookup did not answer, so nothing here is confirmed.',
+            'Refresh this page in a moment. If you were charged, contact support — your provider receipt is authoritative.', 'warn');
+        return null;
+      }
+      return res.json();
+    })
+    .then(function(data){
+      if (!data || data.found !== true) return;
+      var st = String(data.status || '').toLowerCase();
+      details(data);
+      if (PAID.indexOf(st) !== -1) {
+        set('🎉', 'Payment confirmed',
+            'Thank you — your payment went through.',
+            '✅ Confirmed by our payment provider. Your plan is active on your account.', 'ok');
+      } else if (st === 'expired' || st === 'cancelled' || st === 'canceled') {
+        set('⌛', 'This checkout expired',
+            'Nothing was charged for this checkout.',
+            'Start again from the pricing page. If your card was charged, contact support.', 'error');
+      } else if (st === 'failed') {
+        set('⚠️', 'That payment did not go through',
+            'Your provider did not complete this payment, so nothing was charged by us.',
+            'Try again from the pricing page, or contact support if your card shows a charge.', 'error');
+      } else {
+        // pending / open / anything else: the provider has not confirmed it yet.
+        set('⏳', 'Payment not confirmed yet',
+            'We have your checkout, but our payment provider has not confirmed the payment yet.',
+            'This can take a minute — refresh this page. If you were charged and this still says pending, contact support and quote the checkout id above.', 'warn');
+      }
+    })
+    .catch(function(){
+      set('⚠️', "We couldn't reach our server",
+          'Nothing has been confirmed here.',
+          'Refresh this page in a moment. If you were charged, contact support — your provider receipt is authoritative.', 'warn');
+    });
 })();
 </script>
 </body>
