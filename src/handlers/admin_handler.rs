@@ -312,7 +312,8 @@ pub async fn list_all_tenants(
             t.id, t.name, t.slug, t.created_at, COALESCE(t.probe_harness, '') AS probe_harness,
             tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
             tp.credit_balance,
-            p.name as plan_name, p.slug as plan_slug, p.price_monthly, p.price_yearly,
+            p.name as plan_name, p.slug as plan_slug, p.price_monthly::float8 AS price_monthly,
+            p.price_yearly::float8 AS price_yearly,
             p.features->>'included_credits' as included_credits,
             (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count,
             (SELECT u.email FROM users u WHERE u.tenant_id = t.id
