@@ -189,6 +189,23 @@ pub async fn push_lead_to_coreswift_detailed(
     source: Option<&str>,
     notes: Option<&str>,
 ) -> Result<(), String> {
+    // Harness residue never reaches the hub (see the `test-mail-hygiene` skill): a probe, canary or
+    // test-run address is not a person, and the contact it creates in the operator's CRM outlives
+    // the probe row that produced it. Measured 2026-10-20 in this fleet: a reserved address pushed
+    // through this path answered `pushed: true` and POSTed to `/api/external/contacts` — exactly the
+    // residue FunnelSwift and ADASwift already refuse. The predicate is the app's own reserved-domain
+    // rule (the same one the mail seam uses), so a routable-but-typo'd address is still pushed.
+    if let Some(addr) = email.map(str::trim).filter(|a| !a.is_empty()) {
+        if crate::security::email_addr::is_reserved_address(addr) {
+            tracing::info!(
+                "CoreSwift push skipped: {addr} is a reserved test address (harness residue stays out of the hub)"
+            );
+            return Err(format!(
+                "{addr} is a reserved test address, so no CRM contact was created"
+            ));
+        }
+    }
+
     let Some((api_key, base_url)) = get_coreswift_connection(state, account_id).await else {
         // Not connected to CoreSwift — nothing to do (this is the no-CRM user case).
         return Err(

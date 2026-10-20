@@ -140,6 +140,23 @@ pub async fn push(
     }
 
     let req = body.map(|Json(b)| b).unwrap_or_default();
+
+    // The delivery path refuses a reserved (harness) address before any request is made. Surface
+    // THAT as itself — a 422 naming the address — instead of letting it fall through to the 424
+    // "CoreSwift refused the push", which would blame the hub for a request it never received
+    // (measured 2026-10-20 against a probe address).
+    if let Some(addr) = req
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+    {
+        if crate::security::email_addr::is_reserved_address(addr) {
+            return Err(AppError::Unprocessable(format!(
+                "{addr} is a reserved test address, so no CRM contact was created"
+            )));
+        }
+    }
     let name = req.name.unwrap_or_default();
     let source = req
         .source
