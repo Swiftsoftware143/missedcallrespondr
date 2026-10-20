@@ -313,6 +313,14 @@ pub async fn list_all_tenants(
             tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
             tp.credit_balance,
             p.name as plan_name, p.slug as plan_slug, p.price_monthly::float8 AS price_monthly,
+            -- The plan the GATES actually enforce for this workspace. `features::resolve_plan_slug`
+            -- falls back to "free" when the tenant has no active `tenant_plans` row, but the list
+            -- above published NULL for those rows, so the operator saw "— no plan —" where the app
+            -- was enforcing a real tier. features.rs states the rule this restores: what the panel
+            -- shows and what the gate read must not diverge.
+            COALESCE(p.name, (SELECT dp.name FROM plans dp
+                              WHERE dp.slug = 'free' AND dp.is_active
+                              ORDER BY dp.sort_order NULLS LAST, dp.created_at LIMIT 1)) AS plan_effective_name,
             p.price_yearly::float8 AS price_yearly,
             p.features->>'included_credits' as included_credits,
             (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count,
@@ -343,6 +351,10 @@ pub async fn list_all_tenants(
             // The plan's SLUG alongside its name (2026-10-19): the Tenants screen's plan cell is a
             // picker now, so it needs the stable key the assign writer takes, not just a label.
             "plan_slug": r.try_get::<Option<String>,_>("plan_slug").ok().flatten(),
+            // The tier the gates enforce when no plan row is assigned (see the query note above),
+            // and whether this row is running on that default rather than an explicit assignment.
+            "plan_effective_name": r.try_get::<Option<String>,_>("plan_effective_name").ok().flatten(),
+            "plan_is_default": r.try_get::<Option<Uuid>,_>("plan_id").ok().flatten().is_none(),
             "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
