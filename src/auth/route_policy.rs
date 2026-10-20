@@ -14,7 +14,9 @@
 //! joined (card t_7bdfcc4a — PROTECTED, so the two anonymous lists are untouched); the 119/104
 //! quoted here until then was one adrift of the code (the tenant plan catalogue of card
 //! t_a57ae7db had been added to the router and to the census TEST but not to this prose), so the
-//! numbers below are the measured ones: 124 = 16 anonymous + 108 protected (re-measured 2026-10-18
+//! numbers below are the measured ones: 125 = 16 anonymous + 109 protected (re-measured
+//! 2026-10-20 after the operator platform-stats read `GET /api/v1/admin/stats` joined — a
+//! PROTECTED mount, so both anonymous lists are untouched; re-measured 2026-10-18
 //! after the sign-in-address change joined, card t_0d1aa081 — its CONFIRM arm is anonymous so the
 //! deliberate-public list went 12 → 13; the admin email send-history read before it was PROTECTED,
 //! so the two anonymous lists were untouched by that one).
@@ -23,10 +25,10 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   124 mounted `.route(..)` entries in the one routing file, 124 distinct paths (every path is
+//!   125 mounted `.route(..)` entries in the one routing file, 125 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   108 entries reach `protected_routes`, which carries `auth_middleware`
+//!   109 entries reach `protected_routes`, which carries `auth_middleware`
 //!    16 entries reach the ANONYMOUS `public_routes`:
 //!        13 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
@@ -505,7 +507,9 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             16
         );
-        // 124 entries / 124 distinct paths (the sign-in-address change joined on 2026-10-18, card
+        // 125 entries / 125 distinct paths (the operator platform-stats read joined on 2026-10-20 —
+        // a PROTECTED `/api/v1/admin/*` mount, so both anonymous lists are untouched; the
+        // sign-in-address change joined on 2026-10-18, card
         // t_0d1aa081 — its CONFIRM arm is an anonymous mount, so PUBLIC_ROUTES went 12 → 13 and the
         // anonymous total 15 → 16; its REQUEST twin is a PROTECTED mount, so protected went
         // 107 → 108. The admin email send-history read joined on 2026-10-18 — a PROTECTED mount, so
@@ -519,11 +523,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 124, "mounted .route entries");
+        assert_eq!(lits.len(), 125, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 124, "distinct mounted paths");
+        assert_eq!(uniq.len(), 125, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
