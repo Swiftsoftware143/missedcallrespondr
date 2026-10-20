@@ -27,6 +27,28 @@ pub fn is_platform_admin(role: &str) -> bool {
     matches!(role, "admin" | "super_admin" | "agency_admin")
 }
 
+/// Does a token's platform-admin CLAIM exceed the authority its `users` row still grants?
+/// (kanban t_28184826)
+///
+/// Measured live on funnelswift 2026-10-20 after kanban t_53fcb666 shipped: the boundary proved the
+/// row EXISTED, but [`admin_surface_denied`] still decided on `claims.role`. So DEMOTING an operator
+/// (the other half of "delete or disable the account") left the token holding the platform surface
+/// for its whole life. A demotion is an `UPDATE users SET role=…`; it has to take effect on the next
+/// request, not at token expiry.
+///
+/// One-directional on purpose: a claim LOWER than the row is not this rule's business and every
+/// tenant surface keeps the behaviour it had. The synthetic roles this app mints are naturally
+/// skipped — `impersonated` and `company_admin` are not platform admins in [`is_platform_admin`], so
+/// neither can ever be "more" than a row.
+pub fn platform_admin_claim_outranks_row(claim_role: &str, row_role: &str) -> bool {
+    is_platform_admin(claim_role) && !is_platform_admin(row_role)
+}
+
+/// The one user-visible string for a credential whose authority the live row no longer backs
+/// (kanban t_28184826). Same wording as the rest of the fleet, so the SPA's 401 arm turns it into
+/// "Session expired" + sign-out rather than a generic error toast.
+pub const SESSION_REVOKED: &str = "This session is no longer valid. Please sign in again.";
+
 /// The platform-admin surface: the `/api/v1/admin/*` prefix this card is about, plus the
 /// `/api/v1/payment-providers` family — same defect, same class (platform-global payment config
 /// with NO tenant face): `routes.rs` labels it "Payment Providers (admin)" and the only caller on
@@ -168,9 +190,25 @@ pub async fn auth_middleware(
     // `users` here has no `is_active` column, so existence is the whole test. Fail closed: a
     // credential naming nobody, and a database that cannot answer, both refuse — 401 and 503
     // respectively, never a pass.
-    match user_exists(&state.pool, claims.sub).await {
-        Ok(true) => {}
-        Ok(false) => {
+    //
+    // The same read now also answers the DEMOTION half (kanban t_28184826): it returns the row's
+    // live `role`, and a credential that still CLAIMS platform-admin authority for a row that no
+    // longer grants it is refused exactly like a deleted account. Before this the admin decision
+    // read `claims.role` alone, so demoting an operator left their token holding the surface.
+    match user_role(&state.pool, claims.sub).await {
+        Ok(Some(row_role)) => {
+            if platform_admin_claim_outranks_row(&claims.role, &row_role) {
+                tracing::warn!(
+                    "refused a platform-admin claim the users row no longer grants (user {})",
+                    claims.sub
+                );
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": SESSION_REVOKED})),
+                ));
+            }
+        }
+        Ok(None) => {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "Invalid or expired token"})),
@@ -189,14 +227,17 @@ pub async fn auth_middleware(
     Ok(next.run(req).await)
 }
 
-/// Does the `users` row named by a token's `sub` still exist?
+/// What the `users` row named by a token's `sub` still grants: its live `role`, or `None` when the
+/// account no longer exists.
 ///
-/// The USER half of the boundary (kanban t_53fcb666). This app's `users` table carries no
-/// `is_active`, so a row that exists is a live account; a deleted one is the only failure mode.
-async fn user_exists(db: &sqlx::PgPool, user_id: uuid::Uuid) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+/// The USER half of the boundary (kanban t_53fcb666) plus the DEMOTION half (kanban t_28184826):
+/// this app's `users` table carries no `is_active`, so a row that exists is a live account — but its
+/// `role` is the authority the row grants TODAY, which the caller compares against the token's
+/// claim.
+async fn user_role(db: &sqlx::PgPool, user_id: uuid::Uuid) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>("SELECT role FROM users WHERE id = $1")
         .bind(user_id)
-        .fetch_one(db)
+        .fetch_optional(db)
         .await
 }
 
@@ -204,8 +245,46 @@ async fn user_exists(db: &sqlx::PgPool, user_id: uuid::Uuid) -> Result<bool, sql
 mod tests {
     use super::{
         admin_surface_denied, admin_surface_denied_for, is_impersonated_session, is_platform_admin,
-        is_stop_impersonation,
+        is_stop_impersonation, platform_admin_claim_outranks_row, SESSION_REVOKED,
     };
+
+    /// The reported defect (kanban t_28184826): the boundary proved the row existed, but the admin
+    /// decision still read `claims.role`, so DEMOTING an operator left the token holding the
+    /// platform surface (admin/tenants, payment providers, platform email templates) for its whole
+    /// life. A claim of platform authority the row no longer grants must be refused, while a claim
+    /// LOWER than the row — and this app's synthetic `impersonated` role — stay exactly as they are.
+    #[test]
+    fn a_platform_admin_claim_the_row_no_longer_grants_is_refused() {
+        for demoted_to in [
+            "account_owner",
+            "company_admin",
+            "business_user",
+            "impersonated",
+            "",
+        ] {
+            for claim in ["admin", "super_admin", "agency_admin"] {
+                assert!(
+                    platform_admin_claim_outranks_row(claim, demoted_to),
+                    "a {claim} claim over a {demoted_to:?} row must be refused"
+                );
+            }
+        }
+        // A real platform admin is untouched.
+        for claim in ["admin", "super_admin", "agency_admin"] {
+            for row in ["admin", "super_admin", "agency_admin"] {
+                assert!(!platform_admin_claim_outranks_row(claim, row));
+            }
+        }
+        // One-directional: a lower claim never trips it, so tenant surfaces keep their behaviour.
+        assert!(!platform_admin_claim_outranks_row("account_owner", "admin"));
+        assert!(!platform_admin_claim_outranks_row("impersonated", "admin"));
+        assert!(!platform_admin_claim_outranks_row(
+            "company_admin",
+            "account_owner"
+        ));
+        // The refusal is the fleet's "session expired" string, which the SPA matches.
+        assert!(SESSION_REVOKED.contains("sign in again"));
+    }
 
     #[test]
     fn platform_admin_roles_are_the_union_the_handlers_accept() {
