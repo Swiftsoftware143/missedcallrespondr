@@ -196,10 +196,23 @@ pub async fn auth_middleware(
     // longer grants it is refused exactly like a deleted account. Before this the admin decision
     // read `claims.role` alone, so demoting an operator left their token holding the surface.
     match user_role(&state.pool, claims.sub).await {
-        Ok(Some(row_role)) => {
+        Ok(Some((row_role, valid_from))) => {
             if platform_admin_claim_outranks_row(&claims.role, &row_role) {
                 tracing::warn!(
                     "refused a platform-admin claim the users row no longer grants (user {})",
+                    claims.sub
+                );
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": SESSION_REVOKED})),
+                ));
+            }
+            // SESSION REVOCATION (kanban t_80787a0f): the same read returns the instant this
+            // account last changed or reset its password, so a token minted before it stops here —
+            // 401, exactly like a deleted account. NULL (never rotated) changes nothing.
+            if session_predates_password_change(Some(claims.iat as i64), valid_from) {
+                tracing::warn!(
+                    "refused a session minted before the account's password change (user {})",
                     claims.sub
                 );
                 return Err((
@@ -227,25 +240,54 @@ pub async fn auth_middleware(
     Ok(next.run(req).await)
 }
 
-/// What the `users` row named by a token's `sub` still grants: its live `role`, or `None` when the
-/// account no longer exists.
+/// What the `users` row named by a token's `sub` still grants: its live `role` and the instant its
+/// sessions were last ended by a password change, or `None` when the account no longer exists.
 ///
 /// The USER half of the boundary (kanban t_53fcb666) plus the DEMOTION half (kanban t_28184826):
 /// this app's `users` table carries no `is_active`, so a row that exists is a live account — but its
 /// `role` is the authority the row grants TODAY, which the caller compares against the token's
 /// claim.
-async fn user_role(db: &sqlx::PgPool, user_id: uuid::Uuid) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar::<_, String>("SELECT role FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(db)
-        .await
+///
+/// The second field is `users.sessions_valid_from` as a unix epoch (`None` = this account never
+/// changed or reset its password, so no session is restricted); a token whose `iat` predates it is
+/// refused, which is what makes a password change revoke the sessions that came before it (kanban
+/// t_80787a0f).
+async fn user_role(
+    db: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+) -> Result<Option<(String, Option<i64>)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, Option<i64>)>(
+        "SELECT role, floor(EXTRACT(EPOCH FROM sessions_valid_from))::bigint
+           FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(db)
+    .await
+}
+
+/// Does a session minted at `jwt_iat` predate the instant its account last changed or reset its
+/// password? (kanban t_80787a0f)
+///
+/// Pure, so both arms are unit-tested. `valid_from` is `users.sessions_valid_from` as a unix epoch
+/// (`None` = never restricted, which is every account until it rotates its password, so every
+/// token already in the wild keeps working). A session with no `iat` cannot prove it is newer than
+/// the change, and the safe answer for a credential is "cannot prove → refuse". `iat` is second-granularity (and the change's own timestamp is floored to a second for this reason), so a session minted in the SAME second as the change cannot be told apart from a re-login and is allowed.
+pub fn session_predates_password_change(jwt_iat: Option<i64>, valid_from: Option<i64>) -> bool {
+    match valid_from {
+        None => false,
+        Some(v) => match jwt_iat {
+            None => true,
+            Some(iat) => iat < v,
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         admin_surface_denied, admin_surface_denied_for, is_impersonated_session, is_platform_admin,
-        is_stop_impersonation, platform_admin_claim_outranks_row, SESSION_REVOKED,
+        is_stop_impersonation, platform_admin_claim_outranks_row, session_predates_password_change,
+        SESSION_REVOKED,
     };
 
     /// The reported defect (kanban t_28184826): the boundary proved the row existed, but the admin
@@ -446,5 +488,24 @@ mod tests {
                 false
             ));
         }
+    }
+
+    /// The reported defect (kanban t_80787a0f): changing or resetting the password revoked
+    /// nothing. The rule is one comparison — a session minted BEFORE `users.sessions_valid_from`
+    /// is refused — and it must change nothing else: a NULL timestamp (every account that never
+    /// rotated), a session minted at or after the change, and a session with no `iat` on an
+    /// unrestricted row all stay exactly as they were.
+    #[test]
+    fn a_session_minted_before_the_password_change_is_refused_and_nothing_else_is() {
+        // NULL column: never restricted, so every token already in the wild keeps working.
+        assert!(!session_predates_password_change(Some(1_000), None));
+        // Minted BEFORE the change -> refused.
+        assert!(session_predates_password_change(Some(1_000), Some(2_000)));
+        // Minted AT the change or after it -> allowed (a re-login must work).
+        assert!(!session_predates_password_change(Some(2_000), Some(2_000)));
+        assert!(!session_predates_password_change(Some(3_000), Some(2_000)));
+        // A session that cannot prove it is newer is refused rather than trusted.
+        assert!(session_predates_password_change(None, Some(2_000)));
+        assert!(!session_predates_password_change(None, None));
     }
 }

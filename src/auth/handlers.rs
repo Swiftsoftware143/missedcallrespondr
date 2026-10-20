@@ -279,11 +279,16 @@ pub async fn change_password(
     let new_hash =
         hash_password(&req.new_password).map_err(|e| AppError::Internal(e.to_string()))?;
 
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&new_hash)
-        .bind(user.id)
-        .execute(&state.pool)
-        .await?;
+    // SESSION REVOCATION (kanban t_80787a0f): a password change/reset also ends every JWT
+    // minted BEFORE it (`users.sessions_valid_from`), refused at the boundary read.
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, sessions_valid_from = NOW(), updated_at = NOW() \
+           WHERE id = $2",
+    )
+    .bind(&new_hash)
+    .bind(user.id)
+    .execute(&state.pool)
+    .await?;
 
     Ok(Json(
         serde_json::json!({"message": "Password updated successfully"}),
@@ -563,11 +568,16 @@ pub async fn reset_password(
     let new_hash =
         hash_password(&req.new_password).map_err(|e| AppError::Internal(e.to_string()))?;
 
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&new_hash)
-        .bind(user_id)
-        .execute(&state.pool)
-        .await?;
+    // SESSION REVOCATION (kanban t_80787a0f): a password change/reset also ends every JWT
+    // minted BEFORE it (`users.sessions_valid_from`), refused at the boundary read.
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, sessions_valid_from = NOW(), updated_at = NOW() \
+           WHERE id = $2",
+    )
+    .bind(&new_hash)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await?;
 
     sqlx::query("UPDATE password_resets SET used = true WHERE id = $1")
         .bind(reset_id)
