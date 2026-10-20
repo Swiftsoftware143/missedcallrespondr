@@ -359,6 +359,25 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000043_tickets_carry_the_requested_plan",
             include_str!("../migrations/000043_tickets_carry_the_requested_plan.sql"),
         ),
+        // UNREGISTERED UNTIL NOW (found 2026-10-20). `000043_password_change_revokes_sessions.sql`
+        // shipped in commit efa35fa and its column exists on the live database — but it was never
+        // added to this list, so the boot runner never executes it and a FRESH database (a new
+        // install, a from-zero baseline) lacks `users.sessions_valid_from`. The auth middleware
+        // reads that column on every guarded request, so a fresh install would have booted into a
+        // 500 rather than a login. `ADD COLUMN IF NOT EXISTS`, so re-running on live is a no-op.
+        (
+            "000043_password_change_revokes_sessions",
+            include_str!("../migrations/000043_password_change_revokes_sessions.sql"),
+        ),
+        // A workspace must be DELETABLE (measured live 2026-10-20): three keys on `users` carried
+        // NO ACTION, so `POST /api/v1/admin/tenants/bulk-delete` answered `deleted:0` with a raw
+        // Postgres foreign-key sentence for any workspace whose owner had ever pressed "Forgot
+        // password", had call activity, or had an assigned follow-up. Catalog-only and guarded on
+        // the current delete rule, so it is idempotent under this runner's re-execute-every-boot.
+        (
+            "000044_workspace_delete_cascades",
+            include_str!("../migrations/000044_workspace_delete_cascades.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
