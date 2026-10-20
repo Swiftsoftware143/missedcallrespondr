@@ -614,6 +614,10 @@ pub fn create_router(state: AppState) -> Router {
         // builds a store nothing can name.
         // Admin endpoints (cross-app portfolio sync + impersonation)
         .route(
+            "/api/v1/admin/stats",
+            get(crate::handlers::admin_handler::platform_stats),
+        )
+        .route(
             "/api/v1/admin/portfolio-sync",
             post(crate::handlers::admin_handler::portfolio_sync),
         )

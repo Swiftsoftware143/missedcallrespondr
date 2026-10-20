@@ -599,3 +599,39 @@ pub async fn bulk_delete_tenants(
         "failed": failed
     })))
 }
+
+/// `GET /api/v1/admin/stats` — the OPERATOR's platform-wide figures (cron 2026-10-20).
+///
+/// WHY THIS EXISTS. The operator console's landing screen read `/api/v1/dashboard/stats`, whose
+/// every count is scoped to `claims.aid` — the OPERATOR'S OWN workspace — and carried the caption
+/// "Counts are this workspace's own." Measured live on this app: a platform admin signing in to the
+/// admin console saw Response Rules / Templates / Contacts / Missed Calls all at 0 while the fleet
+/// held real workspaces, and the one number that makes money — how many customers are waiting for
+/// a plan — appeared nowhere on the landing screen. An operator could file a plan request from a
+/// customer and never be told it existed without opening the Tickets screen by hand.
+///
+/// The route sits under `/api/v1/admin/`, so `auth::middleware` has already refused a tenant token
+/// before this handler runs; it reads only aggregate counts, never another workspace's rows.
+pub async fn platform_stats(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+    let row: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+           (SELECT COUNT(*) FROM tenants)::bigint, \
+           (SELECT COUNT(*) FROM users)::bigint, \
+           (SELECT COUNT(*) FROM inbound_calls)::bigint, \
+           (SELECT COUNT(*) FROM inbound_calls WHERE disposition = 'missed')::bigint, \
+           (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved','closed'))::bigint, \
+           (SELECT COUNT(*) FROM tickets WHERE source = 'plan_request' \
+              AND status NOT IN ('resolved','closed'))::bigint",
+    )
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(json!({
+        "workspaces": row.0,
+        "users": row.1,
+        "calls_received": row.2,
+        "missed_calls": row.3,
+        "open_tickets": row.4,
+        "plan_requests_waiting": row.5,
+    })))
+}
