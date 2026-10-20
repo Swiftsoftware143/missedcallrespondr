@@ -15,6 +15,10 @@ pub struct Ticket {
     pub source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// The tier a plan request asks for (cron 2026-10-20). `None` on an ordinary ticket.
+    pub plan_slug: Option<String>,
+    /// When an operator's resolve seated `plan_slug` on the workspace. `None` = not applied yet.
+    pub plan_applied_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -41,6 +45,10 @@ pub struct CreateTicketRequest {
     pub assigned_to: Option<Uuid>,
     pub contact_id: Option<Uuid>,
     pub source: Option<String>,
+    /// The plan catalogue slug this request is for (cron 2026-10-20). Optional: an ordinary ticket
+    /// names no plan, and every existing caller keeps working unchanged.
+    #[serde(default)]
+    pub plan_slug: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

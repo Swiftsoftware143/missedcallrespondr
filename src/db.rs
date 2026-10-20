@@ -351,6 +351,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000042_ticket_reply_template",
             include_str!("../migrations/000042_ticket_reply_template.sql"),
         ),
+        // The tier a plan request asks for, and when an operator's resolve actually seated it
+        // (cron 2026-10-20). Catalog-only and idempotent, because this runner keeps NO ledger and
+        // re-executes every file on each boot — the boot runner applies it, so no Rust besides this
+        // registration is needed for the columns to exist.
+        (
+            "000043_tickets_carry_the_requested_plan",
+            include_str!("../migrations/000043_tickets_carry_the_requested_plan.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

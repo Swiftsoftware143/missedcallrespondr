@@ -67,6 +67,12 @@ pub struct OperatorTicket {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub tenant_name: String,
     pub account_email: String,
+    /// The tier the request asks for (cron 2026-10-20), and its catalogue name — so the operator row
+    /// says "Pro", not a slug, and a request for an ordinary ticket stays empty.
+    pub plan_slug: Option<String>,
+    pub plan_name: Option<String>,
+    /// When the resolve seated it; `None` = still waiting.
+    pub plan_applied_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// The ticket `id`, as this caller is allowed to reach it.
@@ -109,8 +115,12 @@ pub async fn list(
             r#"SELECT t.id, t.tenant_id, t.subject, t.status, t.priority, t.assigned_to,
                       t.contact_id, t.source, t.created_at, t.updated_at,
                       COALESCE(tn.name, '') AS tenant_name,
-                      COALESCE(u.email, '') AS account_email
+                      COALESCE(u.email, '') AS account_email,
+                      t.plan_slug,
+                      COALESCE(p.name, t.plan_slug) AS plan_name,
+                      t.plan_applied_at
                FROM tickets t
+               LEFT JOIN plans p ON p.slug = t.plan_slug
                LEFT JOIN tenants tn ON tn.id = t.tenant_id
                LEFT JOIN LATERAL (
                    SELECT email FROM users
@@ -203,9 +213,32 @@ pub async fn create(
     crate::features::check_feature_limit(&state.pool, claims.aid, "max_tickets", "Tickets").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
+    // The tier a plan request ASKS FOR travels with the row (cron 2026-10-20). It used to live only as
+    // words inside `subject` ("Upgrade request: Pro plan"), so the operator's resolve had nothing
+    // machine-readable to seat and the customer stayed on the free plan while being told the request
+    // was handled — measured live. Validated against the ACTIVE catalogue here, so a typo or a retired
+    // tier is a 400 at filing time instead of a request no operator can match to a plan.
+    let plan_slug = req
+        .plan_slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase);
+    if let Some(slug) = plan_slug.as_deref() {
+        let known: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM plans WHERE slug = $1 AND is_active = true")
+                .bind(slug)
+                .fetch_optional(&state.pool)
+                .await?;
+        if known.is_none() {
+            return Err(AppError::BadRequest(format!(
+                "No active plan with slug '{slug}'"
+            )));
+        }
+    }
     sqlx::query(
-        "INSERT INTO tickets (id, tenant_id, subject, status, priority, assigned_to, contact_id, source, created_at, updated_at) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        "INSERT INTO tickets (id, tenant_id, subject, status, priority, assigned_to, contact_id, source, created_at, updated_at, plan_slug) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
     )
     .bind(id)
     .bind(claims.aid)
@@ -217,6 +250,7 @@ pub async fn create(
     .bind(req.source.as_deref().unwrap_or("manual"))
     .bind(now)
     .bind(now)
+    .bind(plan_slug.as_deref())
     .execute(&state.pool)
     .await?;
     // First message = description body
@@ -341,16 +375,17 @@ pub async fn update(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateTicketRequest>,
-) -> Result<Json<Ticket>, AppError> {
+) -> Result<Json<serde_json::Value>, AppError> {
     check_opt_len("status", req.status.as_deref(), max::TICKETS_STATUS)?;
     check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
     let existing = ticket_visible_to(&state.pool, &claims, id).await?;
     let now = chrono::Utc::now();
+    let next_status = req.status.as_ref().unwrap_or(&existing.status).clone();
     sqlx::query(
         "UPDATE tickets SET subject=$1, status=$2, priority=$3, assigned_to=$4, contact_id=$5, updated_at=$6 WHERE id=$7",
     )
     .bind(req.subject.as_ref().unwrap_or(&existing.subject))
-    .bind(req.status.as_ref().unwrap_or(&existing.status))
+    .bind(&next_status)
     .bind(req.priority.as_ref().unwrap_or(&existing.priority))
     .bind(req.assigned_to.or(existing.assigned_to))
     .bind(req.contact_id.or(existing.contact_id))
@@ -358,11 +393,76 @@ pub async fn update(
     .bind(id)
     .execute(&state.pool)
     .await?;
+
+    // MOVE THE WORKSPACE ONTO THE PLAN IT ASKED FOR (cron 2026-10-20). Before this an operator's
+    // "resolved" changed one word on the row: the customer was told the request was handled while
+    // `tenant_plans` still seated the free plan — measured live (filed Pro, resolved, `/auth/me` still
+    // answered plan_name "Free"). ONLY an operator can trigger the seat: the customer may also PATCH
+    // their own ticket, and letting that arm seat a plan would hand every tenant a free upgrade.
+    //
+    // Idempotent through `plan_applied_at`, and it seats through `seat_plan_for_tenant` — the same
+    // statement the panel's "Assign plan" uses, so the one-row-per-tenant invariant
+    // (`tenant_plans_tenant_id_key`) and the credits columns keep their single writer.
+    let mut plan_applied = false;
+    let mut applied_plan_name: Option<String> = None;
+    if caller_is_operator(&claims)
+        && matches!(next_status.as_str(), "resolved" | "closed")
+        && existing.plan_applied_at.is_none()
+    {
+        if let Some(slug) = existing.plan_slug.as_deref() {
+            let plan: Option<(Uuid, String)> =
+                sqlx::query_as("SELECT id, name FROM plans WHERE slug = $1 AND is_active = true")
+                    .bind(slug)
+                    .fetch_optional(&state.pool)
+                    .await?;
+            match plan {
+                Some((plan_id, plan_name)) => {
+                    crate::handlers::plans_handler::seat_plan_for_tenant(
+                        &state,
+                        existing.tenant_id,
+                        plan_id,
+                        None,
+                    )
+                    .await?;
+                    sqlx::query("UPDATE tickets SET plan_applied_at = NOW() WHERE id = $1")
+                        .bind(id)
+                        .execute(&state.pool)
+                        .await?;
+                    plan_applied = true;
+                    applied_plan_name = Some(plan_name);
+                    tracing::info!(
+                        ticket = %id,
+                        tenant = %existing.tenant_id,
+                        plan = %slug,
+                        "Plan request resolved — the workspace was seated on the requested plan"
+                    );
+                }
+                None => {
+                    tracing::warn!(
+                        ticket = %id,
+                        plan = %slug,
+                        "Plan request names a tier that is no longer active — status only, nothing seated"
+                    );
+                }
+            }
+        }
+    }
+
     let item = sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1")
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
-    Ok(Json(item))
+    // The row's own fields, unchanged, plus what the resolve actually did — a superset, so every
+    // existing caller of this route reads exactly what it read before.
+    let mut out = serde_json::to_value(&item).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("plan_applied".to_string(), serde_json::json!(plan_applied));
+        obj.insert(
+            "plan_name".to_string(),
+            serde_json::json!(applied_plan_name),
+        );
+    }
+    Ok(Json(out))
 }
 
 pub async fn add_message(
