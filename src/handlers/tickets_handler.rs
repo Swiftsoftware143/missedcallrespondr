@@ -76,7 +76,7 @@ pub async fn create(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
     Json(req): Json<CreateTicketRequest>,
-) -> Result<Json<Ticket>, AppError> {
+) -> Result<Json<serde_json::Value>, AppError> {
     check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
     check_opt_len("source", req.source.as_deref(), max::TICKETS_SOURCE)?;
     check_opt_len(
@@ -124,7 +124,78 @@ pub async fn create(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
-    Ok(Json(item))
+    // A BILLING ticket is the Plan & Billing screen's request (cron 2026-10-20). While checkout is
+    // closed that request IS the buying path, and until now the row was written while the customer's
+    // inbox stayed empty. `acknowledged` is reported so the screen can only promise a mail that was
+    // actually queued; it is flat in the body so every existing field reads exactly as before.
+    let acknowledged = if item.source == "billing" {
+        notify_customer_of_billing_request(&state, &item).await
+    } else {
+        false
+    };
+    let mut out = serde_json::to_value(&item).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("acknowledged".to_string(), serde_json::json!(acknowledged));
+    }
+    Ok(Json(out))
+}
+
+/// Tell the CUSTOMER their plan request was received (cron 2026-10-20).
+///
+/// `POST /api/v1/tickets` with `source: "billing"` is what the Plan & Billing screen files when
+/// checkout refuses (this install has no payment provider), so it is the only way a customer can ask
+/// to buy. The row was recorded and nothing was sent: they asked to hand over money and heard
+/// nothing until an operator happened to answer. Sends through `email::send_template_email` — the ONE
+/// funnel carrying per-tenant branding, the tenant's editable template and the reserved-address
+/// suppression — so a probe account is recorded `withheld` and no message is attempted.
+/// Best-effort by construction: a mail failure is logged and never fails a filed request.
+async fn notify_customer_of_billing_request(state: &AppState, ticket: &Ticket) -> bool {
+    let owner: Option<(Option<String>, String)> = match sqlx::query_as(
+        "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
+    )
+    .bind(ticket.tenant_id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(
+                "tickets.create: owner lookup failed (tenant_id={}): {e}",
+                ticket.tenant_id
+            );
+            return false;
+        }
+    };
+    let Some((name, email)) = owner else {
+        tracing::warn!(
+            "tickets.create: no user to acknowledge for tenant {}",
+            ticket.tenant_id
+        );
+        return false;
+    };
+    let vars = serde_json::json!({
+        "name": name.unwrap_or_else(|| "there".to_string()),
+        "request_subject": ticket.subject,
+        "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
+    });
+    match crate::email::send_template_email(
+        &state.pool,
+        ticket.tenant_id,
+        &email,
+        "billing_request_receipt",
+        &vars,
+    )
+    .await
+    {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(
+                "tickets.create: plan-request receipt to {email} failed (ticket {}): {e}",
+                ticket.id
+            );
+            false
+        }
+    }
 }
 
 pub async fn get(

@@ -1619,7 +1619,7 @@ const Billing = () => {
     if (!want || st.busy) return;
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
-      await API.post('/tickets', {
+      const res = await API.post('/tickets', {
         subject: 'Upgrade request: ' + want.name + ' plan',
         description: 'This workspace asked to move to the ' + want.name + ' plan ($' + want.price
           + '/month) from Plan & Billing. Self-serve checkout is not open on this install, so the'
@@ -1627,8 +1627,12 @@ const Billing = () => {
         priority: 'normal',
         source: 'billing'
       });
+      // The receipt is best-effort on the server, so the promise is made only when the server says it
+      // actually queued one (`acknowledged`). Before this the customer was never told a copy was
+      // coming, because none was ever sent.
       st.notice = 'Request sent \u2014 our team will move this workspace to the ' + want.name
-        + ' plan and confirm here.';
+        + ' plan and confirm here.'
+        + ((res && res.acknowledged) ? ' We have emailed you a copy of this request.' : '');
       st.requestFor = null;
       loadPlanRequests(st);
     } catch (e) {

@@ -231,6 +231,9 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
         // asked about, because "MissedCall Respondr Notification" tells them nothing and reads like
         // marketing on a thread they started.
         "ticket_reply" => "We answered your request".to_string(),
+        // The receipt for a filed plan request (cron 2026-10-20). Named for what the customer just
+        // did, so it is not mistaken for the answer itself — the answer arrives later, from a person.
+        "billing_request_receipt" => format!("We have your plan request — {}", app_name),
         _ => format!("{} Notification", app_name),
     }
 }
@@ -363,6 +366,30 @@ async fn send_inline(
                 template_type,
                 to,
                 &format!("We answered your request: {subject_line}"),
+                &body,
+                "",
+            )
+            .await
+        }
+        // The receipt for a plan request (cron 2026-10-20). Reached whenever the tenant has no
+        // `billing_request_receipt` template row, which is the normal state on a fresh install — so
+        // this body is the REAL mail most customers get, not a placeholder. On an install with no
+        // payment provider the Plan & Billing screen's request IS the buying path, and until this
+        // arm existed the row was written while the customer's inbox stayed empty.
+        "billing_request_receipt" => {
+            let request_subject = vars
+                .get("request_subject")
+                .and_then(|v| v.as_str())
+                .unwrap_or("your request");
+            let body = format!(
+                "Hi {name},\n\nThanks — we have your request:\n\n    {request_subject}\n\nNothing has been charged. A person (not a robot) reads it and answers you by email, and you can see where it stands under Tickets on your dashboard: {app_url}/dashboard\n\nIf you would rather not go ahead, reply to this message and we will close it.\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("We have your plan request — {app_name}"),
                 &body,
                 "",
             )
