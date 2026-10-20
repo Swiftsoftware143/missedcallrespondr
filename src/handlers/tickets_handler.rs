@@ -21,15 +21,113 @@ pub struct ListQuery {
     pub offset: Option<i64>,
     pub status: Option<String>,
     pub priority: Option<String>,
+    /// EXACT source filter (`plan_request`, `billing`, `manual`, …). Added for the operator's Plan
+    /// Requests queue, which asks for the two sources a plan change is filed under. Omitted, every
+    /// source comes back, so no existing caller changes shape.
+    pub source: Option<String>,
+}
+
+/// Is the caller a PLATFORM OPERATOR — the team that answers plan requests?
+///
+/// The customer consoles file a plan change as a `source = "billing"` ticket (the Plan & Billing
+/// screen's "Request the <plan> plan" button). Until this predicate existed every read in this module
+/// was scoped to `claims.aid`, so a request filed by a customer lived in a workspace the operator
+/// could not open: measured live 2026-10-20, the customer's POST answered 200 (and mailed them a
+/// receipt) while the operator's `GET /api/v1/tickets` returned **0 rows** and
+/// `GET`/`PUT /api/v1/tickets/:id` answered **404** for the very id the customer had just been given.
+/// The fleet's other apps close the same gap from the same direction (IncentiveSwift reads the whole
+/// queue for an operator; WorkflowSwift has an admin Plan Requests screen).
+///
+/// This only ever WIDENS what a platform role can see. A customer keeps the strict workspace scope,
+/// so no ticket becomes readable by another tenant's customer.
+fn caller_is_operator(claims: &Claims) -> bool {
+    matches!(
+        claims.role.as_str(),
+        "admin" | "super_admin" | "agency_admin"
+    )
+}
+
+/// A ticket as the OPERATOR's queue shows it: the row plus whose workspace filed it.
+///
+/// `tenant_name` and `account_email` are what make a request actionable — "Upgrade request: Starter
+/// plan" alone does not say which customer asked. They are joined in the query rather than fetched per
+/// row, and `COALESCE` keeps the shape of the JSON fixed when a tenant or owner is missing.
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct OperatorTicket {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub subject: String,
+    pub status: String,
+    pub priority: String,
+    pub assigned_to: Option<Uuid>,
+    pub contact_id: Option<Uuid>,
+    pub source: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub tenant_name: String,
+    pub account_email: String,
+}
+
+/// The ticket `id`, as this caller is allowed to reach it.
+///
+/// One place decides the access rule so `get`, `update`, `add_message` and `delete` cannot drift
+/// apart: a customer sees their own workspace's ticket, an operator sees any ticket. A row the caller
+/// may not reach is a 404 (not a 403) — a 403 would confirm that someone else's ticket exists.
+async fn ticket_visible_to(
+    pool: &sqlx::PgPool,
+    claims: &Claims,
+    id: Uuid,
+) -> Result<Ticket, AppError> {
+    let row = if caller_is_operator(claims) {
+        sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+    } else {
+        sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(claims.aid)
+            .fetch_optional(pool)
+            .await?
+    };
+    row.ok_or_else(|| AppError::NotFound("Ticket not found".into()))
 }
 
 pub async fn list(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
-) -> Result<Json<Vec<Ticket>>, AppError> {
+) -> Result<Json<serde_json::Value>, AppError> {
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let offset = q.offset.unwrap_or(0).max(0);
+    // An OPERATOR reads the WHOLE queue (cron 2026-10-20). A customer's plan request is a ticket in
+    // THEIR workspace, and scoping the read to the operator's own workspace made the one screen built
+    // to work those requests permanently empty. The customer arm below keeps the strict scope.
+    if caller_is_operator(&claims) {
+        let rows = sqlx::query_as::<_, OperatorTicket>(
+            r#"SELECT t.id, t.tenant_id, t.subject, t.status, t.priority, t.assigned_to,
+                      t.contact_id, t.source, t.created_at, t.updated_at,
+                      COALESCE(tn.name, '') AS tenant_name,
+                      COALESCE(u.email, '') AS account_email
+               FROM tickets t
+               LEFT JOIN tenants tn ON tn.id = t.tenant_id
+               LEFT JOIN LATERAL (
+                   SELECT email FROM users
+                   WHERE tenant_id = t.tenant_id
+                   ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC
+                   LIMIT 1
+               ) u ON TRUE
+               WHERE ($1::text IS NULL OR t.source = $1)
+               ORDER BY t.created_at DESC
+               LIMIT $2 OFFSET $3"#,
+        )
+        .bind(&q.source)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.pool)
+        .await?;
+        return Ok(Json(serde_json::json!(rows)));
+    }
     let items = match (&q.status, &q.priority) {
         (Some(s), Some(p)) => sqlx::query_as::<_, Ticket>(
             "SELECT * FROM tickets WHERE tenant_id = $1 AND status = $2 AND priority = $3 ORDER BY created_at DESC LIMIT $4 OFFSET $5",
@@ -48,25 +146,42 @@ pub async fn list(
         )
         .bind(claims.aid).bind(limit).bind(offset).fetch_all(&state.pool).await?,
     };
-    Ok(Json(items))
+    Ok(Json(serde_json::json!(items)))
 }
 
 pub async fn stats(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
-        "SELECT \
-            COUNT(*) FILTER (WHERE status='open'), \
-            COUNT(*) FILTER (WHERE status='in_progress'), \
-            COUNT(*) FILTER (WHERE status='resolved'), \
-            COUNT(*) FILTER (WHERE status='closed'), \
-            COUNT(*) \
-         FROM tickets WHERE tenant_id = $1",
-    )
-    .bind(claims.aid)
-    .fetch_one(&state.pool)
-    .await?;
+    // The counters follow the same rule as the queue: an operator's numbers are the fleet's ticket
+    // numbers, a customer's are their own. A queue that lists another workspace's request while the
+    // counters say zero is the kind of half-truth that makes an operator distrust both.
+    let row = if caller_is_operator(&claims) {
+        sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+            "SELECT \
+                COUNT(*) FILTER (WHERE status='open'), \
+                COUNT(*) FILTER (WHERE status='in_progress'), \
+                COUNT(*) FILTER (WHERE status='resolved'), \
+                COUNT(*) FILTER (WHERE status='closed'), \
+                COUNT(*) \
+             FROM tickets",
+        )
+        .fetch_one(&state.pool)
+        .await?
+    } else {
+        sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+            "SELECT \
+                COUNT(*) FILTER (WHERE status='open'), \
+                COUNT(*) FILTER (WHERE status='in_progress'), \
+                COUNT(*) FILTER (WHERE status='resolved'), \
+                COUNT(*) FILTER (WHERE status='closed'), \
+                COUNT(*) \
+             FROM tickets WHERE tenant_id = $1",
+        )
+        .bind(claims.aid)
+        .fetch_one(&state.pool)
+        .await?
+    };
     Ok(Json(serde_json::json!({
         "open": row.0, "in_progress": row.1, "resolved": row.2, "closed": row.3, "total": row.4
     })))
@@ -203,13 +318,7 @@ pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let ticket =
-        sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
-            .bind(id)
-            .bind(claims.aid)
-            .fetch_optional(&state.pool)
-            .await?
-            .ok_or_else(|| AppError::NotFound("Ticket not found".into()))?;
+    let ticket = ticket_visible_to(&state.pool, &claims, id).await?;
     let messages = sqlx::query_as::<_, TicketMessage>(
         "SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC",
     )
@@ -229,13 +338,7 @@ pub async fn update(
 ) -> Result<Json<Ticket>, AppError> {
     check_opt_len("status", req.status.as_deref(), max::TICKETS_STATUS)?;
     check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
-    let existing =
-        sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
-            .bind(id)
-            .bind(claims.aid)
-            .fetch_optional(&state.pool)
-            .await?
-            .ok_or_else(|| AppError::NotFound("Ticket not found".into()))?;
+    let existing = ticket_visible_to(&state.pool, &claims, id).await?;
     let now = chrono::Utc::now();
     sqlx::query(
         "UPDATE tickets SET subject=$1, status=$2, priority=$3, assigned_to=$4, contact_id=$5, updated_at=$6 WHERE id=$7",
@@ -267,13 +370,7 @@ pub async fn add_message(
         req.sender_type.as_deref(),
         max::TICKET_MESSAGES_SENDER_TYPE,
     )?;
-    let ticket =
-        sqlx::query_as::<_, Ticket>("SELECT * FROM tickets WHERE id = $1 AND tenant_id = $2")
-            .bind(id)
-            .bind(claims.aid)
-            .fetch_optional(&state.pool)
-            .await?
-            .ok_or_else(|| AppError::NotFound("Ticket not found".into()))?;
+    let ticket = ticket_visible_to(&state.pool, &claims, id).await?;
     // How many messages the thread already held BEFORE this one. `create()` stores the opening
     // description as the first message, so a non-zero count is what separates a genuine REPLY from
     // that description being stored again — without it, filing a ticket would email the customer a
@@ -377,9 +474,9 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let result = sqlx::query("DELETE FROM tickets WHERE id = $1 AND tenant_id = $2")
-        .bind(id)
-        .bind(claims.aid)
+    let ticket = ticket_visible_to(&state.pool, &claims, id).await?;
+    let result = sqlx::query("DELETE FROM tickets WHERE id = $1")
+        .bind(ticket.id)
         .execute(&state.pool)
         .await?;
     if result.rows_affected() == 0 {
