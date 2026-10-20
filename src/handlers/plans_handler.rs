@@ -1121,12 +1121,27 @@ pub async fn admin_assign_plan(
     if tenant_exists.is_none() {
         return Err(AppError::NotFound(format!("No tenant with id {tenant_id}")));
     }
-    let plan_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM plans WHERE id = $1")
-        .bind(plan_id)
-        .fetch_optional(&state.pool)
-        .await?;
-    if plan_exists.is_none() {
+    // The plan must exist AND still be on sale. MEASURED LIVE 2026-10-20: this action accepted
+    // the RETIRED `Pro` row (`is_active = false`, slug `pro`) — `POST /api/v1/admin/plans/assign`
+    // answered 200, `tenant_plans` moved to it, and the customer's own `/auth/me` then reported
+    // `plan_name: "Pro"` while their billing screen offered only Free / Pro Monthly / Enterprise.
+    // A workspace was therefore seated on a tier no surface sells, could not see it in its own
+    // catalogue, and could not pick it again. The operator DOES have a re-activate control on the
+    // Plans table, so seating a retired tier is never the intended action — refuse it by name.
+    let plan: Option<(Uuid, String, bool)> =
+        sqlx::query_as("SELECT id, name, is_active FROM plans WHERE id = $1")
+            .bind(plan_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let Some((_, plan_name, plan_active)) = plan else {
         return Err(AppError::NotFound(format!("No plan with id {plan_id}")));
+    };
+    if !plan_active {
+        return Err(AppError::Conflict(format!(
+            "'{plan_name}' is retired, so it cannot be assigned: the customer's billing screen \
+             would not list the plan they are on. Re-activate it on the Plans table first, then \
+             assign it."
+        )));
     }
 
     // ONE row per tenant is the invariant this upsert relies on (kanban t_f5494ad5): the conflict
