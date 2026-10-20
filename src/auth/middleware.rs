@@ -157,8 +157,47 @@ pub async fn auth_middleware(
         ));
     }
 
+    // ── the USER behind the credential must still exist (kanban t_53fcb666) ───────────────────
+    // A signature only proves the token was minted here. Everything below — and every handler
+    // behind it — authorises from the claims alone, so deleting an account left a working
+    // credential for its whole life (measured on a sibling app 2026-10-20: /auth/me and a
+    // platform-admin read both answered 200 after the user + tenant rows were deleted). Deleting
+    // the row is how the fleet remediates a compromised account AND how its probe sweep cleans up
+    // throwaways, so deletion has to BE the revocation. One primary-key read, for every role.
+    //
+    // `users` here has no `is_active` column, so existence is the whole test. Fail closed: a
+    // credential naming nobody, and a database that cannot answer, both refuse — 401 and 503
+    // respectively, never a pass.
+    match user_exists(&state.pool, claims.sub).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid or expired token"})),
+            ));
+        }
+        Err(e) => {
+            tracing::error!("user existence lookup failed for {}: {e}", claims.sub);
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": "Authentication temporarily unavailable"})),
+            ));
+        }
+    }
+
     req.extensions_mut().insert(claims);
     Ok(next.run(req).await)
+}
+
+/// Does the `users` row named by a token's `sub` still exist?
+///
+/// The USER half of the boundary (kanban t_53fcb666). This app's `users` table carries no
+/// `is_active`, so a row that exists is a live account; a deleted one is the only failure mode.
+async fn user_exists(db: &sqlx::PgPool, user_id: uuid::Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+        .bind(user_id)
+        .fetch_one(db)
+        .await
 }
 
 #[cfg(test)]
