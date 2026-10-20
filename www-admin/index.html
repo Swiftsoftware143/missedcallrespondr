@@ -30,7 +30,7 @@ window.appGuidePages = {
   "plans": { title: "Plans & Features", desc: "The subscription plans this install sells and the features each one grants. A plan is a set of permissions that decides what a workspace can use.", actions: ["Create or edit a plan", "Turn a feature on or off per plan", "Assign a workspace to a plan"] },
   "provisioning": { title: "Provisioning", desc: "The switch that lets a tag in another SwiftSoftware app create a free account here. While it is off the incoming request is refused and no account is made.", actions: ["Turn tag-driven provisioning on or off", "Choose the free plan a provisioned account starts on"] },
   "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data.", actions: ["Search for a workspace", "Select rows and delete the selected workspaces"] },
-  "dashboard": { title: "Dashboard", desc: "Your workspace at a glance: contacts, activity and how the responses are doing. The numbers come from your own data.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list"] },
+  "dashboard": { title: "Dashboard", desc: "The whole install at a glance: workspaces, people, calls received, and how many customers are waiting on a plan switch. The queue tile opens the plan requests already filtered; a workspace user sees that workspace's own figures instead.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list"] },
   "portfolio": { title: "Portfolio Companies", desc: "The businesses and brands this workspace lists.", actions: ["Add or edit a portfolio company", "Open a company's record"] },
   "rules": { title: "Response Rules", desc: "What should happen automatically when a call is missed or a message arrives — the routing and reply rules that run without anyone watching.", actions: ["Create a rule", "Choose the trigger", "Enable or disable a rule"] },
   "templates": { title: "Message Templates", desc: "The message and email templates used to reply to a caller. Edit the wording without touching code.", actions: ["Preview a template", "Edit the subject and body", "Enable or disable a template"] },
@@ -306,10 +306,42 @@ const Branding = () => {
   </div>`;
 };
 
+// PLATFORM_FIGURES_DASHBOARD (cron 2026-10-20). A platform admin reads the WHOLE INSTALL's
+// figures from GET /api/v1/admin/stats. Before this the landing screen read /dashboard/stats,
+// whose every count is scoped to the operator's OWN workspace, so the console showed zeros
+// about a workspace that is not the business and never named the one queue that makes money:
+// customers who pressed Upgrade and are waiting for a hand switch.
 const Dashboard = () => {
   const st = viewState('dashboard', {});
+  const isOps = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   if (!st._loaded) { st._loaded = true;
     API.get('/dashboard/stats').then(s => { Object.assign(st, s); renderApp(); }).catch(() => {});
+    if (isOps) API.get('/admin/stats').then(s => { st.platform = s; renderApp(); }).catch(() => {});
+  }
+  if (isOps) {
+    const p = st.platform;
+    const waiting = p ? (p.plan_requests_waiting || 0) : null;
+    const openTickets = p ? (p.open_tickets || 0) : 0;
+    const goPlanRequests = () => { try { const tk = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false, filter: 'all' }); tk.filter = 'plan'; } catch (e) {} S.view = 'tickets'; renderApp(); };
+    return html`<div>
+      <h2 class="text-xl font-bold mb-4">Dashboard</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="stat-card"><div class="stat-value">${p ? p.workspaces : '...'}</div><div class="stat-label">Workspaces</div></div>
+        <div class="stat-card"><div class="stat-value">${p ? p.users : '...'}</div><div class="stat-label">People</div></div>
+        <div class="stat-card"><div class="stat-value">${p ? p.calls_received : '...'}</div><div class="stat-label">Calls received</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:${waiting ? '#92400e' : '#1e293b'}">${p ? waiting : '...'}</div><div class="stat-label">Plan requests waiting</div></div>
+      </div>
+      <div class="card mt-4">
+        <div class="flex items-center justify-between" style="gap:16px">
+          <div>
+            <div class="font-semibold">${p ? (openTickets + ' request' + (openTickets === 1 ? '' : 's') + ' waiting on you') : 'Loading the queue...'}</div>
+            <p class="text-sm text-gray-500 mt-1">Plan requests are customers who pressed Upgrade while self-serve checkout is closed. Each one is a sale waiting on a hand switch.</p>
+          </div>
+          <button class="btn" data-open-plan-requests onClick=${goPlanRequests}>Open the plan requests</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mt-4">These are the whole install's figures, not one workspace's. Calls received counts every workspace's inbound calls.</p>
+    </div>`;
   }
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Dashboard</h2>

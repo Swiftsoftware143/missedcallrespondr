@@ -620,7 +620,7 @@ pub async fn platform_stats(State(state): State<AppState>) -> Result<Json<Value>
            (SELECT COUNT(*) FROM inbound_calls)::bigint, \
            (SELECT COUNT(*) FROM inbound_calls WHERE disposition = 'missed')::bigint, \
            (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved','closed'))::bigint, \
-           (SELECT COUNT(*) FROM tickets WHERE source = 'plan_request' \
+           (SELECT COUNT(*) FROM tickets WHERE source IN ('plan_request','billing') \
               AND status NOT IN ('resolved','closed'))::bigint",
     )
     .fetch_one(&state.pool)

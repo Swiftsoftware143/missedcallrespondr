@@ -1600,6 +1600,13 @@ const Billing = () => {
       // and the team performs the switch by hand. Same shape here, on this app's own ticket route
       // (POST /api/v1/tickets), so a tenant can still move plan while checkout is closed.
       st.requestFor = noProvider ? { key: keyOf(p), name: nameOf(p), price: monthly(p) } : null;
+      // ONE PRESS FILES IT (cron 2026-10-20). Measured LIVE in Chromium on
+      // app.missedcallrespondr.com/dashboard before this change: pressing an upgrade answered 400
+      // /api/v1/checkout/create, the screen rendered the request card, and GET /api/v1/tickets still
+      // returned 0 — the customer had to press a second button before anything reached the team.
+      // File it on the same press here; the button remains for the failure case (requestPlan's catch
+      // arm leaves st.requestFor set and the button enabled, so pressing it retries).
+      var autoFiled = noProvider;
       // The customer line stands ALONE on the no-provider arm. It used to have the server's own
       // sentence appended, which is how a buyer came to read "No active none provider configured"
       // (measured live 2026-10-19) — `none` is the placeholder `plans.payment_provider` carries on a
@@ -1613,6 +1620,15 @@ const Billing = () => {
           + (detail ? ' ' + detail : '');
     }
     st.busy = false; st.buying = null; renderApp();
+    // The one-press arm: the refusal above is the customer's whole answer, and the request it
+    // describes is filed HERE rather than waiting for a second button press.
+    if (autoFiled) {
+      await requestPlan();
+      if (st.notice) {
+        st.error = 'Upgrades are not open on this workspace yet \u2014 nothing was charged.';
+        renderApp();
+      }
+    }
   };
   const requestPlan = async () => {
     const want = st.requestFor;
@@ -1625,7 +1641,11 @@ const Billing = () => {
           + '/month) from Plan & Billing. Self-serve checkout is not open on this install, so the'
           + ' request has to be completed by the team.',
         priority: 'normal',
-        source: 'billing'
+        // The fleet's own name for this queue. The operator console filters on it, the exact-source
+        // query parameter takes it, and `platform_stats` counts it — this door filed `billing` until
+        // 2026-10-20, which made the operator's "Plan requests waiting" tile read 0 while customers
+        // were waiting on a switch. `billing` is still counted by the server for rows already filed.
+        source: 'plan_request'
       });
       // The receipt is best-effort on the server, so the promise is made only when the server says it
       // actually queued one (`acknowledged`). Before this the customer was never told a copy was

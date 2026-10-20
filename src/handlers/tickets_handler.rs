@@ -29,8 +29,9 @@ pub struct ListQuery {
 
 /// Is the caller a PLATFORM OPERATOR — the team that answers plan requests?
 ///
-/// The customer consoles file a plan change as a `source = "billing"` ticket (the Plan & Billing
-/// screen's "Request the <plan> plan" button). Until this predicate existed every read in this module
+/// The customer consoles file a plan change as a `source = "plan_request"` ticket (the Plan & Billing
+/// screen's "Request the <plan> plan" button; missedcall filed `billing` until 2026-10-20, so the
+/// operator's figures count BOTH — see `admin_handler::platform_stats`). Until this predicate existed every read in this module
 /// was scoped to `claims.aid`, so a request filed by a customer lived in a workspace the operator
 /// could not open: measured live 2026-10-20, the customer's POST answered 200 (and mailed them a
 /// receipt) while the operator's `GET /api/v1/tickets` returned **0 rows** and
@@ -239,11 +240,16 @@ pub async fn create(
         .bind(id)
         .fetch_one(&state.pool)
         .await?;
-    // A BILLING ticket is the Plan & Billing screen's request (cron 2026-10-20). While checkout is
+    // A plan-request ticket is the Plan & Billing screen's request (cron 2026-10-20). While checkout is
     // closed that request IS the buying path, and until now the row was written while the customer's
     // inbox stayed empty. `acknowledged` is reported so the screen can only promise a mail that was
     // actually queued; it is flat in the body so every existing field reads exactly as before.
-    let acknowledged = if item.source == "billing" {
+    //
+    // BOTH source names are receipts: the fleet files `plan_request` (IncentiveSwift, WorkflowSwift),
+    // and this door filed `billing` until 2026-10-20. Gating on `billing` alone means the day the app
+    // files the fleet's own name, the customer stops getting the receipt — a silent regression of the
+    // feature this function exists for. `admin_handler::platform_stats` counts both for the same reason.
+    let acknowledged = if matches!(item.source.as_str(), "billing" | "plan_request") {
         notify_customer_of_billing_request(&state, &item).await
     } else {
         false
