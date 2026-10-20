@@ -954,7 +954,13 @@ const Campaigns = () => {
 
 // ---- TICKETS ----
 const Tickets = () => {
-  const st = viewState('tickets', { list: [], showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
+  // `filter` is the operator's Plan Requests view (cron 2026-10-20). The backend now returns EVERY
+  // workspace's tickets to a platform role — before this, the queue was scoped to the operator's own
+  // workspace, so a customer's "Request the <plan> plan" ticket was invisible here (measured live:
+  // list returned 0 rows and the ticket's own id answered 404). A plan change is filed under
+  // `source: 'billing'` by the customer console; `plan_request` is the fleet-wide spelling, read too
+  // so neither ever goes missing.
+  const st = viewState('tickets', { list: [], showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false, filter: 'all' });
   const load = async () => { try { const data = await API.get('/tickets'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
   const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
@@ -987,18 +993,27 @@ const Tickets = () => {
       st.reply = ''; st.busy = false; load();
     } catch (e) { st.busy = false; renderApp(); alert('The reply was not saved: ' + e.message); }
   };
+  const isPlanRequest = (t) => !!t && (t.source === 'billing' || t.source === 'plan_request');
+  const planCount = st.list.filter(isPlanRequest).length;
+  const shown = st.filter === 'plan' ? st.list.filter(isPlanRequest) : st.list;
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Tickets</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ New Ticket</button></div>
+    <div class="flex items-center gap-2 mb-3" id="tk-filter-row">
+      <button id="tk-filter-all" class=${'btn btn-sm' + (st.filter === 'all' ? '' : ' btn-outline')} onClick=${() => { st.filter = 'all'; renderApp(); }}>All tickets (${st.list.length})</button>
+      <button id="tk-filter-plan" class=${'btn btn-sm' + (st.filter === 'plan' ? '' : ' btn-outline')} onClick=${() => { st.filter = 'plan'; renderApp(); }}>Plan requests (${planCount})</button>
+      <span class="text-xs text-gray-500">${st.filter === 'plan' ? 'Customers who asked to change plan while checkout is closed. Open one to reply, then set it to resolved when the switch is done.' : 'Every workspace\'s ticket, newest first.'}</span>
+    </div>
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Subject</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(t => html`<tr>
-          <td class="font-medium">${t.subject || '-'}</td>
+      <table class="table"><thead><tr><th>Subject</th><th>Customer</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>${shown.map(t => html`<tr data-ticket-id=${t.id || ''} data-source=${t.source || ''}>
+          <td class="font-medium">${t.subject || '-'}${isPlanRequest(t) && html` <span class="badge badge-blue" data-plan-request="1">Plan request</span>`}</td>
+          <td class="text-gray-500 text-sm" data-tenant=${t.tenant_name || ''}>${t.tenant_name || '-'}</td>
           <td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status || 'open'}</span></td>
           <td class="text-gray-500">${t.priority || 'medium'}</td>
           <td class="text-gray-500 text-sm">${t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</td>
           <td><button class="btn btn-sm" onClick=${() => openThread(t)}>Open</button><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
         </tr>`)}
-        ${st.list.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No tickets yet.</td></tr>`}
+        ${shown.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8" id="tk-empty">${st.filter === 'plan' ? 'No plan requests right now.' : 'No tickets yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.threadId && html`<div id="tk-thread" class="card mt-4 p-4">
