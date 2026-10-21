@@ -1,7 +1,7 @@
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHasher};
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
 use rand::rngs::OsRng;
@@ -282,6 +282,7 @@ pub async fn stop_impersonation() -> Result<Json<Value>, AppError> {
 pub async fn list_all_tenants(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Value>, AppError> {
     // Simple auth check — verify token has admin access
     let auth_header = headers
@@ -332,8 +333,12 @@ pub async fn list_all_tenants(
         FROM tenants t
         LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id AND tp.status = 'active'
         LEFT JOIN plans p ON p.id = tp.plan_id
+        WHERE $1::bool
+           OR COALESCE(t.probe_harness, '') = ''
+           OR t.probe_harness ~* '^CNRY'
         ORDER BY t.created_at DESC"#,
     )
+    .bind(params.get("include_probe").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false))
     .fetch_all(&state.pool)
     .await?;
 
