@@ -629,17 +629,36 @@ pub async fn bulk_delete_tenants(
 ///
 /// The route sits under `/api/v1/admin/`, so `auth::middleware` has already refused a tenant token
 /// before this handler runs; it reads only aggregate counts, never another workspace's rows.
-pub async fn platform_stats(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+///
+/// HARNESS TRAFFIC IS NOT A CUSTOMER (measured live 2026-10-21, same class as FunnelSwift d75f0b4).
+/// `admin_handler::list_all_tenants` below already hides a harness-tagged workspace
+/// (`tenants.probe_harness`, stamped at signup by `crate::probe_harness::for_signup`, migration
+/// 000038). These figures did not, so the landing screen said 7 workspaces while the Tenants screen
+/// underneath listed 6, and the operator had no way to tell which number was true. `workspaces` and
+/// `users` now use the SAME predicate as the list: tagged rows excluded unless `?include_probe=1`,
+/// a pre-column NULL row is a customer, `^CNRY` canaries stay visible. The call counters need no
+/// change — a probe workspace produces no calls, and hiding its rows there would misstate volume.
+pub async fn platform_stats(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, AppError> {
+    let include_probe = params
+        .get("include_probe")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let row: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
-           (SELECT COUNT(*) FROM tenants)::bigint, \
-           (SELECT COUNT(*) FROM users)::bigint, \
+           (SELECT COUNT(*) FROM tenants t WHERE $1::bool \
+              OR COALESCE(t.probe_harness, '') = '' OR t.probe_harness ~* '^CNRY')::bigint, \
+           (SELECT COUNT(*) FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE $1::bool \
+              OR COALESCE(t.probe_harness, '') = '' OR t.probe_harness ~* '^CNRY')::bigint, \
            (SELECT COUNT(*) FROM inbound_calls)::bigint, \
            (SELECT COUNT(*) FROM inbound_calls WHERE disposition = 'missed')::bigint, \
            (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved','closed'))::bigint, \
            (SELECT COUNT(*) FROM tickets WHERE source IN ('plan_request','billing') \
               AND status NOT IN ('resolved','closed'))::bigint",
     )
+    .bind(include_probe)
     .fetch_one(&state.pool)
     .await?;
 
