@@ -790,7 +790,7 @@ const Branding = () => {
       </div>
       <p class="text-xs text-gray-500 mt-3">Your logo and business name open every transactional email we send for your account (welcome, password reset, receipts). Leave them blank to keep our default look.</p>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e2e8f0">
-        <div class="text-xs text-gray-500 mb-2">Preview &mdash; the header every email from this account opens with</div>
+        <div class="text-xs text-gray-500 mb-2">Preview — the header every email from this account opens with</div>
         <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px;background:#fff">
           <div id="brand-bp-header" style="display:none">
             ${logo
@@ -800,7 +800,7 @@ const Branding = () => {
             <div id="brand-bp-rule" style="border-top:3px solid #4f46e5;margin:0 0 10px"></div>
           </div>
           <div id="brand-bp-blank" class="text-xs text-gray-500">Nothing is set yet, so mail keeps the MissedCall Respondr header.</div>
-          <div style="font-size:13.5px;color:#111827;line-height:1.5">Hi Alex &mdash; this is a sample of the message body. Only the header above comes from your branding.</div>
+          <div style="font-size:13.5px;color:#111827;line-height:1.5">Hi Alex — this is a sample of the message body. Only the header above comes from your branding.</div>
         </div>
       </div>
     </div>
@@ -1521,7 +1521,14 @@ const loadPlanRequests = async (st) => {
   try {
     const d = await API.get('/tickets');
     const list = Array.isArray(d) ? d : ((d && d.tickets) || []);
-    st.requests = list.filter(t => String(t.source || '') === 'billing');
+    // BOTH source names are a plan request. This screen's own button files `plan_request`
+    // (the fleet name the operator's queue and `platform_stats` read), while rows filed
+    // before 2026-10-20 carry `billing` — the server counts both, so the customer's list
+    // must too. It filtered on `billing` ALONE, so the request this very screen had just
+    // filed was invisible on it: measured live 2026-10-21, POST /tickets answered 200 with
+    // source=plan_request and the Billing screen rendered no "Your plan requests" card at
+    // all — after the notice had promised "its live status is in the list below".
+    st.requests = list.filter(t => ['billing', 'plan_request'].indexOf(String(t.source || '')) !== -1);
   } catch (e) { st.requests = []; }
   st.requestsLoaded = true;
   renderApp();
@@ -1622,14 +1629,20 @@ const Billing = () => {
           + (detail ? ' ' + detail : '');
     }
     st.busy = false; st.buying = null; renderApp();
-    // The one-press arm: the refusal above is the customer's whole answer, and the request it
-    // describes is filed HERE rather than waiting for a second button press.
+    // The one-press arm: the request it describes is filed HERE rather than waiting for a second
+    // button press.
+    // MEASURED LIVE 2026-10-21 (Chromium, app.missedcallrespondr.com, throwaway workspace): one
+    // press of "Upgrade to Pro Monthly" on an install with no payment provider rendered TWO cards
+    // at once \u2014 the red "Upgrades are not open on this workspace yet, nothing was charged"
+    // AND the green "Request sent: our team will move this workspace to the Pro Monthly plan and we
+    // have emailed you a copy of this request". Both statements were true, and together they
+    // read as a failure that had also succeeded, so the buyer could not tell whether the press
+    // counted. ONE outcome now: while the notice stands, the refusal line is cleared, and the
+    // notice itself carries the "nothing was charged" fact.
     if (autoFiled) {
       await requestPlan();
-      if (st.notice) {
-        st.error = 'Upgrades are not open on this workspace yet \u2014 nothing was charged.';
-        renderApp();
-      }
+      if (st.notice) st.error = null;
+      renderApp();
     }
   };
   const requestPlan = async () => {
@@ -1664,7 +1677,7 @@ const Billing = () => {
         ? 'You already have an open request for the ' + want.name + ' plan \u2014 our team is on it,'
           + ' and its live status is in the list below.'
         : 'Request sent \u2014 our team will move this workspace to the ' + want.name
-          + ' plan and confirm here.'
+          + ' plan and confirm here. Nothing was charged.'
           + ((res && res.acknowledged) ? ' We have emailed you a copy of this request.' : '');
       st.requestFor = null;
       loadPlanRequests(st);
@@ -1695,7 +1708,7 @@ const Billing = () => {
     <div class="card">
       <h3 class="font-semibold mb-1">Your current plan</h3>
       <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || 'Free'}</span></p>
-      <p class="text-sm text-gray-500 mt-2">Payment is taken by the provider this install is connected to: pressing a button below opens that provider's own secure checkout, and no card details are entered on this site.</p>
+      <p class="text-sm text-gray-500 mt-2">Pressing a button below opens the payment provider's own secure checkout when self-serve checkout is open on that plan. While it is not open, the same press sends your request to our team, who complete the switch by hand — nothing is charged. No card details are entered on this site either way.</p>
     </div>
     ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans…</div>` : null}
     ${st.loaded && st.plans.length === 0 && !st.error ? html`<div class="card text-sm text-gray-400">No plans are on sale yet. The platform operator publishes them under Plans in the admin panel.</div>` : null}
