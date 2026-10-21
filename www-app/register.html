@@ -25,6 +25,7 @@ body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;
   </div>
   <div class="error" id="error"></div>
   <div class="success" id="success"></div>
+  <div id="planNote" style="display:none;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.5;margin-bottom:16px"></div>
   <form id="regForm" style="display:flex;flex-direction:column;gap:16px">
     <div>
       <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Full Name</label>
@@ -43,6 +44,22 @@ body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;
 </div>
 
 <script>
+// A visitor who picks a card on missedcallrespondr.com/#pricing arrives here with ?plan=<slug>.
+// Before this, every card linked to a bare /register/, so the pick vanished and the page's only
+// plan word was "Create your free account" — a visitor who chose Pro Monthly had nothing telling
+// them what the account would start on. The slugs are the three the catalogue actually serves
+// (free, pro-monthly, enterprise); anything else is ignored. The pick does NOT change what the
+// server creates — every new account starts on Free — so the note says that plainly.
+var PLAN_LABELS = { 'free': 'Free', 'pro-monthly': 'Pro Monthly', 'enterprise': 'Enterprise' };
+(function () {
+  var picked = (new URLSearchParams(location.search).get('plan') || '').trim().toLowerCase();
+  var label = PLAN_LABELS[picked];
+  if (!label || picked === 'free') return;
+  var el = document.getElementById('planNote');
+  el.textContent = 'You picked ' + label + '. New accounts start on Free \u2014 no card. '
+    + 'Open Plan & Billing in your dashboard whenever you want us to switch the workspace to ' + label + '.';
+  el.style.display = 'block';
+})();
 document.getElementById('regForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('submitBtn');
