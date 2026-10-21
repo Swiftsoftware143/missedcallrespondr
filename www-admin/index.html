@@ -1049,7 +1049,7 @@ const Tickets = () => {
       <table class="table"><thead><tr><th>Subject</th><th>Customer</th><th>Plan asked for</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>${shown.map(t => html`<tr data-ticket-id=${t.id || ''} data-source=${t.source || ''}>
           <td class="font-medium">${t.subject || '-'}${isPlanRequest(t) && html` <span class="badge badge-blue" data-plan-request="1">Plan request</span>`}</td>
-          <td class="text-gray-500 text-sm" data-tenant=${t.tenant_name || ''}>${t.tenant_name || '-'}</td>
+          <td class="text-gray-500 text-sm" data-tenant=${t.tenant_name || ''} data-ticket-workspace=${t.account_email || ''}><div>${t.tenant_name || '-'}</div><div class="text-xs text-gray-400">${t.account_email || '\u2014'}${isProbeAddress(t.account_email) ? html` <span class="badge badge-yellow" data-probe-row="1" title="filed by a fleet test harness \u2014 a probe, not a customer waiting to buy">probe</span>` : null}</div></td>
           <td class="text-sm" data-plan=${t.plan_slug || ''}>${(t.plan_name || t.plan_slug || '-')}${t.plan_applied_at ? html` <span class="badge badge-green" title=${'Switched on ' + String(t.plan_applied_at).slice(0,10)}>switched</span>` : ''}</td>
           <td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status || 'open'}</span></td>
           <td class="text-gray-500">${t.priority || 'medium'}</td>
