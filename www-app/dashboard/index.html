@@ -1657,9 +1657,15 @@ const Billing = () => {
       // The receipt is best-effort on the server, so the promise is made only when the server says it
       // actually queued one (`acknowledged`). Before this the customer was never told a copy was
       // coming, because none was ever sent.
-      st.notice = 'Request sent \u2014 our team will move this workspace to the ' + want.name
-        + ' plan and confirm here.'
-        + ((res && res.acknowledged) ? ' We have emailed you a copy of this request.' : '');
+      // A press that lands on an OPEN request for the same plan is answered with that request, not a
+      // twin (the server refuses the duplicate, cron 2026-10-21). Saying "Request sent" again would
+      // read as if the earlier press never registered, so the sentence names the open request.
+      st.notice = (res && res.already_open)
+        ? 'You already have an open request for the ' + want.name + ' plan \u2014 our team is on it,'
+          + ' and its live status is in the list below.'
+        : 'Request sent \u2014 our team will move this workspace to the ' + want.name
+          + ' plan and confirm here.'
+          + ((res && res.acknowledged) ? ' We have emailed you a copy of this request.' : '');
       st.requestFor = null;
       loadPlanRequests(st);
     } catch (e) {

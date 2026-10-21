@@ -236,6 +236,44 @@ pub async fn create(
             )));
         }
     }
+    // A SECOND identical request is not a second request (measured live 2026-10-21). The Plan &
+    // Billing button stays pressable after a request is filed, so a customer who pressed it twice
+    // filed two OPEN tickets for the same plan and was mailed a receipt for each: duplicate work for
+    // the operator, two mails to one inbox, and a request list that reads as if the first press had
+    // been ignored. Their intent is unchanged, so the EXISTING open request is returned (flagged
+    // `already_open`) instead of minting a twin — and no second receipt is queued, because the first
+    // one already told them truthfully that the request had been received.
+    //
+    // The key is the TIER ASKED FOR (`plan_slug`, the machine-readable column added 2026-10-20), so a
+    // customer with a Pro request open can still file a different plan's request. A legacy row with
+    // no plan_slug falls back to the subject it was filed under.
+    if matches!(
+        req.source.as_deref().unwrap_or("manual"),
+        "billing" | "plan_request"
+    ) {
+        let existing = sqlx::query_as::<_, Ticket>(
+            "SELECT * FROM tickets \
+             WHERE tenant_id = $1 \
+               AND source IN ('billing','plan_request') \
+               AND status IN ('open','in_progress') \
+               AND ((plan_slug IS NOT NULL AND plan_slug = $2) \
+                    OR (plan_slug IS NULL AND subject = $3)) \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(claims.aid)
+        .bind(plan_slug.as_deref())
+        .bind(&req.subject)
+        .fetch_optional(&state.pool)
+        .await?;
+        if let Some(ticket) = existing {
+            let mut out = serde_json::to_value(&ticket).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("acknowledged".to_string(), serde_json::json!(false));
+                obj.insert("already_open".to_string(), serde_json::json!(true));
+            }
+            return Ok(Json(out));
+        }
+    }
     sqlx::query(
         "INSERT INTO tickets (id, tenant_id, subject, status, priority, assigned_to, contact_id, source, created_at, updated_at, plan_slug) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
