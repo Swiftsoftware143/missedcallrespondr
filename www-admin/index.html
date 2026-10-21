@@ -47,7 +47,7 @@ window.appGuidePages = {
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header.", actions: ["Upload your logo", "Set your brand name and colour", "Preview the header exactly as a caller sees it"] },
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, and the password-reset mail. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
-  "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your password", "See the plan you are on"] }
+  "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on"] },
 };
 </script>
 <script src="/inline-guide-widget.js"></script>
@@ -998,7 +998,16 @@ const Tickets = () => {
   const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
   const save = async (data) => {
-    try { if(st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+    try {
+      // The operator's resolve now SEATS the plan the request asked for, so say what happened
+      // instead of just closing the dialog (cron 2026-10-20).
+      const r = st.editItem ? await API.put('/tickets/' + st.editItem.id, data) : await API.post('/tickets', data);
+      const wanted = st.editItem && (st.editItem.plan_name || st.editItem.plan_slug);
+      if (r && r.plan_applied) st.notice = 'Resolved \u2014 ' + (st.editItem.tenant_name || 'the workspace') + ' is now on ' + (r.plan_name || wanted) + '.';
+      else if (wanted && String(data.status || '').match(/^(resolved|closed)$/i)) st.notice = 'Resolved \u2014 the plan on this request was not switched automatically; set it on the workspace.';
+      else st.notice = null;
+      st.showModal = false; load();
+    } catch(e){ alert(e.message); }
   };
   const remove = async (id) => { if(!confirm('Delete this ticket?')) return; await API.del('/tickets/' + id); load(); };
   // ── Conversation (2026-10-19) ──────────────────────────────────────────────────────────────────
@@ -1035,17 +1044,19 @@ const Tickets = () => {
       <button id="tk-filter-plan" class=${'btn btn-sm' + (st.filter === 'plan' ? '' : ' btn-outline')} onClick=${() => { st.filter = 'plan'; renderApp(); }}>Plan requests (${planCount})</button>
       <span class="text-xs text-gray-500">${st.filter === 'plan' ? 'Customers who asked to change plan while checkout is closed. Open one to reply, then set it to resolved when the switch is done.' : 'Every workspace\'s ticket, newest first.'}</span>
     </div>
+    ${st.notice && html`<div class="card" id="tk-notice" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Subject</th><th>Customer</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+      <table class="table"><thead><tr><th>Subject</th><th>Customer</th><th>Plan asked for</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>${shown.map(t => html`<tr data-ticket-id=${t.id || ''} data-source=${t.source || ''}>
           <td class="font-medium">${t.subject || '-'}${isPlanRequest(t) && html` <span class="badge badge-blue" data-plan-request="1">Plan request</span>`}</td>
           <td class="text-gray-500 text-sm" data-tenant=${t.tenant_name || ''}>${t.tenant_name || '-'}</td>
+          <td class="text-sm" data-plan=${t.plan_slug || ''}>${(t.plan_name || t.plan_slug || '-')}${t.plan_applied_at ? html` <span class="badge badge-green" title=${'Switched on ' + String(t.plan_applied_at).slice(0,10)}>switched</span>` : ''}</td>
           <td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status || 'open'}</span></td>
           <td class="text-gray-500">${t.priority || 'medium'}</td>
           <td class="text-gray-500 text-sm">${t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</td>
           <td><button class="btn btn-sm" onClick=${() => openThread(t)}>Open</button><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
         </tr>`)}
-        ${shown.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8" id="tk-empty">${st.filter === 'plan' ? 'No plan requests right now.' : 'No tickets yet.'}</td></tr>`}
+        ${shown.length === 0 && html`<tr><td colspan="7" class="text-center text-gray-400 py-8" id="tk-empty">${st.filter === 'plan' ? 'No plan requests right now.' : 'No tickets yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.threadId && html`<div id="tk-thread" class="card mt-4 p-4">
@@ -2229,7 +2240,7 @@ const TenantsScreen = () => {
       value=${t.plan_id || ''}
       disabled=${st.busy === 'plan:' + t.id}
       onChange=${e => assignPlan(t, e.target.value)}>
-      <option value="">— no plan —</option>
+      <option value="">${t.plan_id ? '— no plan —' : '— no plan — · ' + (t.plan_effective_name || 'Free') + ' limits'}</option>
       ${(st.plans || []).filter(p => p.is_active !== false || p.id === t.plan_id)
         .map(p => html`<option value=${p.id}>${p.name}</option>`)}
     </select>`;
@@ -2687,7 +2698,7 @@ const App = () => {
 
       <div class="card">
         <h3 class="font-semibold mb-2">Assign a plan to an account</h3>
-        <p class="text-xs text-gray-500 mb-2">Find the tenant id in Operator Console → Impersonate a tenant. Assigning does not change the tenant's credit balance.</p>
+        <p class="text-xs text-gray-500 mb-2">Find the tenant id in Operator Console → Impersonate a tenant. Assigning does not change the tenant's credit balance. Only a plan that is on sale can be assigned — re-activate a retired plan on the Plans table first.</p>
         <div class="flex gap-2 items-end flex-wrap">
           <div><label class="block text-xs text-gray-600 mb-1">Tenant ID</label>
             <input class="input" style="width:320px" value=${assign.tenant_id} placeholder="uuid"
@@ -2695,7 +2706,7 @@ const App = () => {
           <div><label class="block text-xs text-gray-600 mb-1">Plan</label>
             <select class="input" style="width:200px" value=${assign.plan_id}
               onChange=${e => setAssign(Object.assign({}, assign, { plan_id: e.target.value }))}>
-              <option value="">— choose —</option>${plans.map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>
+              <option value="">— choose —</option>${plans.filter(p => p.is_active !== false).map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>
           <div><label class="block text-xs text-gray-600 mb-1">Cycle</label>
             <select class="input" style="width:120px" value=${assign.billing_cycle}
               onChange=${e => setAssign(Object.assign({}, assign, { billing_cycle: e.target.value }))}>
@@ -2819,6 +2830,11 @@ const App = () => {
     const [np, setNp] = useState('');
     const [np2, setNp2] = useState('');
     const [cp, setCp] = useState('');
+    // Sign-in address change (cron 2026-10-20): the route pair existed with NO console surface, so
+    // the address printed under "Profile" was read-only here. The REQUEST arm mails the NEW address;
+    // the account address only moves when that link is opened, which is what makes a typo harmless.
+    const [ec, setEc] = useState('');
+    const [ecMsg, setEcMsg] = useState(null);
 
     useEffect(() => {
       API.get('/auth/me')
@@ -2892,6 +2908,25 @@ const App = () => {
       } catch (e) { setPwMsg({ ok: false, text: (e && e.message) || 'Could not change the password' }); }
       setBusy(false);
     };
+    // Two-arm flow, exactly like the customer dashboard: this form only ASKS. The server writes one
+    // pending row and mails the NEW address; nothing moves until that mailbox opens the link. A
+    // reserved test address answers delivered:false and its own sentence is shown - nothing sent,
+    // nothing changed - so the console never implies a mail that the sender withheld.
+    const sendEmailChange = async () => {
+      const v = (ec || '').trim();
+      if (!v) { setEcMsg({ ok: false, text: 'Enter the new email address first' }); return; }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { setEcMsg({ ok: false, text: 'That does not look like an email address' }); return; }
+      setBusy(true); setEcMsg(null);
+      try {
+        const d = await API.post('/auth/email-change', { new_email: v });
+        if (d && d.delivered === false) {
+          setEcMsg({ ok: false, text: d.message || 'That address cannot receive mail, so nothing was sent.' });
+        } else {
+          setEc(''); setEcMsg({ ok: true, text: (d && d.message) || 'Check the new address for the confirmation link. Your current address keeps working until you open it.' });
+        }
+      } catch (e) { setEcMsg({ ok: false, text: (e && e.message) || 'Could not start the change' }); }
+      setBusy(false);
+    };
 
     if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-2">My Account</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
     if (!me) return html`<div class="card"><h2 class="text-xl font-bold mb-2">My Account</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
@@ -2938,6 +2973,20 @@ const App = () => {
             <input class="input" id="mc-acct-cp" type="password" autocomplete="current-password" value=${cp} onInput=${e => setCp(e.target.value)} /></div>
         </div>
         <div class="mt-3"><button class="btn" id="mc-acct-save-pw" disabled=${busy} onClick=${savePassword}>Save</button>${msg(pwMsg)}</div>
+      </div>
+      <!-- Sign-in address (cron 2026-10-20). The email under "Profile" below was a read-only div: the
+           change route pair existed and the customer dashboard offered it, but this operator console
+           had no way to reach it. Nothing here claims the address has moved - it says a link was sent,
+           because the account address only changes when that link is opened. No backtick may appear in
+           this html template literal or the console stops parsing. -->
+      <div class="card mb-4">
+        <div class="font-semibold mb-3">Sign-in email</div>
+        <p class="text-sm text-gray-600 mb-3">Your sign-in address is <b id="mc-acct-ec-current">${me.email || '-'}</b>. To move it, enter the new address below and we will email a confirmation link to it. Your current address keeps working until you open that link, and the link expires in two hours.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">New email address</label>
+            <input class="input" id="mc-acct-ec" type="email" maxlength="254" autocomplete="email" value=${ec} placeholder="you@yourbusiness.com" onInput=${e => setEc(e.target.value)} /></div>
+        </div>
+        <div class="mt-3"><button class="btn" id="mc-acct-ec-send" disabled=${busy} onClick=${sendEmailChange}>Send confirmation link</button>${msg(ecMsg)}</div>
       </div>
       <div class="card">
         <div class="font-semibold mb-3">Profile</div>
