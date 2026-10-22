@@ -806,10 +806,33 @@ pub fn create_router(state: AppState) -> Router {
         .layer(CorsLayer::permissive())
 }
 
-async fn health_check() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({
-        "status": "ok",
+// Rewritten 2026-10-21 (cron): this returned a CONSTANT `{"status":"ok"}` — no state, no
+// query, so it could not fail. With the database gone or the pool exhausted it still
+// reported ok, which makes the green light an assertion nobody measured. It now
+// round-trips `SELECT 1` and answers 503 with `database:"unreachable"` when that fails, so
+// a watchdog can tell a serving app from a broken one. Public by necessity (a healthcheck
+// carries no credential) and it reads no row.
+async fn health_check(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> (axum::http::StatusCode, axum::Json<serde_json::Value>) {
+    let db_ok = sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await
+        .is_ok();
+
+    let body = serde_json::json!({
+        "status": if db_ok { "ok" } else { "degraded" },
         "service": "missedcallrespondr",
+        "database": if db_ok { "ok" } else { "unreachable" },
         "version": "0.1.0"
-    }))
+    });
+
+    if db_ok {
+        (axum::http::StatusCode::OK, axum::Json(body))
+    } else {
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(body),
+        )
+    }
 }
