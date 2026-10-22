@@ -37,7 +37,7 @@
 }();
 </script>
 <title>MissedCall Respondr — Dashboard</title>
-<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:#b91c1c;font-weight:600}</style>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500;width:100%;border:0;background:transparent;text-align:left;font-family:inherit;line-height:1.2}.nav-item:focus-visible{outline:2px solid #2563eb;outline-offset:2px}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:#b91c1c;font-weight:600}</style>
 <link rel="stylesheet" href="/dashboard/tw.css">
 </head>
 <body>
@@ -58,7 +58,7 @@ window.appGuidePages = {
   contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list.", actions: ["Search your contacts", "Open a contact's history"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
-  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Upgrading opens the payment provider's own secure checkout.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] }
+  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Pressing a plan opens the payment provider's own secure checkout when self-serve checkout is open on that plan; while it is not open, the same press sends your request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] }
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
@@ -320,7 +320,7 @@ const Overview = () => {
         <p class="text-sm text-gray-600">${totalCalls === 0 ? 'No calls yet — your response rate shows here once calls land.'
           : (rate === null ? 'Not measured yet' : rate + '% of calls answered or sent an automatic reply')}</p></div>
       <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
-        <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || 'Free'}</span></p>
+        <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || '\u2014'}</span></p>
         <p class="text-sm text-gray-600 mt-2">${withCap(u.rules, 'max_rules', 'response rule', 'response rules')} · ${withCap(u.phone_numbers, 'max_phone_numbers', 'phone number', 'phone numbers')} · ${withCap(u.contacts, 'max_contacts', 'contact', 'contacts')}</p>${creditNote(u)}</div>
     </div>
     <div class="card mt-4"><h3 class="font-semibold mb-2">Recent activity</h3>
@@ -625,7 +625,7 @@ const Profile = () => {
           <div><label class="text-sm font-medium block mb-1">Company</label>
             <input id="profile-company" class="input" value=${st.company || ''} onInput=${e => { st.company = e.target.value; }} /></div>
           <div><label class="text-sm font-medium block mb-1">Level</label>
-            <div style="padding:8px 0"><span id="profile-level" class="badge badge-blue">${c.plan_name || 'Free'}</span></div></div>
+            <div style="padding:8px 0"><span id="profile-level" class="badge badge-blue">${c.plan_name || '\u2014'}</span></div></div>
           <button id="save-profile" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save changes</button>
         </div>
       </div>
@@ -1549,7 +1549,7 @@ const Billing = () => {
     });
   }
   const me = API.user || {};
-  const current = String(me.plan_name || 'Free').trim().toLowerCase();
+  const current = me.plan_name ? String(me.plan_name).trim().toLowerCase() : '';
   const nameOf = p => p.name || p.slug || 'Plan';
   const keyOf = p => p.slug || p.name || String(p.id);
   const isCurrent = p => {
@@ -1707,7 +1707,7 @@ const Billing = () => {
     </div>` : null}
     <div class="card">
       <h3 class="font-semibold mb-1">Your current plan</h3>
-      <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || 'Free'}</span></p>
+      <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || '\u2014'}</span></p>
       <p class="text-sm text-gray-500 mt-2">Pressing a button below opens the payment provider's own secure checkout when self-serve checkout is open on that plan. While it is not open, the same press sends your request to our team, who complete the switch by hand — nothing is charged. No card details are entered on this site either way.</p>
     </div>
     ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans…</div>` : null}
@@ -1762,16 +1762,16 @@ const App = () => {
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
-    <div class="sidebar">
+    <aside class="sidebar">
       <div class="flex items-center gap-2 px-3 py-4 mb-2">
         ${c.avatar_url
           ? html`<img id="header-avatar" src=${c.avatar_url + (S.avatarBust ? '?t=' + S.avatarBust : '')} alt="Profile" class="w-8 h-8 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
           : html`<span class="text-2xl">📞</span>`}
         <span class="nav-txt font-bold text-gray-800">MissedCall</span>
       </div>
-      <div class="flex-1 space-y-1">
-        ${nav.map(n => html`<div class="nav-item ${S.view===n.id?'active':''}" onClick=${() => { S.view = n.id; renderApp(); }}><span>${n.icon}</span><span class="nav-txt">${n.label}</span></div>`)}
-      </div>
+      <nav class="flex-1 space-y-1" aria-label="Console sections">
+        ${nav.map(n => html`<button type="button" class="nav-item ${S.view===n.id?'active':''}" aria-current=${S.view===n.id?'page':'false'} onClick=${() => { S.view = n.id; renderApp(); }}><span aria-hidden="true">${n.icon}</span><span class="nav-txt">${n.label}</span></button>`)}
+      </nav>
       <!-- The signed-in person, by NAME like every other app's sidebar (cron 2026-10-18). This used
            to print the raw email address here while the overview said "Welcome back, <name>", so the
            one place a customer looks to confirm who they are showed an address instead of their name.
@@ -1780,14 +1780,14 @@ const App = () => {
       <!-- The account LEVEL (kanban t_9cd2c8f2): the REAL plan tier from GET /auth/me, never the
            literal word "User" (the FunnelSwift defect). Falls back to "Free" only when the server
            has not answered yet. -->
-      <div class="px-3 pb-2"><span id="level-label" class="badge badge-blue">${c.plan_name || 'Free'}</span></div>
+      <div class="px-3 pb-2"><span id="level-label" class="badge badge-blue" style=${c.plan_name ? '' : 'display:none'}>${c.plan_name || ''}</span></div>
       <!-- User guide link (kanban t_5af0ddda): the fleet standard puts the user guide at
            /guide.html on THIS origin and links it from the app shell beside sign-out. Before this
            the tenant shell linked its own guide nowhere - only the marketing footer did, and it
            pointed at the other origin. -->
       <a class="nav-item" id="user-guide-link" href="/guide.html" target="_blank" rel="noopener"><span>📖</span><span class="nav-txt">User Guide</span></a>
-      <div class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span>🚪</span><span class="nav-txt">Logout</span></div>
-    </div>
+      <button type="button" class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span aria-hidden="true">🚪</span><span class="nav-txt">Logout</span></button>
+    </aside>
     <div class="main">
       ${impTenant && html`<div class="imp-banner" id="imp-banner" data-impersonating=${impTenant}>
         <span>🔑 Impersonating <b>${impTenant}</b> — this tab is the customer's session, not yours. Your operator session stays open on the admin panel.</span>
