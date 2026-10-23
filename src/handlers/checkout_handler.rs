@@ -16,7 +16,7 @@
 use axum::{
     extract::{Json, Path, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Extension,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -476,7 +476,7 @@ pub async fn create_checkout_session(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Json(req): Json<Value>,
-) -> ApiResult<impl IntoResponse> {
+) -> ApiResult<Response> {
     let tenant_id: Uuid = claims.aid;
     let user_id: Uuid = claims.sub;
 
@@ -484,6 +484,16 @@ pub async fn create_checkout_session(
         .get("purchasable_type")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("purchasable_type is required".into()))?;
+
+    // The TIER the buyer pressed, when this is a plan checkout. Read here so the no-provider
+    // refusals below can record the ask (see `record_checkout_plan_request`).
+    let requested_plan_id = if purchasable_type == "plan" {
+        req.get("purchasable_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+    } else {
+        None
+    };
 
     // Resolve payment provider: explicit > plan's payment_provider > error
     let provider_type = if let Some(pt) = req.get("provider_type").and_then(|v| v.as_str()) {
@@ -531,9 +541,14 @@ pub async fn create_checkout_session(
         None => match active_provider_types(&state.pool).await?.as_slice() {
             [only] => only.clone(),
             _ => {
-                return Err(AppError::BadRequest(
-                    "No payment provider is connected on this install yet".to_string(),
-                ))
+                let plan_request = record_checkout_plan_request(
+                    &state.pool,
+                    tenant_id,
+                    requested_plan_id,
+                    "no payment provider is connected on this installation",
+                )
+                .await;
+                return Ok(no_provider_refusal(plan_request).into_response());
             }
         },
     };
@@ -577,18 +592,32 @@ pub async fn create_checkout_session(
     }
 
     // Get the active provider config
-    let provider = get_active_provider(&state.pool, &provider_type)
-        .await?
-        .ok_or_else(|| {
-            AppError::BadRequest(format!("No active {} provider configured", provider_type))
-        })?;
+    let provider = match get_active_provider(&state.pool, &provider_type).await? {
+        Some(p) => p,
+        None => {
+            // The plan names a provider this installation has no active row for: the purchase
+            // cannot start, so the ask is recorded before the buyer is refused.
+            let plan_request = record_checkout_plan_request(
+                &state.pool,
+                tenant_id,
+                requested_plan_id,
+                &format!("no active {provider_type} provider is configured"),
+            )
+            .await;
+            return Ok(no_provider_refusal(plan_request).into_response());
+        }
+    };
 
     let api_key = provider["api_key"].as_str().unwrap_or("").to_string();
     if api_key.is_empty() {
-        return Err(AppError::BadRequest(format!(
-            "{} API key not configured",
-            provider_type
-        )));
+        let plan_request = record_checkout_plan_request(
+            &state.pool,
+            tenant_id,
+            requested_plan_id,
+            &format!("the configured {provider_type} provider has no API key"),
+        )
+        .await;
+        return Ok(no_provider_refusal(plan_request).into_response());
     }
 
     // Create checkout session with the provider
@@ -654,7 +683,8 @@ pub async fn create_checkout_session(
         "provider_session_id": provider_session_id,
         "checkout_url": checkout_url,
         "provider_type": provider_type,
-    })))
+    }))
+    .into_response())
 }
 
 /// Create a Stripe checkout session via Stripe API
@@ -2509,6 +2539,155 @@ pub async fn test_payment_provider(
     ))
 }
 
+/// The customer-facing refusal for a plan checkout that cannot start, and the ask it carries.
+///
+/// BUYER-FIRST (parity with FunnelSwift, ADASwift, WorkflowSwift and IncentiveSwift): the two facts
+/// a buyer needs come first — nothing was charged, and their request exists — and the operator's
+/// setup detail stays in a parenthesis for whoever reads it next. `error` keeps the words
+/// "payment provider" because the console keys its hand-off offer on /provider|not configured/i;
+/// `request_recorded` tells that console the ask is already filed, so it need not file a twin.
+fn no_provider_refusal(plan_request: Option<Value>) -> (StatusCode, Json<Value>) {
+    let recorded = plan_request.is_some();
+    let message = if recorded {
+        format!(
+            "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
+             Your request has been recorded for the platform team, who can switch this workspace \
+             onto the plan you picked by hand. {}",
+            NO_PROVIDER_OPERATOR_NOTE
+        )
+    } else {
+        format!(
+            "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
+             Upgrades are not switched on for this installation yet. {}",
+            NO_PROVIDER_OPERATOR_NOTE
+        )
+    };
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "error": "payment_provider_not_configured",
+            "message": message,
+            "configured": false,
+            "request_recorded": recorded,
+            "plan_request": plan_request,
+        })),
+    )
+}
+
+const NO_PROVIDER_OPERATOR_NOTE: &str =
+    "(Operator: connect a provider's key in the admin panel under Payment providers; until then \
+     every upgrade press on a paid tier files a request in the Plan requests queue.)";
+
+/// File the customer's ask in the place the operator can act on it.
+///
+/// THE ASK USED TO DEPEND ON THE BROWSER FINISHING (2026-10-23). The console filed the request with
+/// its own second call to `POST /tickets`, so a buyer who closed the tab between the refusal and
+/// that call had asked for nothing, and the operator's "Plan requests waiting" tile stayed at 0
+/// while customers were waiting. FunnelSwift shipped the server-side arm first; this is the same
+/// shape on THIS app's own queue: a `tickets` row with `source='plan_request'` and `plan_slug`,
+/// which is what `platform_stats` counts and what the operator's Plan requests queue resolves.
+///
+/// Deduped on ONE open request per (tenant, tier) — the key the customer door in
+/// `tickets_handler.rs` already uses — so a second press, or the console's own follow-up call,
+/// returns the existing row instead of a twin. No mail is queued here: nothing was charged.
+async fn record_checkout_plan_request(
+    db: &sqlx::PgPool,
+    tenant_id: Uuid,
+    plan_id: Option<Uuid>,
+    why: &str,
+) -> Option<Value> {
+    let plan_id = plan_id?;
+    let plan: Result<Option<(String, String, f64)>, sqlx::Error> = sqlx::query_as(
+        "SELECT slug, name, COALESCE(NULLIF(price_monthly, 0), price)::float8 \
+           FROM plans WHERE id = $1",
+    )
+    .bind(plan_id)
+    .fetch_optional(db)
+    .await;
+    let (slug, name, price) = match plan {
+        Ok(Some(row)) => row,
+        Ok(None) => return None,
+        Err(e) => {
+            tracing::error!("checkout/create: could not read plan {plan_id}: {e:?}");
+            return None;
+        }
+    };
+    if price <= 0.0 {
+        // A free tier is not an ask anybody can act on.
+        return None;
+    }
+    let open: Option<Uuid> = match sqlx::query_scalar(
+        "SELECT id FROM tickets \
+          WHERE tenant_id = $1 AND source = 'plan_request' \
+            AND status IN ('open','in_progress') \
+            AND plan_slug IS NOT DISTINCT FROM $2 \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .bind(&slug)
+    .fetch_optional(db)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("checkout/create: could not look for an open plan request: {e:?}");
+            return None;
+        }
+    };
+    if let Some(id) = open {
+        return Some(json!({
+            "id": id.to_string(),
+            "plan_slug": slug,
+            "plan_name": name,
+            "already_open": true,
+        }));
+    }
+    let id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+    let subject = format!("Upgrade request: {name} plan");
+    let body = format!(
+        "This workspace pressed Upgrade on the {name} plan (${price:.0}/month) from Plan & Billing \
+         and no charge was made: {why}, so the switch has to be completed by the team. Filed by the \
+         checkout route itself, so the ask stands even if the buyer closed the tab."
+    );
+    let written: Result<(), sqlx::Error> = async {
+        sqlx::query(
+            "INSERT INTO tickets (id, tenant_id, subject, status, priority, assigned_to, \
+                                  contact_id, source, created_at, updated_at, plan_slug) \
+             VALUES ($1,$2,$3,'open','medium',NULL,NULL,'plan_request',$4,$4,$5)",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(&subject)
+        .bind(now)
+        .bind(&slug)
+        .execute(db)
+        .await?;
+        sqlx::query(
+            "INSERT INTO ticket_messages (id, ticket_id, sender_type, sender_id, body, created_at) \
+             VALUES ($1,$2,'agent',NULL,$3,$4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(id)
+        .bind(&body)
+        .bind(now)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+    .await;
+    if let Err(e) = written {
+        tracing::error!("checkout/create: could not record the plan request: {e:?}");
+        return None;
+    }
+    Some(json!({
+        "id": id.to_string(),
+        "plan_slug": slug,
+        "plan_name": name,
+        "already_open": false,
+    }))
+}
+
 #[cfg(test)]
 mod provider_sentinel_tests {
     //! A plan's `payment_provider` may hold the placeholder `none` (the Free tier, and any tier the
@@ -2540,11 +2719,39 @@ mod provider_sentinel_tests {
 
     #[test]
     fn the_refusal_a_customer_reads_names_no_placeholder() {
-        // The sentence the customer's own screen renders when the fallback finds no active provider.
-        // It has to keep the word "provider": the console keys its "request the plan by hand" offer
-        // on /provider|not configured/i, so dropping the word would dead-end the upgrade instead.
-        let sentence = "No payment provider is connected on this install yet";
-        assert!(sentence.contains("provider"));
-        assert!(!sentence.to_ascii_lowercase().contains(NO_PROVIDER_SENTINEL));
+        // Asserted against the REAL body the route returns, not a copied sentence (cron 2026-10-23:
+        // the old version quoted a literal, so it would have kept passing after the route changed).
+        // Two things must hold: the refusal keeps the words "payment provider" (the console keys its
+        // "request the plan by hand" offer on /provider|not configured/i, and `handle()` throws
+        // `error` first), and the buyer's own line never reads the internal `none` sentinel.
+        let (status, body) = no_provider_refusal(None);
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let value = body.0;
+        let err = value["error"].as_str().unwrap_or("");
+        let msg = value["message"].as_str().unwrap_or("");
+        assert!(err.contains("provider"), "console key lost: {err:?}");
+        assert!(
+            msg.contains("No charge was made"),
+            "buyer line missing: {msg:?}"
+        );
+        assert!(!msg.to_ascii_lowercase().contains(NO_PROVIDER_SENTINEL));
+        assert_eq!(value["request_recorded"], serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn a_recorded_ask_is_told_to_the_buyer_and_to_the_console() {
+        let recorded = json!({
+            "id": Uuid::new_v4().to_string(),
+            "plan_slug": "pro-monthly",
+            "plan_name": "Pro Monthly",
+            "already_open": false,
+        });
+        let (_status, body) = no_provider_refusal(Some(recorded));
+        let value = body.0;
+        assert_eq!(value["request_recorded"], serde_json::Value::Bool(true));
+        assert_eq!(value["plan_request"]["plan_slug"], "pro-monthly");
+        let msg = value["message"].as_str().unwrap_or("");
+        assert!(msg.contains("request has been recorded"), "{msg:?}");
+        assert!(msg.contains("No charge was made"), "{msg:?}");
     }
 }
