@@ -48,16 +48,19 @@ body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;
 // Before this, every card linked to a bare /register/, so the pick vanished and the page's only
 // plan word was "Create your free account" — a visitor who chose Pro Monthly had nothing telling
 // them what the account would start on. The slugs are the three the catalogue actually serves
-// (free, pro-monthly, enterprise); anything else is ignored. The pick does NOT change what the
-// server creates — every new account starts on Free — so the note says that plainly.
+// (free, pro-monthly, enterprise); anything else is ignored. Every new account still STARTS on Free
+// and no card is taken — the pick is filed with the server as a plan request the team can act on
+// (cron 2026-10-23), so it is no longer dropped at the door.
 var PLAN_LABELS = { 'free': 'Free', 'pro-monthly': 'Pro Monthly', 'enterprise': 'Enterprise' };
+var pickedPlan = '';
 (function () {
   var picked = (new URLSearchParams(location.search).get('plan') || '').trim().toLowerCase();
   var label = PLAN_LABELS[picked];
   if (!label || picked === 'free') return;
+  pickedPlan = picked;
   var el = document.getElementById('planNote');
-  el.textContent = 'You picked ' + label + '. New accounts start on Free \u2014 no card. '
-    + 'Open Plan & Billing in your dashboard whenever you want us to switch the workspace to ' + label + '.';
+  el.textContent = 'You picked ' + label + '. We\'ll note that with your new account so the team '
+    + 'can set your workspace up on it \u2014 nothing is charged at signup.';
   el.style.display = 'block';
 })();
 document.getElementById('regForm').addEventListener('submit', async (e) => {
@@ -71,23 +74,26 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
   btn.textContent = 'Creating account...';
 
   const email = document.getElementById('email').value;
+  const qEmail = encodeURIComponent(email);
   try {
     const res = await fetch('/api/v1/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // David's signup model: NAME + EMAIL only. The server mints the login credentials and
       // emails them, so there is nothing to store here and NO auto-login — the user confirms
-      // their address by signing in with the password we sent.
+      // their address by signing in with the password we sent. The tier picked on the pricing
+      // page rides along (cron 2026-10-23) and the server files it as a plan request the operator
+      // can see, instead of dropping it at the door.
       body: JSON.stringify({
         name: document.getElementById('name').value,
-        email: email
+        email: email,
+        plan: pickedPlan || 'free'
       })
     });
     const data = await res.json();
     if (res.ok) {
       var escEmail = email.replace(/[<>&"]/g, '');
-      var qEmail = encodeURIComponent(email);
-      ok.innerHTML = '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + escEmail + '.<br><br>You can change your password any time in your profile settings.'
+      ok.innerHTML = '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + escEmail + '.' + (pickedPlan && PLAN_LABELS[pickedPlan] ? '<br><br>Your interest in ' + PLAN_LABELS[pickedPlan] + ' is noted \u2014 the team sets that up with you; nothing was charged.' : '') + '<br><br>You can change your password any time in your profile settings.'
         + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
         + 'Nothing in your inbox after a minute? Check your spam folder, then '
         + '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
@@ -98,7 +104,25 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
       btn.disabled = true;
       return;
     } else {
-      err.textContent = data.error || data.message || 'Registration failed. Please try again.';
+      // An address that is ALREADY registered used to reach a dead end here: the server's
+      // duplicate-email refusal was printed with nothing to press, right after the visitor had
+      // picked a plan on the pricing page. Keep the refusal, then offer the two doors that help —
+      // sign in to the account they already own, or have a reset code sent — with the address they
+      // typed carried into both links. A paid pick is pointed at Plan & Billing, where the same
+      // request is filed for the workspace they already have.
+      var msg = String(data.error || data.message || 'Registration failed. Please try again.');
+      var alreadyRegistered = res.status === 409 || /already exists/i.test(msg);
+      err.innerHTML = msg.replace(/[<>&"]/g, '')
+        + (alreadyRegistered
+          ? '<div style="margin-top:8px;font-size:13px">'
+            + '<a href="/login?email=' + qEmail + '" style="color:#2563eb;font-weight:600">Sign in to that account</a>'
+            + ' or <a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>.'
+            + (pickedPlan && PLAN_LABELS[pickedPlan]
+              ? ' Once you are in, open Plan &amp; Billing and ask for ' + PLAN_LABELS[pickedPlan]
+                + ' there \u2014 that files the same request this page would have filed.'
+              : '')
+            + '</div>'
+          : '');
       err.style.display = 'block';
     }
   } catch (ex) {
