@@ -113,6 +113,26 @@ pub async fn register(
     )
     .await?;
 
+    // The tier the visitor picked on the marketing pricing page travels WITH the signup (cron
+    // 2026-10-23). Before this the page said "You picked Pro Monthly" and then posted name+email, so
+    // the pick died at the door: the account landed on Free and nothing in the operator's Plan
+    // Requests queue knew a paid tier had been asked for. Files the same `plan_request` ticket the
+    // dashboard's upgrade button files. BEST-EFFORT: a bad slug or a DB hiccup must never refuse an
+    // account that has already been minted.
+    if let Err(e) = crate::handlers::tickets_handler::record_signup_plan_request(
+        &state.pool,
+        ids.account_id,
+        &req.plan,
+    )
+    .await
+    {
+        tracing::warn!(
+            "register: signup plan request '{}' could not be filed for tenant {}: {e:?}",
+            req.plan,
+            ids.account_id
+        );
+    }
+
     let claims = Claims {
         sub: ids.user_id,
         email: email.clone(),

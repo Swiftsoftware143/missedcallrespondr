@@ -628,3 +628,87 @@ pub async fn delete(
     }
     Ok(Json(serde_json::json!({"deleted": true, "id": id})))
 }
+
+/// Record the paid tier a visitor PICKED on the public pricing page, at the moment they sign up
+/// (cron 2026-10-23). The marketing pricing cards already carry the tier into `/register/?plan=…`,
+/// and that page showed "You picked Pro" — then posted name+email only, so the pick died at the door
+/// and nothing in the operator's console knew a paid tier had been asked for.
+///
+/// The row is the SAME `tickets` shape the dashboard's "Request the <plan> plan" button files
+/// (`source='plan_request'` + `plan_slug`, deduped on one open request per tier), which is what the
+/// operator's Plan Requests queue reads and what its Resolve action switches the workspace with. So a
+/// signup pick is workable, not a line in a log. Best-effort by design: an unknown, retired or free
+/// slug returns `None` and the signup still succeeds — a preference must never refuse an account.
+pub async fn record_signup_plan_request(
+    db: &sqlx::PgPool,
+    tenant_id: Uuid,
+    picked: &str,
+) -> Result<Option<String>, AppError> {
+    let slug: String = picked
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if slug.is_empty() || slug.len() > 60 || slug == "free" {
+        return Ok(None);
+    }
+    // Only an ACTIVE, priced tier is a request an operator can act on: `pro` is a retired duplicate
+    // of `pro-monthly` here (is_active=false), so a stale link can never file a dead tier.
+    let plan: Option<(String, f64)> = sqlx::query_as(
+        "SELECT name, COALESCE(NULLIF(price_monthly, 0), price)::float8 \
+           FROM plans WHERE slug = $1 AND is_active = true",
+    )
+    .bind(&slug)
+    .fetch_optional(db)
+    .await?;
+    let Some((name, price)) = plan else {
+        return Ok(None);
+    };
+    if price <= 0.0 {
+        return Ok(None);
+    }
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM tickets \
+          WHERE tenant_id = $1 AND source = 'plan_request' \
+            AND status IN ('open','in_progress') \
+            AND plan_slug IS NOT DISTINCT FROM $2 \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .bind(&slug)
+    .fetch_optional(db)
+    .await?;
+    if existing.is_some() {
+        return Ok(Some(name));
+    }
+    let id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+    sqlx::query(
+        "INSERT INTO tickets (id, tenant_id, subject, status, priority, assigned_to, contact_id, \
+                              source, created_at, updated_at, plan_slug) \
+         VALUES ($1,$2,$3,'open','medium',NULL,NULL,'plan_request',$4,$4,$5)",
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .bind(format!("Plan request at signup: {name} plan"))
+    .bind(now)
+    .bind(&slug)
+    .execute(db)
+    .await?;
+    sqlx::query(
+        "INSERT INTO ticket_messages (id, ticket_id, sender_type, sender_id, body, created_at) \
+         VALUES ($1,$2,'agent',NULL,$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(id)
+    .bind(format!(
+        "This workspace picked the {name} plan (${price:.0}/month) on the pricing page before it \
+         signed up. New accounts start on Free and no card was taken, so the switch has to be made \
+         by the team. Filed automatically by the signup door."
+    ))
+    .bind(now)
+    .execute(db)
+    .await?;
+    Ok(Some(name))
+}

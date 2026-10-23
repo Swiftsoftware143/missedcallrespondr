@@ -192,6 +192,12 @@ pub struct RegisterRequest {
     /// OPTIONAL: with no workspace-name field the handler derives `"<name>'s Workspace"`.
     #[serde(default)]
     pub account_name: String,
+    /// OPTIONAL: the tier the visitor picked on the public pricing page (`/register/?plan=<slug>`).
+    /// Accepts the fleet's `plan_slug` spelling too, so an older link keeps working. Absent, empty or
+    /// `free` files no request; an unknown or retired slug is ignored (a preference never refuses
+    /// an account) — see `tickets_handler::record_signup_plan_request`.
+    #[serde(default, alias = "plan_slug")]
+    pub plan: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
