@@ -123,6 +123,13 @@
       main.content { padding: 1.25rem; }
       .topbar { padding: .5rem 1rem; }
       .topbar h1 { font-size: 1rem; }
+      /* A long URL inside <code> (the API base, a webhook address) has no break opportunity, so it
+         set a min-content width of 471px and the whole guide laid itself out 496px wide on a 390px
+         phone — measured in Chromium 2026-10-23. Every block then rendered ~20% small. Wrap the
+         token instead of letting it widen the page; nothing changes above 768px. */
+      body, .wrapper, main.content, .content { min-width: 0; max-width: 100%; }
+      code, pre, kbd { overflow-wrap: anywhere; word-break: break-word; }
+      pre { overflow-x: auto; max-width: 100%; }
     }
   </style>
 </head>
