@@ -1064,7 +1064,17 @@ const Contacts = () => {
     // did with it: the calls they made and the messages they were sent had no screen in this console.
     hist: null
   });
+  // Each GET returns EVERY row the tenant has (list_calls / list_messages carry no LIMIT and no
+  // contact id), so a History click used to download both tables in full — and clicking a second
+  // contact downloaded them again. Fetch each table at most once per page session and reuse it;
+  // `load()` (which every contact write ends with) drops the cache so a new call or contact is
+  // never hidden behind a stale copy.
+  // The cache lives on S, not in this closure: openHistory() re-renders, the component runs again
+  // and a closure-local cache would be rebuilt empty on every render (measured: still 2 requests on
+  // the second click). S survives renders for as long as the page does.
+  const dropHistoryCache = () => { S._histCache = null; };
   const load = async () => {
+    dropHistoryCache();
     try { const f = await API.get('/contacts/custom-fields'); st.fields = Array.isArray(f) ? f : []; }
     catch (e) { st.fields = []; }
     try {
@@ -1091,9 +1101,11 @@ const Contacts = () => {
   const openHistory = async (c) => {
     st.hist = { contact: c, calls: null, messages: null, err: null, busy: true }; renderApp();
     try {
-      const both = await Promise.all([API.get('/calls'), API.get('/messages')]);
-      const cs = Array.isArray(both[0]) ? both[0] : [];
-      const ms = Array.isArray(both[1]) ? both[1] : [];
+      const cache = (S._histCache = S._histCache || { calls: null, messages: null });
+      if (!cache.calls) cache.calls = await API.get('/calls');
+      if (!cache.messages) cache.messages = await API.get('/messages');
+      const cs = Array.isArray(cache.calls) ? cache.calls : [];
+      const ms = Array.isArray(cache.messages) ? cache.messages : [];
       st.hist = {
         contact: c,
         calls: cs.filter(x => sameNumber(x.caller_number, c.phone)),
