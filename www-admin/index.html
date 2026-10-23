@@ -2307,6 +2307,7 @@ const EmailProviderScreen = () => {
     try {
       const lg = await API.get('/admin/email-log');
       st.sends = (lg && lg.sends) || [];
+      st.withheld7d = (lg && lg.withheld_7d) || 0;
     } catch (e) { st.sends = st.sends || []; }
     renderApp();
   };
@@ -2387,7 +2388,7 @@ const EmailProviderScreen = () => {
         <span class="font-semibold">Recent sends</span>
         <button class="btn btn-outline btn-sm" data-email-provider="refresh-history" disabled=${st.busy} onClick=${load}>Refresh</button>
       </div>
-      <p class="text-xs text-gray-400 mb-2">The last 50 transactional sends, newest first. The line above answers "what happened to the most recent one"; this list keeps the ones before it, so a credentials mail the provider refused at signup is still visible after a later send succeeds. <b>withheld</b> means nothing was attempted (a reserved test address), <b>failed</b> means the provider refused it, <b>sent</b> means the provider accepted it.</p>
+      <p class="text-xs text-gray-400 mb-2">The last 50 real sends, newest first. The line above answers "what happened to the most recent one"; this list keeps the ones before it, so a credentials mail the provider refused at signup is still visible after a later send succeeds. Reserved test addresses (the fleet probes) are not listed here — ${st.withheld7d || 0} withheld in the last 7 days, and none of them were attempts. <b>failed</b> means the provider refused it, <b>sent</b> means the provider accepted it.</p>
       ${(st.sends && st.sends.length) ? html`<div class="overflow-x-auto"><table class="w-full text-sm" id="email-send-history-table">
         <thead><tr class="text-left text-xs text-gray-500"><th class="py-1 pr-3">When</th><th class="py-1 pr-3">To</th><th class="py-1 pr-3">What</th><th class="py-1 pr-3">Result</th><th class="py-1">Detail</th></tr></thead>
         <tbody>${st.sends.map(s => {
