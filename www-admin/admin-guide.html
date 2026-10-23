@@ -252,6 +252,13 @@
   </table>
   <p>Providers offered: <code>mailgun</code>, <code>sendgrid</code>, <code>sendiio</code> — exactly the arms the app can deliver through; a save of any other value is rejected rather than stored as a dead setting.</p>
   <p><code>admin_settings.email_last_send</code> records the outcome of the last <strong>system-mail</strong> send (kind, recipient, provider, receipt) and is shown by the GET above, so "the customer never got the mail" is answerable without reading container logs. A deliberate <em>test</em> send reports its result inline and does not overwrite that row. A failed credential mail is never fatal to account creation — the loud <code>account created but the WELCOME/CREDENTIALS EMAIL FAILED</code> line plus <code>email_last_send</code> are the signal.</p>
+  <p><strong>Recent sends is real sends only.</strong> The list under the Email Provider card
+  (<code>GET /api/v1/admin/email-log</code>) keeps the last 50 <em>attempts</em> and says how many
+  reserved test recipients were <em>withheld</em> in the last 7 days (<code>withheld_7d</code> in the
+  same answer). A reserved address (the fleet probes end in <code>.invalid</code>) is never attempted,
+  so it is not listed as a send; it is counted once, beside the table. Before 2026-10-23 those probe
+  rows filled the window and pushed real customer mail out of it, which is exactly the question the
+  history exists to answer: "did this customer get their password?".</p>
   <h2 id="email-branding">Email Branding (per account)</h2>
   <p>Each tenant can put its own logo, display name and colour at the top of the transactional mail this app sends for it (kanban t_feab8aff). The tenant sets it in the <strong>🎨 Email Branding</strong> tab of their console (the same account also has the screen in the app dashboard).</p>
   <ul>
