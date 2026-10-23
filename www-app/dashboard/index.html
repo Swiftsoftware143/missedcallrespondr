@@ -37,7 +37,7 @@
 }();
 </script>
 <title>MissedCall Respondr — Dashboard</title>
-<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500;width:100%;border:0;background:transparent;text-align:left;font-family:inherit;line-height:1.2}.nav-item:focus-visible{outline:2px solid #2563eb;outline-offset:2px}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:#b91c1c;font-weight:600}</style>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh;min-width:0;overflow-wrap:anywhere}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500;width:100%;border:0;background:transparent;text-align:left;font-family:inherit;line-height:1.2}.nav-item:focus-visible{outline:2px solid #2563eb;outline-offset:2px}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:#b91c1c;font-weight:600}</style>
 <link rel="stylesheet" href="/dashboard/tw.css">
 </head>
 <body>
@@ -1059,7 +1059,10 @@ const Contacts = () => {
     list: [], fields: [], search: '', searching: false, showFields: false, showValues: null,
     values: {}, draft: { name: '', type: 'text', order: 0 }, responder: '', busy: null,
     notice: null, error: null,
-    showForm: false, editItem: null, formSeeded: false
+    showForm: false, editItem: null, formSeeded: false,
+    // A contact's own history (2026-10-22). The roster listed a person's number and nothing they
+    // did with it: the calls they made and the messages they were sent had no screen in this console.
+    hist: null
   });
   const load = async () => {
     try { const f = await API.get('/contacts/custom-fields'); st.fields = Array.isArray(f) ? f : []; }
@@ -1073,6 +1076,35 @@ const Contacts = () => {
     renderApp();
   };
   if (!st._loaded) { st._loaded = true; load(); }
+
+  // A contact's own calls and messages (2026-10-22). GET /calls and GET /messages are tenant-scoped
+  // and carry NO contact id — both tables match a person by NUMBER — so the join here is on the
+  // normalised digits (last ten), which is exactly what those tables store. A contact with no phone
+  // is answered with a sentence, never an empty list that looks like "no activity".
+  const dials = (s) => String(s || '').replace(/\D/g, '');
+  const sameNumber = (a, b) => {
+    const x = dials(a), y = dials(b);
+    if (!x || !y) return false;
+    if (x.length >= 7 && y.length >= 7) return x.slice(-10) === y.slice(-10);
+    return x === y;
+  };
+  const openHistory = async (c) => {
+    st.hist = { contact: c, calls: null, messages: null, err: null, busy: true }; renderApp();
+    try {
+      const both = await Promise.all([API.get('/calls'), API.get('/messages')]);
+      const cs = Array.isArray(both[0]) ? both[0] : [];
+      const ms = Array.isArray(both[1]) ? both[1] : [];
+      st.hist = {
+        contact: c,
+        calls: cs.filter(x => sameNumber(x.caller_number, c.phone)),
+        messages: ms.filter(x => sameNumber(x.from_number, c.phone) || sameNumber(x.to_number, c.phone)),
+        err: null, busy: false,
+      };
+    } catch (e) {
+      st.hist = { contact: c, calls: [], messages: [], err: 'Could not load this history: ' + e.message, busy: false };
+    }
+    renderApp();
+  };
 
   let timer = null;
   const onSearch = (v) => {
@@ -1164,10 +1196,10 @@ const Contacts = () => {
 
   const rows = st.list.slice(0, 100);
   return html`<div>
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between mb-4" style="flex-wrap:wrap;gap:8px">
       <h2 class="text-xl font-bold">Contacts</h2>
-      <div class="flex items-center gap-2">
-        <input class="input" style="width:240px" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
+      <div class="flex items-center gap-2" style="flex-wrap:wrap">
+        <input class="input" style="width:240px;max-width:100%" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
         <button class="btn btn-sm btn-green" onClick=${() => showContact(null)}>+ New Contact</button>
         <button class="btn btn-sm btn-outline" onClick=${() => { st.showFields = !st.showFields; renderApp(); }}>Custom fields (${st.fields.length})</button>
         <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
@@ -1200,11 +1232,32 @@ const Contacts = () => {
             <td class="text-gray-500">${c.phone || '-'}</td>
             <td class="text-gray-500">${c.email || '-'}</td>
             ${st.fields.map(f => { const k = fieldKey(f); return html`<td class="text-gray-500">${vals[k] != null && vals[k] !== '' ? vals[k] : html`<span class="text-gray-300">—</span>`}</td>`; })}
-            <td><div class="flex gap-1 justify-end">${st.fields.length ? html`<button class="btn btn-sm btn-outline" onClick=${() => openValues(c)}>Fields</button>` : ''}<button class="btn btn-sm btn-outline" onClick=${() => showContact(c)}>Edit</button><button class="btn btn-sm btn-red" disabled=${st.busy === c.id} onClick=${() => removeContact(c)}>Delete</button></div></td>
+            <td><div class="flex gap-1 justify-end"><button class="btn btn-sm btn-outline" data-contact-history=${c.id} onClick=${() => openHistory(c)}>History</button>${st.fields.length ? html`<button class="btn btn-sm btn-outline" onClick=${() => openValues(c)}>Fields</button>` : ''}<button class="btn btn-sm btn-outline" onClick=${() => showContact(c)}>Edit</button><button class="btn btn-sm btn-red" disabled=${st.busy === c.id} onClick=${() => removeContact(c)}>Delete</button></div></td>
           </tr>`; })}
         ${rows.length === 0 && html`<tr><td colspan=${4 + st.fields.length} class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
       </tbody></table>
     </div>
+    ${st.hist && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.hist = null, renderApp())}><div class="modal-content" data-contact-history-card style="max-width:820px">
+      <h3 class="text-lg font-bold mb-1">${st.hist.contact.name || st.hist.contact.full_name || 'Contact'} \u2014 history</h3>
+      <p class="text-sm text-gray-500 mb-3">${st.hist.contact.phone || 'no number on file'}</p>
+      ${st.hist.busy ? html`<p class="text-sm text-gray-500">Loading this contact\u2019s calls and messages\u2026</p>`
+        : html`<div>
+          ${st.hist.err && html`<p class="text-sm text-red-600 mb-2">${st.hist.err}</p>`}
+          ${!st.hist.contact.phone ? html`<p class="text-sm text-gray-500">This contact has no phone number, so there are no calls or messages to match.</p>` : html`<div>
+            <h4 class="font-semibold mb-2">Calls (${st.hist.calls.length})</h4>
+            ${st.hist.calls.length === 0 ? html`<p class="text-sm text-gray-400 mb-3">No calls from this number.</p>`
+              : html`<table class="table mb-3"><thead><tr><th>When</th><th>From</th><th>Duration</th><th>Outcome</th></tr></thead><tbody>
+                ${st.hist.calls.slice(0, 20).map(x => html`<tr><td class="text-sm">${utcTime(x.call_time)}</td><td>${x.caller_number}</td><td>${x.duration != null ? x.duration + 's' : '\u2014'}</td><td>${x.disposition || '\u2014'}</td></tr>`)}
+              </tbody></table>`}
+            <h4 class="font-semibold mb-2">Messages (${st.hist.messages.length})</h4>
+            ${st.hist.messages.length === 0 ? html`<p class="text-sm text-gray-400">No messages exchanged with this number.</p>`
+              : html`<table class="table"><thead><tr><th>When</th><th>Direction</th><th>Message</th></tr></thead><tbody>
+                ${st.hist.messages.slice(0, 20).map(x => html`<tr><td class="text-sm">${utcTime(x.created_at)}</td><td>${x.direction || '\u2014'}</td><td class="text-sm">${x.body || ''}</td></tr>`)}
+              </tbody></table>`}
+          </div>`}
+        </div>`}
+      <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { st.hist = null; renderApp(); }}>Close</button></div>
+    </div></div>`}
     ${st.showValues && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showValues = null, renderApp())}><div class="modal-content">
       <h3 class="text-lg font-bold mb-4">Field values — ${st.showValues.name || st.showValues.phone || 'contact'}</h3>
       <div class="space-y-3">${st.fields.map(f => html`<div><label class="text-sm font-medium block mb-1">${f.field_name}</label>
@@ -1460,14 +1513,14 @@ const Integrations = () => {
     ${st.error ? html`<div class="card" style="border-left:4px solid #dc2626"><b class="text-red-700">Error</b><p class="text-sm text-gray-600 mt-.5">${st.error}</p></div>` : ''}
     ${st.notice ? html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-600">${st.notice}</p></div>` : ''}
     ${core ? html`<div class="card" style="border:2px solid #2563eb">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex items-start justify-between gap-4" style="flex-wrap:wrap">
         <div style="flex:1">
           <h3 class="font-semibold text-lg">🔗 ${core.name || 'CoreSwift CRM'} <span class="badge badge-blue">Recommended</span></h3>
           <p class="text-sm text-gray-600 mt-1">${core.description || 'Push leads into CoreSwift CRM'}</p>
           <p class="text-xs text-gray-500 mt-1">Every caller you capture here lands in CoreSwift automatically — the single home for all of your leads.</p>
           ${controls(core)}
         </div>
-        <div style="min-width:210px" class="text-right">
+        <div style="min-width:210px;max-width:100%" class="text-right">
           <div class="text-sm font-semibold text-blue-700">One CRM for every tool you connect</div>
           <a class="btn btn-sm" style="display:inline-block;margin-top:8px;text-decoration:none" href="https://coreswiftcrm.com/?utm_source=missedcallrespondr&utm_medium=integration_center" target="_blank" rel="noopener">Get CoreSwift CRM →</a>
           <div class="mt-2"><a class="text-xs text-blue-600" id="billing-link" href="#" onClick=${e => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>See plans & upgrade</a></div>
