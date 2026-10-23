@@ -123,7 +123,18 @@
       .topbar { padding: .5rem 1rem; }
       .topbar h1 { font-size: 1rem; }
     }
-  </style>
+  
+/* Phone: nothing on this page may widen the document (measured 2026-10-22, real Chromium at 390 px).
+   A route/merge-field table laid out wider than the column, and one long migration filename in
+   inline <code>, each pushed the whole guide sideways (measured 420-917 px of document width).
+   The table now scrolls inside its own box and a long token wraps, so the page itself stays 100%. */
+@media (max-width: 768px) {
+  body, .main-content, .content-area, main { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  table { display: block; width: 100%; max-width: 100%; overflow-x: auto; }
+  pre { overflow-x: auto; max-width: 100%; }
+  code { overflow-wrap: anywhere; }
+}
+</style>
 </head>
 <body>
 
@@ -151,6 +162,7 @@
     <li><a href="#outbound-sms-the-send-path">Outbound SMS (the send path)</a></li>
     <li><a href="#response-rules-the-call-path-evaluator">Response Rules (the call-path evaluator)</a></li>
     <li><a href="#monitoring">Monitoring</a></li>
+    <li><a href="#deals-campaigns-and-clients">Deals, Campaigns and Clients</a></li>
     <li><a href="#payments-and-the-paypal-webhook-receiver">Payments and the PayPal webhook receiver</a></li>
     <li><a href="#deployment">Deployment</a></li>
   </ul>
@@ -421,6 +433,27 @@ Header: x-internal-key: &lt;the shared INTERNAL_SYNC_KEY&gt;
     <li><strong>What a text needs.</strong> The same <code>telnyx_config</code> credential as the manual send. With it missing the rule still fires and is logged, but no row is written — nothing was attempted. The console's Response Rules screen and the user guide both say so.</li>
     <li><strong>Plan limit.</strong> <code>max_rules</code> is counted from this table and enforced on <code>POST /api/v1/response-rules</code>. The automatic reply itself is NOT run through <code>max_messages</code>: dropping a missed-call reply mid-ring would break the product's one promise with nothing to show for it, and the row still counts towards the tenant's total.</li>
     <li><strong>Templates are not involved.</strong> <code>message_templates</code> is a library of saved text; a rule holds its own <code>response_content.text</code> and no placeholder is substituted anywhere in the sent message.</li>
+  </ul>
+  <h2 id="deals-campaigns-and-clients">Deals, Campaigns and Clients</h2>
+  <p>Three working screens in the console list the account's own rows. None of them is a mock-up:
+  every table reads what is actually stored, and every action writes it back.</p>
+  <ul>
+    <li><strong>Deals</strong> (<em>Name</em>, <em>Value</em>, <em>Stage</em>, <em>Prob</em>) is the
+    pipeline: each deal carries its own value, the stage it has reached and its probability.
+    <strong>+ Add Deal</strong> creates one; <strong>Edit</strong> and <strong>Delete</strong> change
+    or remove it, with <strong>Cancel</strong> leaving the row untouched.</li>
+    <li><strong>Campaigns</strong> (<em>Name</em>, <em>Kind</em>, <em>Status</em>, <em>Linked
+    Tag</em>, <em>Owned List</em>) is how a campaign is wired to a list. A campaign owns its own
+    fresh list, named after the campaign; linking a <strong>tag</strong> means a lead carrying that
+    tag is auto-added to the campaign's list and pushed to CoreSwift. So the
+    <em>Owned List</em> column shows where this campaign's leads land, and <em>Linked Tag</em> shows
+    the trigger. <strong>+ Add Campaign</strong> creates one; <strong>Edit</strong> changes the name,
+    the kind or the linked tag.</li>
+    <li><strong>Clients</strong> (<em>Name</em>, <em>Email</em>, <em>Phone</em>, <em>Source</em>) is
+    the customer list, with the <em>Source</em> column saying where each client came from, so a
+    client that arrived through a campaign is distinguishable from one typed in by hand.
+    <strong>+ Add Client</strong>, <strong>Edit</strong> and <strong>Delete</strong> work as they do
+    everywhere else in this console.</li>
   </ul>
   <h2 id="monitoring">Monitoring</h2>
   <ul>

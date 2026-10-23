@@ -48,6 +48,7 @@ window.appGuidePages = {
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, and the password-reset mail. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
   "account": { title: "My Account", desc: "Your own profile: the name, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on"] },
+  "email-provider": { title: "Email Provider", desc: "The mail provider every transactional message this install sends goes through \u2014 the welcome mail a new customer needs first, invitations and password resets. Choose the provider, then give its API URL, the API key, the sending domain and the From name and address. Two badges say whether it is ready: configured / not configured, and whether the STORED key is encrypted at rest \u2014 a key that arrived from a restored backup or a manual database write reads \u201cstored in the clear\u201d until the app seals it, and leaving the key field blank keeps the stored one instead of replacing it.", actions: ["Choose the provider and enter its API URL", "Paste the API key (leave it blank to keep the saved one)", "Set the sending domain and the From name and address", "Send a test email to prove the path end to end", "Save the provider"] },
 };
 </script>
 <script src="/inline-guide-widget.js"></script>
@@ -3169,9 +3170,9 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
         <span class="nav-text font-bold text-gray-800">MissedCall</span>
       </div>
       <div class="flex-1 space-y-1">
-        ${nav.filter(n => !n.adminOnly || (API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0)).map(n => html`<div class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }}>
+        ${nav.filter(n => !n.adminOnly || (API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0)).map(n => html`<button type="button" class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }} aria-label=${n.label}>
           <span>${n.icon}</span><span class="nav-text">${n.label}</span>
-        </div>`)}
+        </button>`)}
       </div>
       <!-- Admin guide (kanban t_5af0ddda): fleet standard - the console links its own guide on its
            OWN origin at /admin-guide.html. Served from this root by
@@ -3180,9 +3181,9 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       <a class="nav-item" id="admin-guide-link" href="/admin-guide.html" target="_blank" rel="noopener">
         <span>📖</span><span class="nav-text">Admin Guide</span>
       </a>
-      <div class="nav-item text-red-500 mt-auto" onClick=${() => { API.logout(); S.view = 'dashboard'; renderApp(); }}>
+      <button type="button" class="nav-item text-red-500 mt-auto" onClick=${() => { API.logout(); S.view = 'dashboard'; renderApp(); }} aria-label="Logout">
         <span>🚪</span><span class="nav-text">Logout</span>
-      </div>
+      </button>
     </div>
     <div class="main flex-1 p-6 overflow-auto">
       <${CurrentView} />

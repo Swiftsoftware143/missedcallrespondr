@@ -29,11 +29,11 @@ body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;
   <form id="regForm" style="display:flex;flex-direction:column;gap:16px">
     <div>
       <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Full Name</label>
-      <input type="text" class="input" id="name" placeholder="John Smith" required autocomplete="name">
+      <input type="text" class="input" id="name" placeholder="John Smith" required autocomplete="name" aria-label="Your name">
     </div>
     <div>
       <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Email</label>
-      <input type="email" class="input" id="email" placeholder="you@company.com" required autocomplete="email">
+      <input type="email" class="input" id="email" placeholder="you@company.com" required autocomplete="email" aria-label="Email">
     </div>
     <p style="font-size:12px;color:#64748b;margin:0">No password to choose — we'll email your login details so you can confirm your address by signing in.</p>
     <button type="submit" class="btn" id="submitBtn">Create Free Account</button>
