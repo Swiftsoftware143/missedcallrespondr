@@ -252,16 +252,34 @@ pub async fn preview_email(
         .unwrap_or_else(|| "there".to_string());
     match crate::email::send_branding_preview_email(&state.pool, claims.aid, &to, &name).await {
         Ok(()) => {
-            let branded = branding::load(&state.pool, claims.aid).await.is_some();
+            // Say truthfully WHOSE header the reader is about to see. `logo_url` is never empty on
+            // the wire now — an account with no branding gets this app's own wordmark — so the
+            // answer keys on whether the logo is the account's OWN upload. Before this, an
+            // unbranded account was told the preview "carries the MissedCall Respondr header" while
+            // the rendered message had no header at all (measured live 2026-10-24, kanban
+            // t_6a8af451), and a name-only account was told it carried "your logo".
+            let stored = branding::load(&state.pool, claims.aid).await;
+            let logo_is_own = stored
+                .as_ref()
+                .and_then(|b| b.resolve_logo_url(branding::APP_URL))
+                .is_some();
+            let name_is_own = stored
+                .as_ref()
+                .map(|b| !b.brand_name.is_empty())
+                .unwrap_or(false);
+            let detail = if logo_is_own {
+                "Preview sent to your own address, with your logo and brand name at the top."
+            } else if name_is_own {
+                "Preview sent to your own address, with your display name at the top. Add a logo on this card to complete the header."
+            } else {
+                "Preview sent to your own address. Nothing of your own is branded yet, so it carries the MissedCall Respondr wordmark and name — set a name or a logo, save, and send it again."
+            };
             Ok(Json(json!({
                 "sent": true,
                 "to": to,
-                "branded": branded,
-                "detail": if branded {
-                    "Preview sent to your own address, with your logo and brand name at the top."
-                } else {
-                    "Preview sent to your own address. Nothing is branded yet, so it carries the MissedCall Respondr header — set a name or a logo, save, and send it again."
-                }
+                "branded": logo_is_own || name_is_own,
+                "logo_is_own": logo_is_own,
+                "detail": detail
             })))
         }
         Err(detail) => Ok(Json(json!({ "sent": false, "to": to, "detail": detail }))),

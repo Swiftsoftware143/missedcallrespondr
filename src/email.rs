@@ -61,6 +61,31 @@ fn with_app_vars(vars: &serde_json::Value, app_name: &str, app_url: &str) -> ser
     serde_json::Value::Object(merged)
 }
 
+/// The app's OWN wordmark, used for the header of every message sent for an account that has
+/// configured no branding of its own (kanban t_6a8af451).
+///
+/// A mail client fetches it over the network with no session, so it is an absolute URL on a host
+/// that answers publicly — and it is a PNG, because Gmail and Outlook do not render the SVG the
+/// pages use. `alt` carries the name, so a client that blocks images still says whose mail this is.
+const APP_LOGO_PATH: &str = "/logo.png";
+
+/// The identity every message falls back to when its account has configured none: the app's own
+/// name and wordmark, in the fleet's default accent.
+///
+/// Before this the header block only appeared once an account had uploaded a logo of its own, so
+/// the credentials mail a BRAND-NEW customer receives — the first thing this product ever shows
+/// them — arrived with no wordmark at all, while the branding preview told the operator it
+/// "carries the MissedCall Respondr header" (measured live 2026-10-24: no `<img>`, no header div,
+/// no colour rule and no HTML part at all on the captured message). An account's own branding
+/// still wins field by field.
+fn app_default_branding() -> branding::Branding {
+    branding::Branding {
+        brand_name: branding::APP_NAME.to_string(),
+        brand_color: String::new(),
+        logo_url: APP_LOGO_PATH.to_string(),
+    }
+}
+
 /// Bind the two branding merge fields into a render's variable map (kanban t_feab8aff).
 ///
 /// They are PER-ACCOUNT, so they cannot live in a `&'static` default map: the account's own values
@@ -75,11 +100,26 @@ fn bind_branding(vars: &mut serde_json::Value, branding: Option<&branding::Brand
             b.brand_name.clone(),
             b.resolve_logo_url(branding::APP_URL).unwrap_or_default(),
         ),
-        None => (branding::APP_NAME.to_string(), String::new()),
+        None => (
+            branding::APP_NAME.to_string(),
+            app_default_branding()
+                .resolve_logo_url(branding::APP_URL)
+                .unwrap_or_default(),
+        ),
     };
+    // Whether the logo above is the account's OWN upload or this app's wordmark standing in for
+    // one. `logo_url` is always non-empty now, so copy that describes the header reads this flag
+    // instead of testing the URL — and never calls the app's own header the tenant's.
+    let logo_is_own = branding
+        .and_then(|b| b.resolve_logo_url(branding::APP_URL))
+        .is_some();
     if let Some(obj) = vars.as_object_mut() {
         obj.insert("brand_name".to_string(), json!(name));
         obj.insert("logo_url".to_string(), json!(logo));
+        obj.insert(
+            "logo_is_own".to_string(),
+            json!(if logo_is_own { "yes" } else { "no" }),
+        );
     }
 }
 
@@ -88,8 +128,9 @@ fn bind_branding(vars: &mut serde_json::Value, branding: Option<&branding::Brand
 /// The HTML part gains the header block (logo + name + colour rule); the text part gains the brand
 /// name as a one-line header (a text part cannot carry an image). When the account HAS branding but
 /// the message carries no HTML part — the inline fallbacks return text only — one is built from the
-/// ESCAPED text so a branded mail still shows the logo. A no-op for an account with no branding,
-/// which is what makes the change additive: those renders are byte-identical to before.
+/// ESCAPED text so a branded mail still shows the logo. `None` stays a no-op — that is the shape
+/// the additivity test pins — while every SEND passes `Some`, because the send path substitutes the
+/// app's own identity for an account that has none (kanban t_6a8af451).
 fn apply_branding(
     branding: Option<&branding::Branding>,
     text: &str,
@@ -130,8 +171,13 @@ pub async fn send_template_email(
     // Per-account branding merge fields (kanban t_feab8aff), loaded at the ONE funnel so a template
     // added later inherits them for free. The header block is applied to the rendered parts in
     // `send_email_request`, the choke point both this arm and the inline fallbacks pass through.
-    let branding = branding::load(pool, tenant_id).await;
-    bind_branding(&mut vars, branding.as_ref());
+    //
+    // The MERGE fields follow the STORED document (an account with a name but no logo keeps its own
+    // name and reports `logo_is_own = no`), while the header below follows the account's branding
+    // or, when it has none, this app's own identity — an unbranded account's mail must still say
+    // whose it is (kanban t_6a8af451).
+    let stored_branding = branding::load(pool, tenant_id).await;
+    bind_branding(&mut vars, stored_branding.as_ref());
 
     // Load template from DB. A lookup FAILURE is no longer swallowed: `lookup_db_template`
     // logs it with this function's name and the error, then the caller falls back to the
@@ -406,8 +452,17 @@ async fn send_inline(
         // reader is looking at. Text-only on purpose: every other mail this app sends is text-only
         // and gets the same branded header, so the sample is the mail a caller really gets.
         "branding_preview" => {
+            // The header is ALWAYS there now (an unbranded account gets this app's own wordmark),
+            // so the copy reads the `logo_is_own` merge field instead of assuming the logo above is
+            // the operator's: an upload they never made must not be described as theirs, and this
+            // app's own header must not be called "YOUR branding" (kanban t_6a8af451).
+            let header_line = if vars.get("logo_is_own").and_then(|v| v.as_str()) == Some("yes") {
+                "The header above this line is YOUR branding: your logo, your display name and your colour. If it is right here, it is right on every missed-call reply, invite and password email your callers receive."
+            } else {
+                "No logo of your own is set yet, so this message carries the MissedCall Respondr wordmark and name. Upload a logo under Email Branding on your dashboard, save it, and send yourself another preview to see your own."
+            };
             let body = format!(
-                "Hi {name},\n\nThis is a sample of the mail {app_name} sends on your behalf.\n\nThe header above this line is YOUR branding: your logo, your display name and your colour. If it is right here, it is right on every missed-call reply, invite and password email your callers receive.\n\nChange it any time under Email Branding on your dashboard: {app_url}/dashboard\n\n- The {app_name} Team"
+                "Hi {name},\n\nThis is a sample of the mail {app_name} sends on your behalf.\n\n{header_line}\n\nChange it any time under Email Branding on your dashboard: {app_url}/dashboard\n\n- The {app_name} Team"
             );
             send_email_request(
                 pool,
@@ -647,10 +702,15 @@ async fn send_email_request(
         .await;
         return Ok(());
     }
-    // The account's branding opens both parts of the message (kanban t_feab8aff); a no-op for an
-    // account with no branding, so those sends are byte-identical to before.
-    let branding = branding::load(pool, tenant_id).await;
-    let (text_body, html_body) = apply_branding(branding.as_ref(), text_body, html_body);
+    // The account's branding opens both parts of the message (kanban t_feab8aff). An account with
+    // NO branding of its own gets this app's own wordmark and name instead of an empty space
+    // (kanban t_6a8af451): the first mail a brand-new customer receives is the credentials mail, and
+    // it must say who it is from. `apply_branding` still takes an Option so its additivity test
+    // keeps pinning "None changes nothing"; every SEND resolves to `Some` here.
+    let branding = branding::load(pool, tenant_id)
+        .await
+        .unwrap_or_else(app_default_branding);
+    let (text_body, html_body) = apply_branding(Some(&branding), text_body, html_body);
 
     let cfg = email_provider::resolve(pool).await.ok_or_else(|| {
         "no email provider configured — save the admin panel's Email Provider \
@@ -785,5 +845,96 @@ mod render_tests {
             merged["app_url"],
             json!("https://app.missedcallrespondr.com")
         );
+    }
+}
+
+#[cfg(test)]
+mod branding_tests {
+    use super::{app_default_branding, apply_branding, bind_branding, APP_LOGO_PATH};
+    use crate::branding;
+    use serde_json::json;
+
+    /// The defect this card fixes (kanban t_6a8af451): an account with no branding of its own used
+    /// to send mail with NO header at all, so the very first message a new customer receives — the
+    /// credentials mail — carried no wordmark, while the branding preview claimed it "carries the
+    /// MissedCall Respondr header".
+    #[test]
+    fn an_unbranded_account_gets_the_apps_own_wordmark() {
+        let b = app_default_branding();
+        assert_eq!(b.brand_name, branding::APP_NAME);
+        assert_eq!(b.logo_url, APP_LOGO_PATH);
+        let url = b
+            .resolve_logo_url(branding::APP_URL)
+            .expect("the app wordmark resolves");
+        // A mail client resolves nothing relative: the PNG must be absolute, on the app's own host.
+        assert_eq!(url, "https://app.missedcallrespondr.com/logo.png");
+        let header = b.header_html(Some(&url));
+        assert!(header.contains("<img"), "{header}");
+        assert!(header.contains("alt=\"MissedCall Respondr\""), "{header}");
+        assert!(
+            header.contains(branding::DEFAULT_BRAND_COLOR),
+            "the app's own header is painted in the fleet accent: {header}"
+        );
+    }
+
+    /// The header must reach a TEXT-ONLY message too: every transactional mail in this app passes
+    /// `html = ""`, so `apply_branding` builds a part for the header to live in.
+    #[test]
+    fn a_text_only_send_still_carries_the_header() {
+        let b = app_default_branding();
+        let (text, html) = apply_branding(Some(&b), "Hi there", "");
+        assert!(text.starts_with("MissedCall Respondr\n\n"), "{text}");
+        assert!(html.contains("<img"), "{html}");
+        assert!(html.contains("Hi there"), "{html}");
+    }
+
+    /// `None` stays a no-op — the additivity shape the port pinned. Every SEND resolves to `Some`
+    /// (the app's identity), so this arm is only reachable from a test now.
+    #[test]
+    fn none_still_changes_nothing() {
+        let (text, html) = apply_branding(None, "Hi there", "<p>Hi there</p>");
+        assert_eq!(text, "Hi there");
+        assert_eq!(html, "<p>Hi there</p>");
+    }
+
+    /// `logo_url` is never empty on the wire now, so copy that describes the header reads the flag.
+    #[test]
+    fn the_merge_fields_say_whose_logo_the_reader_is_looking_at() {
+        let mut unbranded = json!({"name": "Ada"});
+        bind_branding(&mut unbranded, None);
+        assert_eq!(unbranded["brand_name"], json!(branding::APP_NAME));
+        assert_eq!(
+            unbranded["logo_url"],
+            json!("https://app.missedcallrespondr.com/logo.png")
+        );
+        assert_eq!(unbranded["logo_is_own"], json!("no"));
+
+        // An account's own upload: its own URL, and the flag tells the copy it is theirs.
+        let own = branding::Branding {
+            brand_name: "Acme Plumbing".into(),
+            brand_color: "#0ea5e9".into(),
+            logo_url: "/api/v1/branding/logo/abc?v=7".into(),
+        };
+        let mut branded = json!({"name": "Ada"});
+        bind_branding(&mut branded, Some(&own));
+        assert_eq!(branded["brand_name"], json!("Acme Plumbing"));
+        assert_eq!(
+            branded["logo_url"],
+            json!("https://app.missedcallrespondr.com/api/v1/branding/logo/abc?v=7")
+        );
+        assert_eq!(branded["logo_is_own"], json!("yes"));
+
+        // A name with no logo keeps the account's name and reports `no` — the preview must not
+        // promise a logo that is not in the header.
+        let name_only = branding::Branding {
+            brand_name: "Acme Plumbing".into(),
+            brand_color: String::new(),
+            logo_url: String::new(),
+        };
+        let mut mine = json!({});
+        bind_branding(&mut mine, Some(&name_only));
+        assert_eq!(mine["brand_name"], json!("Acme Plumbing"));
+        assert_eq!(mine["logo_url"], json!(""));
+        assert_eq!(mine["logo_is_own"], json!("no"));
     }
 }
