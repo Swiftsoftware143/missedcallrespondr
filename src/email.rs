@@ -264,7 +264,7 @@ async fn send_inline(
         // behaviour, unchanged here, and it leaks nothing (the live default row always exists).
         "welcome" | "welcome_credentials" => {
             let body = format!(
-                "Welcome to {}, {}!\n\nYour account has been created successfully.\n\nHere are your login credentials:\n\nEmail: {}\nPassword: {}\n\nLogin at: {}/login\n\nYou can now:\n- Set up your missed call responses\n- Configure call forwarding rules\n- Monitor your call activity\n\nFor help, contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
+                "Welcome to {}, {}!\n\nYour account has been created successfully.\n\nHere are your login credentials:\n\nEmail: {}\nPassword: {}\n\nLogin at: {}/login\n\nYou can now:\n- Set up your missed call responses\n- Configure call forwarding rules\n- Monitor your call activity\n\nFor help, contact support@swiftsoftware.net\n\nBest regards,\nThe {} Team",
                 app_name, name, email, password, app_url, app_name
             );
             send_email_request(
@@ -280,7 +280,7 @@ async fn send_inline(
         }
         "purchase_confirmed" => {
             let body = format!(
-                "Hi {},\n\nThank you for your purchase! Your payment for the {} plan has been received successfully.\n\nYou can access your dashboard at: {}/dashboard\n\nIf you have any questions, please contact support@missedcallrespondr.com\n\nBest regards,\nThe {} Team",
+                "Hi {},\n\nThank you for your purchase! Your payment for the {} plan has been received successfully.\n\nYou can access your dashboard at: {}/dashboard\n\nIf you have any questions, please contact support@swiftsoftware.net\n\nBest regards,\nThe {} Team",
                 name, plan_name_val, app_url, app_name
             );
             send_email_request(
