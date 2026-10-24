@@ -286,7 +286,7 @@ const Overview = () => {
       // the sentence sent a stopped customer looking for a control that does not exist. The real
       // route is the operator: `admin_handler`'s manual add (POS / adjust credits). It is named here
       // with a mail link so the only instruction on the panel is one the customer can carry out.
-      return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">No call credits left \u2014 incoming calls are being refused. Credits are added by our team, not from this screen: email <a href="mailto:support@missedcallrespondr.com?subject=Add%20call%20credits" style="color:#b91c1c;text-decoration:underline">support@missedcallrespondr.com</a> to top them up.</p>`;
+      return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">No call credits left \u2014 incoming calls are being refused. Credits are added by our team, not from this screen: email <a href="mailto:support@swiftsoftware.net?subject=Add%20call%20credits" style="color:#b91c1c;text-decoration:underline">support@swiftsoftware.net</a> to top them up.</p>`;
     }
     const cap = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al.included_credits) : null;
     const of = (cap !== null && isFinite(cap) && cap > 0) ? ' of ' + cap : '';
@@ -696,7 +696,8 @@ function syncBrandPreview() {
 const Branding = () => {
   const st = viewState('branding', {
     loaded: false, brand_name: '', brand_color: '', logo_url: '',
-    notice: null, error: null, busy: false, bust: null
+    notice: null, error: null, busy: false, bust: null,
+    previewBusy: false, previewMsg: null
   });
   if (!st.loaded && !st.busy) {
     st.busy = true;
@@ -758,6 +759,25 @@ const Branding = () => {
     st.busy = false; renderApp();
   };
 
+  // "Send me a preview email" (2026-10-24): the app's OWN POST /api/v1/settings/branding/preview mails a
+  // sample of THIS account's branded mail to the caller's own address. The request carries no
+  // recipient at all, so the route can never be used as a relay, and a reserved test address comes
+  // back as {sent:false, detail:"'…' is a reserved test address…"} instead of a false "sent" — the
+  // sentence under the button is the server's, never invented here.
+  const sendPreview = async () => {
+    st.previewBusy = true; st.previewMsg = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/settings/branding/preview', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + API.token }
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || j.message || ('Preview failed (' + r.status + ')'));
+      st.previewMsg = { ok: !!j.sent, text: j.detail || (j.sent ? ('Preview sent to ' + j.to) : 'No preview was sent.') };
+    } catch (e) { st.previewMsg = { ok: false, text: 'Preview failed: ' + e.message }; }
+    st.previewBusy = false; renderApp();
+  };
+
   const logo = logoUrl();
   setTimeout(syncBrandPreview, 0);
   return html`<div>
@@ -801,6 +821,12 @@ const Branding = () => {
           </div>
           <div id="brand-bp-blank" class="text-xs text-gray-500">Nothing is set yet, so mail keeps the MissedCall Respondr header.</div>
           <div style="font-size:13.5px;color:#111827;line-height:1.5">Hi Alex — this is a sample of the message body. Only the header above comes from your branding.</div>
+        </div>
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e2e8f0">
+          <div class="text-xs text-gray-500 mb-2">See it in your own inbox</div>
+          <p class="text-xs text-gray-500" style="margin:0 0 8px">This box shows the header inside this page. The button mails the same sample to your own address — save your branding first, or the preview carries the default MissedCall Respondr header.</p>
+          <button id="brand-preview-btn" class="btn btn-sm btn-outline" disabled=${st.previewBusy} onClick=${sendPreview}>${st.previewBusy ? 'Sending…' : 'Send me a preview email'}</button>
+          ${st.previewMsg && html`<p id="brand-preview-msg" class="text-xs" style="margin:8px 0 0;color:${st.previewMsg.ok ? '#047857' : '#dc2626'}">${st.previewMsg.text}</p>`}
         </div>
       </div>
     </div>
