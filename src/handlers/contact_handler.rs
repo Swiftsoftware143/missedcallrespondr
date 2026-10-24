@@ -11,40 +11,26 @@ use crate::{
     features,
     models::contact::{Contact, CreateContactRequest, UpdateContactRequest},
     state::AppState,
+    validation::check_len,
 };
 
 // ---- contact field limits ------------------------------------------------------------------------
-// Nothing in this path bounded a contact's strings before: the columns are `text`, the dashboard
+// Nothing in this path bounded a contact's strings before: `contacts.*` are `text`, the dashboard
 // prints `name` verbatim in its "Recent activity" feed, and a 250-character name was accepted live
 // (measured 2026-10-24: POST /api/v1/contacts answered 200 and stored it). One such row turned the
-// operator's activity list into a single 250-character run of letters. The cap belongs at the WRITE
-// (a well-formed request naming an impossible value), so the refusals are 422 with a sentence the
-// contact form already displays; the dashboard clips as well, because rows written before this
-// validation still exist and must not be able to stretch the panel either.
-pub const MAX_CONTACT_NAME: usize = 120;
-pub const MAX_CONTACT_PHONE: usize = 40;
-pub const MAX_CONTACT_EMAIL: usize = 254;
-pub const MAX_CONTACT_COMPANY: usize = 120;
-pub const MAX_CONTACT_NOTES: usize = 2000;
-pub const MAX_CONTACT_TAGS: usize = 20;
-pub const MAX_CONTACT_TAG: usize = 40;
+// operator's activity list into a single 250-character run of letters. The cap belongs at the WRITE,
+// through the shared length check every other handler uses, so a refusal names the field and the
+// limit; the dashboard clips as well, because rows written before this validation still exist.
+const MAX_CONTACT_NAME: usize = 120;
+const MAX_CONTACT_PHONE: usize = 40;
+const MAX_CONTACT_EMAIL: usize = 254;
+const MAX_CONTACT_COMPANY: usize = 120;
+const MAX_CONTACT_NOTES: usize = 2000;
+const MAX_CONTACT_TAGS: usize = 20;
+const MAX_CONTACT_TAG: usize = 40;
 
-/// `Some(422)` when `value` is longer than `max` CHARACTERS (not bytes — a name in a non-Latin
-/// script must not be rejected for a length it does not have).
-fn too_long(field: &str, value: &str, max: usize) -> Option<AppError> {
-    let n = value.chars().count();
-    if n > max {
-        Some(AppError::Unprocessable(format!(
-            "{field} is {n} characters long; the limit is {max}. Shorten it and try again."
-        )))
-    } else {
-        None
-    }
-}
-
-/// Validate the contact fields a request actually carries. `None` means "the caller did not send
-/// this field" (an update that leaves a value alone), so a row written before these limits cannot
-/// block an unrelated edit.
+/// Validate the fields a request actually carries — `None` means "not sent" (an update that leaves
+/// a value alone), so a row written before these limits cannot block an unrelated edit.
 fn validate_contact(
     name: Option<&str>,
     phone: Option<&str>,
@@ -59,22 +45,16 @@ fn validate_contact(
                 "A contact needs a name — type one and try again.".into(),
             ));
         }
-        if let Some(e) = too_long("The contact name", name, MAX_CONTACT_NAME) {
-            return Err(e);
-        }
+        check_len("name", name, MAX_CONTACT_NAME)?;
     }
     if let Some(phone) = phone {
-        if let Some(e) = too_long("The phone number", phone.trim(), MAX_CONTACT_PHONE) {
-            return Err(e);
-        }
+        check_len("phone", phone.trim(), MAX_CONTACT_PHONE)?;
     }
     if let Some(email) = email {
-        let trimmed = email.trim();
-        if !trimmed.is_empty() {
-            if let Some(e) = too_long("The email address", trimmed, MAX_CONTACT_EMAIL) {
-                return Err(e);
-            }
-            if !trimmed.contains('@') || trimmed.contains(char::is_whitespace) {
+        let email = email.trim();
+        if !email.is_empty() {
+            check_len("email", email, MAX_CONTACT_EMAIL)?;
+            if !email.contains('@') || email.contains(char::is_whitespace) {
                 return Err(AppError::Unprocessable(
                     "That email address is not valid — it needs an @ and no spaces.".into(),
                 ));
@@ -82,26 +62,20 @@ fn validate_contact(
         }
     }
     if let Some(company) = company {
-        if let Some(e) = too_long("The company name", company, MAX_CONTACT_COMPANY) {
-            return Err(e);
-        }
+        check_len("company", company, MAX_CONTACT_COMPANY)?;
     }
     if let Some(notes) = notes {
-        if let Some(e) = too_long("The notes", notes, MAX_CONTACT_NOTES) {
-            return Err(e);
-        }
+        check_len("notes", notes, MAX_CONTACT_NOTES)?;
     }
     if let Some(tags) = tags {
         if tags.len() > MAX_CONTACT_TAGS {
-            return Err(AppError::Unprocessable(format!(
-                "{} tags is more than the {MAX_CONTACT_TAGS} a contact can carry. Remove some and try again.",
+            return Err(AppError::BadRequest(format!(
+                "a contact carries at most {MAX_CONTACT_TAGS} tags, this one names {}",
                 tags.len()
             )));
         }
         for tag in tags {
-            if let Some(e) = too_long("A tag", tag, MAX_CONTACT_TAG) {
-                return Err(e);
-            }
+            check_len("a tag", tag, MAX_CONTACT_TAG)?;
         }
     }
     Ok(())
