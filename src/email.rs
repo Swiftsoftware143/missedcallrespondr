@@ -234,6 +234,10 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
         // The receipt for a filed plan request (cron 2026-10-20). Named for what the customer just
         // did, so it is not mistaken for the answer itself — the answer arrives later, from a person.
         "billing_request_receipt" => format!("We have your plan request — {}", app_name),
+        // The operator's own branding sample (cron 2026-10-24, parity with FunnelSwift,
+        // IncentiveSwift and ADASwift). Named for what it IS, so it cannot be mistaken for the
+        // missed-call reply a caller receives.
+        "branding_preview" => format!("A preview of your {} email branding", app_name),
         _ => format!("{} Notification", app_name),
     }
 }
@@ -395,6 +399,27 @@ async fn send_inline(
             )
             .await
         }
+        // The operator's own branding PREVIEW (cron 2026-10-24, parity with FunnelSwift,
+        // IncentiveSwift and ADASwift). The header the operator is judging is added by
+        // `apply_branding` at the send choke point — that is the account's real logo, name and
+        // colour on a real message — so the body itself stays deliberately plain and says what the
+        // reader is looking at. Text-only on purpose: every other mail this app sends is text-only
+        // and gets the same branded header, so the sample is the mail a caller really gets.
+        "branding_preview" => {
+            let body = format!(
+                "Hi {name},\n\nThis is a sample of the mail {app_name} sends on your behalf.\n\nThe header above this line is YOUR branding: your logo, your display name and your colour. If it is right here, it is right on every missed-call reply, invite and password email your callers receive.\n\nChange it any time under Email Branding on your dashboard: {app_url}/dashboard\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("A preview of your {app_name} email branding"),
+                &body,
+                "",
+            )
+            .await
+        }
         _ => {
             let body = format!("{} Notification:\n\n{}", app_name, vars);
             send_email_request(
@@ -460,6 +485,24 @@ pub async fn send_reset_email(
         "app_url": "https://app.missedcallrespondr.com",
     });
     send_template_email(pool, tenant_id, to, "password_reset", &vars).await
+}
+
+/// The operator's own in-inbox proof that their branding is applied (cron 2026-10-24, parity with
+/// FunnelSwift, IncentiveSwift and ADASwift). The recipient is ALWAYS the caller's own address —
+/// this is a preview, never a relay — and a reserved/harness address never reaches a relay at all:
+/// `send_email_request` reports it as a non-send instead of a false success.
+pub async fn send_branding_preview_email(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    to: &str,
+    name: &str,
+) -> Result<(), String> {
+    let vars = json!({
+        "name": name,
+        "email": to,
+        "app_url": "https://app.missedcallrespondr.com",
+    });
+    send_template_email(pool, tenant_id, to, "branding_preview", &vars).await
 }
 
 /// Host of `api_url` for logging — the URL carries no secret, but the key never goes near a log.

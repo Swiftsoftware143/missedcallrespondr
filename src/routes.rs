@@ -204,6 +204,15 @@ pub fn create_router(state: AppState) -> Router {
             post(crate::handlers::branding_handler::upload_logo)
                 .delete(crate::handlers::branding_handler::delete_logo),
         )
+        // The caller's own in-inbox branding PREVIEW (cron 2026-10-24, parity with FunnelSwift,
+        // IncentiveSwift and ADASwift): mails a sample of the branded transactional mail to the
+        // caller's OWN address. The request has no body and no recipient field, so it cannot be
+        // used as a relay, and a reserved test address is answered with a plain "not sent" rather
+        // than a false "sent" (see `branding_handler::preview_email`).
+        .route(
+            "/api/v1/settings/branding/preview",
+            post(crate::handlers::branding_handler::preview_email),
+        )
         // Calls
         .route(
             "/api/v1/calls",

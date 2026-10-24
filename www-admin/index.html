@@ -196,7 +196,7 @@ const LoginView = () => {
 // upload convention, and the public GET /api/v1/branding/logo/:tenant_id streams it back for a mail
 // client's <img src>. A backend route with no UI is a defect.
 const Branding = () => {
-  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null });
+  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null, previewBusy: false, previewMsg: null });
   if (!st._loaded) { st._loaded = true;
     API.get('/settings/branding').then(b => {
       b = b && typeof b === 'object' ? b : {};
@@ -236,6 +236,23 @@ const Branding = () => {
     st.busy = false; renderApp();
   };
   const branded = !!(st.brand_name || st.logo_url);
+  // The operator's own inbox proof (cron 2026-10-24, parity with FunnelSwift, IncentiveSwift and
+  // ADASwift). The backend mails a sample of THEIR branded mail to their own address — the request
+  // carries no recipient field, so it cannot be used as a relay — and answers {sent, to, detail}.
+  // A reserved test address is reported as NOT sent rather than as a false success.
+  const sendPreview = async () => {
+    st.previewBusy = true; st.previewMsg = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/settings/branding/preview', {
+        method: 'POST',
+        headers: API.token ? { 'Authorization': 'Bearer ' + API.token } : {},
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || j.error || ('Error ' + r.status));
+      st.previewMsg = { ok: !!j.sent, text: j.detail || (j.sent ? ('Preview sent to ' + j.to) : 'No preview was sent.') };
+    } catch(e) { st.previewMsg = { ok: false, text: e.message }; }
+    st.previewBusy = false; renderApp();
+  };
   // What the CALLER sees — mirrors Branding::header_html in the app (src/branding.rs): a centred
   // logo (max 56px high, max 240px wide) or the brand name in 20px #111827, then a 3px rule in the
   // brand colour. Updated IN PLACE on every keystroke so the panel never re-renders and steals
@@ -301,6 +318,11 @@ const Branding = () => {
           <div style="font:14px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827">Hi Alex — you missed a call from <strong>(305) 555-0142</strong>. This is a sample line standing in for the message body.</div>
         </div>
         <div id="bp-blank" class="text-xs text-gray-400 mt-2" style="${branded ? 'display:none' : 'display:block'}">Nothing is set yet, so mail keeps MissedCall Respondr's own header.</div>
+        <div class="mt-3 flex items-center gap-3 flex-wrap">
+          <button id="brand-preview-btn" class="btn btn-outline btn-sm" disabled=${st.previewBusy} onClick=${sendPreview}>${st.previewBusy ? 'Sending…' : 'Send me a preview email'}</button>
+          <span class="text-xs text-gray-400">Mails the sample above, with your logo and colour, to your own address.</span>
+        </div>
+        ${st.previewMsg && html`<div class="mt-2 text-sm ${st.previewMsg.ok ? 'text-green-600' : 'text-red-600'}">${st.previewMsg.text}</div>`}
       </div>
       ${st.msg && html`<div class="mt-3 text-sm ${st.msg.ok ? 'text-green-600' : 'text-red-600'}">${st.msg.ok ? 'OK - ' : 'Error - '}${st.msg.text}</div>`}
     </div>

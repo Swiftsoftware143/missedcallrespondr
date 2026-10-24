@@ -206,6 +206,68 @@ pub async fn delete_logo(
     Ok(Json(json!({"status": "ok", "removed": removed})))
 }
 
+/// `POST /api/v1/settings/branding/preview` — mail the CALLER a sample of their own branded mail.
+///
+/// WHY (cron 2026-10-24, parity with FunnelSwift, IncentiveSwift and ADASwift): the Email Branding
+/// card lets an operator set a logo, a display name and a colour, but until now they had no way to
+/// see the result in a real inbox — the panel's own sample is drawn by the browser, not by the mail
+/// pipeline. `send_template_email` already applies that branding to every send, so this arm sends
+/// the app's own `branding_preview` sample down the normal path: the operator sees exactly what a
+/// caller receives, header and all.
+///
+/// The recipient is ALWAYS the caller's own address (the request carries no body), so this can
+/// never be used as a relay, and an address that cannot receive mail is told so plainly instead of
+/// being shown a false "sent".
+pub async fn preview_email(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
+    let to: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?;
+    let to = to.unwrap_or_default().trim().to_string();
+    if to.is_empty() {
+        return Err(AppError::BadRequest(
+            "This account has no email address to send the preview to".into(),
+        ));
+    }
+    // A reserved/harness address cannot receive mail. Answering with the reason — instead of
+    // "sent" — is the whole discipline: the fleet's suppression arm would silently withhold it and
+    // the operator would be told a message is on its way that never existed.
+    if let Some(domain) = crate::security::probe_addr::harness_domain(&to) {
+        return Ok(Json(json!({
+            "sent": false,
+            "to": to,
+            "detail": format!(
+                "'{domain}' is a reserved test address, so it cannot receive mail — no preview was sent."
+            )
+        })));
+    }
+    let name: String = sqlx::query_scalar("SELECT name FROM tenants WHERE id = $1")
+        .bind(claims.aid)
+        .fetch_optional(&state.pool)
+        .await?
+        .filter(|n: &String| !n.trim().is_empty())
+        .unwrap_or_else(|| "there".to_string());
+    match crate::email::send_branding_preview_email(&state.pool, claims.aid, &to, &name).await {
+        Ok(()) => {
+            let branded = branding::load(&state.pool, claims.aid).await.is_some();
+            Ok(Json(json!({
+                "sent": true,
+                "to": to,
+                "branded": branded,
+                "detail": if branded {
+                    "Preview sent to your own address, with your logo and brand name at the top."
+                } else {
+                    "Preview sent to your own address. Nothing is branded yet, so it carries the MissedCall Respondr header — set a name or a logo, save, and send it again."
+                }
+            })))
+        }
+        Err(detail) => Ok(Json(json!({ "sent": false, "to": to, "detail": detail }))),
+    }
+}
+
 /// `GET /api/v1/branding/logo/:tenant_id` — stream an account's logo. No credential (see the module
 /// docs); ids are unguessable uuids and no other tenant datum is reachable from here.
 pub async fn get_logo(
