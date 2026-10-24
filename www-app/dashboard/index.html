@@ -295,11 +295,19 @@ const Overview = () => {
   // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
   // is honest rather than invisible.
   const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added' };
+  // A stored value is only as short as the write path allowed it to be, and the contact create/update
+  // paths were unbounded until today (a 250-character name was accepted and one is already in the
+  // activity log). Rows written before that cap must not be able to stretch this feed, so every
+  // value the feed prints is clipped first — the name is what would actually break the layout.
+  const clipAct = (value, max) => {
+    const s = (value === null || value === undefined) ? '' : String(value);
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  };
   const actDetail = (a) => {
     const m = (a.metadata && typeof a.metadata === 'object') ? a.metadata : {};
-    if (a.action === 'call.received') return m.caller_number ? ' from ' + m.caller_number : '';
-    if (a.action === 'message.sent') return (m.auto_rule ? ' (' + m.auto_rule + ')' : '') + (m.to_number ? ' to ' + m.to_number : '');
-    if (a.action === 'contact.created') return m.name ? ': ' + m.name : '';
+    if (a.action === 'call.received') return m.caller_number ? ' from ' + clipAct(m.caller_number, 40) : '';
+    if (a.action === 'message.sent') return (m.auto_rule ? ' (' + clipAct(m.auto_rule, 40) + ')' : '') + (m.to_number ? ' to ' + clipAct(m.to_number, 40) : '');
+    if (a.action === 'contact.created') return m.name ? ': ' + clipAct(m.name, 60) : '';
     return '';
   };
   const totalCalls = st.total_calls;

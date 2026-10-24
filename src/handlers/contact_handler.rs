@@ -13,6 +13,100 @@ use crate::{
     state::AppState,
 };
 
+// ---- contact field limits ------------------------------------------------------------------------
+// Nothing in this path bounded a contact's strings before: the columns are `text`, the dashboard
+// prints `name` verbatim in its "Recent activity" feed, and a 250-character name was accepted live
+// (measured 2026-10-24: POST /api/v1/contacts answered 200 and stored it). One such row turned the
+// operator's activity list into a single 250-character run of letters. The cap belongs at the WRITE
+// (a well-formed request naming an impossible value), so the refusals are 422 with a sentence the
+// contact form already displays; the dashboard clips as well, because rows written before this
+// validation still exist and must not be able to stretch the panel either.
+pub const MAX_CONTACT_NAME: usize = 120;
+pub const MAX_CONTACT_PHONE: usize = 40;
+pub const MAX_CONTACT_EMAIL: usize = 254;
+pub const MAX_CONTACT_COMPANY: usize = 120;
+pub const MAX_CONTACT_NOTES: usize = 2000;
+pub const MAX_CONTACT_TAGS: usize = 20;
+pub const MAX_CONTACT_TAG: usize = 40;
+
+/// `Some(422)` when `value` is longer than `max` CHARACTERS (not bytes — a name in a non-Latin
+/// script must not be rejected for a length it does not have).
+fn too_long(field: &str, value: &str, max: usize) -> Option<AppError> {
+    let n = value.chars().count();
+    if n > max {
+        Some(AppError::Unprocessable(format!(
+            "{field} is {n} characters long; the limit is {max}. Shorten it and try again."
+        )))
+    } else {
+        None
+    }
+}
+
+/// Validate the contact fields a request actually carries. `None` means "the caller did not send
+/// this field" (an update that leaves a value alone), so a row written before these limits cannot
+/// block an unrelated edit.
+fn validate_contact(
+    name: Option<&str>,
+    phone: Option<&str>,
+    email: Option<&str>,
+    company: Option<&str>,
+    notes: Option<&str>,
+    tags: Option<&Vec<String>>,
+) -> Result<(), AppError> {
+    if let Some(name) = name {
+        if name.trim().is_empty() {
+            return Err(AppError::Unprocessable(
+                "A contact needs a name — type one and try again.".into(),
+            ));
+        }
+        if let Some(e) = too_long("The contact name", name, MAX_CONTACT_NAME) {
+            return Err(e);
+        }
+    }
+    if let Some(phone) = phone {
+        if let Some(e) = too_long("The phone number", phone.trim(), MAX_CONTACT_PHONE) {
+            return Err(e);
+        }
+    }
+    if let Some(email) = email {
+        let trimmed = email.trim();
+        if !trimmed.is_empty() {
+            if let Some(e) = too_long("The email address", trimmed, MAX_CONTACT_EMAIL) {
+                return Err(e);
+            }
+            if !trimmed.contains('@') || trimmed.contains(char::is_whitespace) {
+                return Err(AppError::Unprocessable(
+                    "That email address is not valid — it needs an @ and no spaces.".into(),
+                ));
+            }
+        }
+    }
+    if let Some(company) = company {
+        if let Some(e) = too_long("The company name", company, MAX_CONTACT_COMPANY) {
+            return Err(e);
+        }
+    }
+    if let Some(notes) = notes {
+        if let Some(e) = too_long("The notes", notes, MAX_CONTACT_NOTES) {
+            return Err(e);
+        }
+    }
+    if let Some(tags) = tags {
+        if tags.len() > MAX_CONTACT_TAGS {
+            return Err(AppError::Unprocessable(format!(
+                "{} tags is more than the {MAX_CONTACT_TAGS} a contact can carry. Remove some and try again.",
+                tags.len()
+            )));
+        }
+        for tag in tags {
+            if let Some(e) = too_long("A tag", tag, MAX_CONTACT_TAG) {
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn list_contacts(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
@@ -31,6 +125,15 @@ pub async fn create_contact(
     State(state): State<AppState>,
     Json(req): Json<CreateContactRequest>,
 ) -> Result<Json<Contact>, AppError> {
+    validate_contact(
+        Some(&req.name),
+        Some(&req.phone),
+        req.email.as_deref(),
+        req.company.as_deref(),
+        req.notes.as_deref(),
+        req.tags.as_ref(),
+    )?;
+
     features::enforce_feature_limit(&state.pool, claims.aid, "max_contacts", "Contacts").await?;
 
     // Check for duplicate email within tenant
@@ -136,6 +239,15 @@ pub async fn update_contact(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateContactRequest>,
 ) -> Result<Json<Contact>, AppError> {
+    validate_contact(
+        req.name.as_deref(),
+        req.phone.as_deref(),
+        req.email.as_deref(),
+        req.company.as_deref(),
+        req.notes.as_deref(),
+        req.tags.as_ref(),
+    )?;
+
     let existing =
         sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2")
             .bind(id)
