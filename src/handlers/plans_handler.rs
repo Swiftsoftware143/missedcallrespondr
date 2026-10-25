@@ -118,12 +118,12 @@ async fn plans_payload(
     let sql = if only_active {
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
          price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
-         created_at, updated_at FROM plans WHERE is_active = true \
+         purchase_url, created_at, updated_at FROM plans WHERE is_active = true \
          ORDER BY price_monthly ASC NULLS LAST, name ASC"
     } else {
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
          price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
-         created_at, updated_at FROM plans ORDER BY price_monthly ASC NULLS LAST, name ASC"
+         purchase_url, created_at, updated_at FROM plans ORDER BY price_monthly ASC NULLS LAST, name ASC"
     };
     let rows = sqlx::query(sql).fetch_all(&state.pool).await?;
 
@@ -139,6 +139,11 @@ async fn plans_payload(
             "is_active": r.try_get::<bool,_>("is_active").unwrap_or(true),
             "sort_order": r.try_get::<i32, _>("sort_order").unwrap_or(0),
             "payment_provider": r.try_get::<Option<String>,_>("payment_provider").ok().flatten(),
+            // The hosted payment page the OPERATOR pasted into the plan (2026-10-24). Read on the
+            // catalogue so the operator's own console can show that a plan carries a link; the
+            // buyer never needs it in the browser, because `POST /checkout/create` hands them to it
+            // server-side (handlers::checkout_handler::create_checkout_session).
+            "purchase_url": r.try_get::<Option<String>,_>("purchase_url").ok().flatten(),
             "created_at": ts_utc(r, "created_at"),
             "updated_at": ts_utc(r, "updated_at"),
         })
@@ -155,7 +160,7 @@ pub async fn get_plan(
     let row = sqlx::query(
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
          price_yearly::float8 AS price_yearly, features, is_active, sort_order, payment_provider, \
-         created_at, updated_at FROM plans WHERE id = $1",
+         purchase_url, created_at, updated_at FROM plans WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -173,6 +178,7 @@ pub async fn get_plan(
         "is_active": row.try_get::<bool,_>("is_active").unwrap_or(true),
         "sort_order": row.try_get::<i32,_>("sort_order").unwrap_or(0),
         "payment_provider": row.try_get::<Option<String>,_>("payment_provider").ok().flatten(),
+        "purchase_url": row.try_get::<Option<String>,_>("purchase_url").ok().flatten(),
         "created_at": ts_utc(&row, "created_at"),
         "updated_at": ts_utc(&row, "updated_at"),
     }})))
@@ -220,9 +226,25 @@ pub async fn create_plan(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    // ── A PLAN CAN CARRY ITS OWN PAYMENT PAGE (2026-10-24) ──────────────────────────────────
+    // `plans.purchase_url` has existed since the plans table shipped and NO code path in this app
+    // could write or read it: the admin form had no box for it and the till never looked at the
+    // column, so on an install whose `payment_providers` is EMPTY (this one) every press on Upgrade
+    // could only be refused even when the operator already had a working way to be paid. An
+    // operator who already has one — a Stripe Payment Link, a PayPal button, any hosted page — can
+    // now paste it here and the till hands the buyer straight to it.
+    // `checkout_handler::is_hosted_payment_url` judges a typo at the till, so a bad value cannot
+    // send a buyer somewhere broken. Blank means "no link".
+    let purchase_url = req
+        .get("purchase_url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     sqlx::query(
-        r#"INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active, payment_provider)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#
+        r#"INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active, payment_provider, purchase_url)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#
     )
     .bind(id)
     .bind(&name)
@@ -233,6 +255,7 @@ pub async fn create_plan(
     .bind(features)
     .bind(is_active)
     .bind(&payment_provider)
+    .bind(&purchase_url)
     .execute(&state.pool)
     .await?;
 
@@ -254,8 +277,8 @@ pub async fn update_plan(
     // there never panics — it just hides the drift and hands the UPDATE a None.
     let existing = sqlx::query(
         "SELECT id, name, slug, description, price_monthly::float8 AS price_monthly, \
-         price_yearly::float8 AS price_yearly, features, is_active, payment_provider, sort_order \
-         FROM plans WHERE id = $1",
+         price_yearly::float8 AS price_yearly, features, is_active, payment_provider, sort_order, \
+         purchase_url FROM plans WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -316,9 +339,34 @@ pub async fn update_plan(
                 .flatten()
         });
 
+    // The plan's own hosted payment page. THREE cases, and they must stay distinguishable:
+    // an ABSENT field leaves whatever is stored (so an unrelated save cannot wipe a link); a JSON
+    // `null` or an empty box CLEARS it (that is how the operator takes a plan off sale-by-link);
+    // anything else sets it. A plain `Option<String>` read of the request would collapse "absent"
+    // and "null" into one value, which is why the `None`/`Some` arm is spelled out here rather than
+    // folded into the `.or_else(existing…)` idiom the other columns use.
+    let purchase_url: Option<String> = match req.get("purchase_url") {
+        None => existing
+            .try_get::<Option<String>, _>("purchase_url")
+            .ok()
+            .flatten(),
+        Some(v) => match v.as_str() {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            // A JSON `null` clears the link, never leaves it.
+            None => None,
+        },
+    };
+
     sqlx::query(
         r#"UPDATE plans SET name=$1, slug=$2, description=$3, price_monthly=$4, price_yearly=$5,
-           features=$6, is_active=$7, payment_provider=$8 WHERE id=$9"#,
+           features=$6, is_active=$7, payment_provider=$8, purchase_url=$9 WHERE id=$10"#,
     )
     .bind(&name)
     .bind(&slug)
@@ -328,6 +376,7 @@ pub async fn update_plan(
     .bind(&features)
     .bind(is_active)
     .bind(&payment_provider)
+    .bind(&purchase_url)
     .bind(id)
     .execute(&state.pool)
     .await?;
@@ -468,14 +517,23 @@ pub async fn plan_registry(
     use sqlx::Row;
     let rows = sqlx::query(
         "SELECT id, name, slug, is_active, sort_order, price_monthly::float8 AS price_monthly, \
-         price_yearly::float8 AS price_yearly, price::float8 AS price FROM plans \
+         price_yearly::float8 AS price_yearly, price::float8 AS price, purchase_url FROM plans \
          ORDER BY is_active DESC, price_monthly ASC NULLS LAST, name ASC",
     )
     .fetch_all(&state.pool)
     .await?;
 
     let mut plan_rows: Vec<(Uuid, String, String, bool, i32, f64, f64)> = Vec::new();
+    // The panel's plan form is seeded from THIS payload, so the operator's own hosted payment page
+    // has to travel with it — otherwise the edit modal opens blank and saving would clear the link.
+    let mut purchase_urls: std::collections::HashMap<Uuid, Option<String>> = Default::default();
     for r in &rows {
+        purchase_urls.insert(
+            r.try_get::<Uuid, _>("id").unwrap_or_default(),
+            r.try_get::<Option<String>, _>("purchase_url")
+                .ok()
+                .flatten(),
+        );
         plan_rows.push((
             r.try_get::<Uuid, _>("id").unwrap_or_default(),
             r.try_get::<String, _>("slug").unwrap_or_default(),
@@ -654,6 +712,7 @@ pub async fn plan_registry(
                 "sort_order": p.4,
                 "price_monthly": p.5,
                 "price_yearly": p.6,
+                "purchase_url": purchase_urls.get(&p.0).cloned().flatten(),
                 "is_top": p.1 == top_slug,
                 "values": values,
                 "sources": sources,

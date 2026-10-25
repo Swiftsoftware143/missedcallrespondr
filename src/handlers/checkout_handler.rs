@@ -495,27 +495,81 @@ pub async fn create_checkout_session(
         None
     };
 
+    // ── A PLAN CAN BE SOLD WITHOUT AN API KEY (2026-10-24) ──────────────────────────────────────
+    // `plans.purchase_url` is a hosted payment page the OPERATOR pastes into the plan (a Stripe
+    // Payment Link, a PayPal button, anything that takes the money). The column has existed since
+    // the plans table shipped and `admin plans` now writes it, but nothing read it at the till — so
+    // on this install, whose `payment_providers` holds ZERO rows, every press on Upgrade could only
+    // ever be refused even when the operator already had a working way to be paid. A plan that
+    // carries a link is SELLABLE: hand the buyer to it, and STILL file the ask, because a hosted
+    // page tells this installation nothing — the workspace is seated when the operator resolves the
+    // ticket, never by a redirect.
+    //
+    // Read ONCE here and consulted at every place the provider ladder dead-ends below; the provider
+    // arms keep precedence, because a configured provider is a real checkout with a session id a
+    // webhook can confirm, which is strictly better than a hand-off.
+    let payment_link = if purchasable_type == "plan" {
+        hosted_payment_link(&state.pool, requested_plan_id).await
+    } else {
+        None
+    };
+
+    // The money and the ask are read BEFORE the ladder: the hand-off arm needs them, and `amount`
+    // was already a hard requirement of this route (400 "amount is required") wherever it sat.
+    let amount = req
+        .get("amount")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| AppError::BadRequest("amount is required".into()))?;
+    let currency = req
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .unwrap_or("USD");
+    let purchasable_id = req
+        .get("purchasable_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok());
+    let metadata = req.get("metadata").cloned().unwrap_or(json!({}));
+
     // Resolve payment provider: explicit > plan's payment_provider > error
     let provider_type = if let Some(pt) = req.get("provider_type").and_then(|v| v.as_str()) {
         pt.to_string()
     } else if purchasable_type == "plan" {
-        if let Some(pid) = req
-            .get("purchasable_id")
-            .and_then(|v| v.as_str())
-            .and_then(|s| Uuid::parse_str(s).ok())
-        {
-            sqlx::query_scalar::<_, Option<String>>(
+        if let Some(pid) = requested_plan_id {
+            match sqlx::query_scalar::<_, Option<String>>(
                 "SELECT payment_provider FROM plans WHERE id = $1",
             )
             .bind(pid)
             .fetch_optional(&state.pool)
             .await?
             .flatten()
-            .ok_or_else(|| {
-                AppError::BadRequest(
-                    "No provider_type specified and plan has no payment_provider set".into(),
-                )
-            })?
+            {
+                Some(stored) => stored,
+                // The plan names NO provider at all (a NULL column). Before 2026-10-24 this was a
+                // hard 400 even on a plan carrying its own hosted payment page — one of the two
+                // places the ladder dead-ended without ever looking at `purchase_url`.
+                None => {
+                    return match payment_link {
+                        Some(url) => Ok(hand_off_to_payment_link(
+                            &state,
+                            tenant_id,
+                            user_id,
+                            PaymentLinkHandOff {
+                                plan_id: Some(pid),
+                                amount,
+                                currency,
+                                metadata: &metadata,
+                                url,
+                            },
+                        )
+                        .await
+                        .into_response()),
+                        None => Err(AppError::BadRequest(
+                            "No provider_type specified and plan has no payment_provider set"
+                                .into(),
+                        )),
+                    };
+                }
+            }
         } else {
             return Err(AppError::BadRequest(
                 "purchasable_id is required for plan checkout".into(),
@@ -541,6 +595,24 @@ pub async fn create_checkout_session(
         None => match active_provider_types(&state.pool).await?.as_slice() {
             [only] => only.clone(),
             _ => {
+                // Neither a plan-level provider nor exactly one install-wide provider. A plan that
+                // carries its own hosted payment page is still sellable: hand the buyer to it.
+                if let Some(url) = payment_link {
+                    return Ok(hand_off_to_payment_link(
+                        &state,
+                        tenant_id,
+                        user_id,
+                        PaymentLinkHandOff {
+                            plan_id: requested_plan_id,
+                            amount,
+                            currency,
+                            metadata: &metadata,
+                            url,
+                        },
+                    )
+                    .await
+                    .into_response());
+                }
                 let plan_request = record_checkout_plan_request(
                     &state.pool,
                     tenant_id,
@@ -552,20 +624,6 @@ pub async fn create_checkout_session(
             }
         },
     };
-
-    let amount = req
-        .get("amount")
-        .and_then(|v| v.as_f64())
-        .ok_or_else(|| AppError::BadRequest("amount is required".into()))?;
-
-    let currency = req
-        .get("currency")
-        .and_then(|v| v.as_str())
-        .unwrap_or("USD");
-    let purchasable_id = req
-        .get("purchasable_id")
-        .and_then(|v| v.as_str())
-        .and_then(|s| Uuid::parse_str(s).ok());
 
     // `plans` has no thank_you_url column (checked against the live DB): the request's own
     // success_url wins, otherwise every plan falls back to the shared thank-you page.
@@ -580,8 +638,6 @@ pub async fn create_checkout_session(
         .and_then(|v| v.as_str())
         .unwrap_or("/");
 
-    let metadata = req.get("metadata").cloned().unwrap_or(json!({}));
-
     // The address a paid signup will later be minted under: `deliver_credentials` reads
     // `metadata.customer_email` back out of `checkout_sessions` and creates the tenant/user from it.
     // Refuse a malformed one HERE — before any provider session exists, so nothing is charged against
@@ -595,8 +651,27 @@ pub async fn create_checkout_session(
     let provider = match get_active_provider(&state.pool, &provider_type).await? {
         Some(p) => p,
         None => {
-            // The plan names a provider this installation has no active row for: the purchase
-            // cannot start, so the ask is recorded before the buyer is refused.
+            // The plan names a provider this installation has no ACTIVE row for, so nothing here
+            // can charge: a plan carrying its own hosted payment page is still sellable, and the
+            // hand-off (with the ask) is the answer. A provider row that CAN charge never reaches
+            // this arm — it was returned by `get_active_provider` above and keeps precedence.
+            if let Some(url) = payment_link {
+                return Ok(hand_off_to_payment_link(
+                    &state,
+                    tenant_id,
+                    user_id,
+                    PaymentLinkHandOff {
+                        plan_id: requested_plan_id,
+                        amount,
+                        currency,
+                        metadata: &metadata,
+                        url,
+                    },
+                )
+                .await
+                .into_response());
+            }
+            // The purchase cannot start, so the ask is recorded before the buyer is refused.
             let plan_request = record_checkout_plan_request(
                 &state.pool,
                 tenant_id,
@@ -610,6 +685,24 @@ pub async fn create_checkout_session(
 
     let api_key = provider["api_key"].as_str().unwrap_or("").to_string();
     if api_key.is_empty() {
+        // The row exists but holds no usable key, so this installation still cannot charge: the
+        // plan's own hosted payment page is the sale (the same call as the two arms above).
+        if let Some(url) = payment_link {
+            return Ok(hand_off_to_payment_link(
+                &state,
+                tenant_id,
+                user_id,
+                PaymentLinkHandOff {
+                    plan_id: requested_plan_id,
+                    amount,
+                    currency,
+                    metadata: &metadata,
+                    url,
+                },
+            )
+            .await
+            .into_response());
+        }
         let plan_request = record_checkout_plan_request(
             &state.pool,
             tenant_id,
@@ -2537,6 +2630,158 @@ pub async fn test_payment_provider(
             "message": format!("Stripe refused the key: {msg}"),
         })),
     ))
+}
+
+/// The hosted payment page this plan carries, if it carries a usable one (2026-10-24).
+///
+/// `plans.purchase_url` is typed in by an OPERATOR — a Stripe Payment Link, a PayPal button, any
+/// page that takes the money — so a blank value is "no link" and a typo must not become a redirect.
+/// Judged by [`is_hosted_payment_url`] here, at the one read, so every arm of the till agrees about
+/// what a usable link is. A database error reads as "no link": the refusal that follows names the
+/// provider problem, which is the truth, rather than 500ing a sale that could have been handed off.
+async fn hosted_payment_link(pool: &sqlx::PgPool, plan_id: Option<Uuid>) -> Option<String> {
+    let plan_id = plan_id?;
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT NULLIF(BTRIM(purchase_url), '') FROM plans WHERE id = $1",
+    )
+    .bind(plan_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None)
+    .flatten()
+    .filter(|u| is_hosted_payment_url(u))
+}
+
+/// Is this a URL a browser can be sent to in order to pay?
+///
+/// `plans.purchase_url` is typed in by an operator, so a typo must REFUSE the sale rather than send
+/// a buyer somewhere broken or insecure. https only (a payment page over plain http is a downgrade
+/// worth refusing), a host with a dot in it, and no whitespace anywhere — enough to catch the two
+/// mistakes an operator actually makes (a bare `stripe.com/pay` with no scheme, a pasted line with a
+/// trailing space or a newline in the middle) without pretending to be a URL parser. Same rule as
+/// ADASwift/IncentiveSwift/FunnelSwift, so the fleet judges a link the same way.
+fn is_hosted_payment_url(raw: &str) -> bool {
+    let u = raw.trim();
+    let Some(rest) = u.strip_prefix("https://") else {
+        return false;
+    };
+    if u.contains(char::is_whitespace) {
+        return false;
+    }
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    !host.is_empty() && host.contains('.')
+}
+
+/// What the till knows when it hands a buyer to the plan's own payment page. A struct because the
+/// fact set is fixed, and eight positional arguments to one function is how two of them get swapped.
+struct PaymentLinkHandOff<'a> {
+    plan_id: Option<Uuid>,
+    amount: f64,
+    currency: &'a str,
+    metadata: &'a Value,
+    url: String,
+}
+
+/// Hand the buyer to the plan's own hosted payment page, and record everything the operator needs.
+///
+/// The ASK is filed exactly as the refusal arms file it (a `tickets` row with
+/// `source='plan_request'`), because a hosted page tells THIS installation nothing — the workspace
+/// is seated when the operator resolves the ticket, never by the redirect. The ticket text says the
+/// buyer was handed to the hosted page, not that no provider is configured.
+///
+/// The hand-off is recorded in `checkout_sessions` with status AND provider `payment_link`, never
+/// `pending`: that would promise a webhook for a session this installation does not own.
+///
+/// The answer is a 200 the console and the customer's own Upgrade button already know how to follow
+/// (`checkout_url` / `url`), so no dashboard change is needed.
+async fn hand_off_to_payment_link(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    hand_off: PaymentLinkHandOff<'_>,
+) -> (StatusCode, Json<Value>) {
+    let PaymentLinkHandOff {
+        plan_id,
+        amount,
+        currency,
+        metadata,
+        url,
+    } = hand_off;
+    let recorded = record_checkout_plan_request(
+        &state.pool,
+        tenant_id,
+        plan_id,
+        &format!("the buyer was handed to the plan's own hosted payment page ({url})"),
+    )
+    .await;
+
+    let plan: Option<(String, String)> = match plan_id {
+        Some(pid) => {
+            sqlx::query_as::<_, (String, String)>("SELECT slug, name FROM plans WHERE id = $1")
+                .bind(pid)
+                .fetch_optional(&state.pool)
+                .await
+                .unwrap_or(None)
+        }
+        None => None,
+    };
+
+    // The row is the history of what actually happened. `provider_session_id` keeps its '' default:
+    // there is no provider session, because the money is taken on the operator's own page.
+    let session_id = Uuid::new_v4();
+    let mut stored_meta = if metadata.is_object() {
+        metadata.clone()
+    } else {
+        json!({})
+    };
+    if let Some(obj) = stored_meta.as_object_mut() {
+        obj.insert("reason".into(), json!("hosted_payment_link"));
+        obj.insert("purchase_url".into(), json!(url));
+        if let Some((slug, name)) = plan.as_ref() {
+            obj.insert("plan_slug".into(), json!(slug));
+            obj.insert("plan_name".into(), json!(name));
+        }
+    }
+    let written = sqlx::query(
+        r#"INSERT INTO checkout_sessions
+           (id, account_id, user_id, provider_type, purchasable_type, purchasable_id,
+            amount, currency, status, metadata)
+           VALUES ($1, $2, $3, 'payment_link', 'plan', $4, $5, $6, 'payment_link', $7)"#,
+    )
+    .bind(session_id)
+    .bind(tenant_id)
+    .bind(user_id)
+    .bind(plan_id)
+    .bind(amount)
+    .bind(currency)
+    .bind(&stored_meta)
+    .execute(&state.pool)
+    .await;
+    if let Err(e) = written {
+        // Best effort, like the ticket: a bookkeeping failure must not turn a live sale into a 500.
+        tracing::error!("checkout/create: could not record the payment-link hand-off: {e:?}");
+    }
+    tracing::info!(
+        "checkout/create: handing tenant {tenant_id} to the plan's own payment page ({})",
+        plan.as_ref().map(|p| p.0.as_str()).unwrap_or("unknown")
+    );
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "payment_link",
+            "url": url,
+            "checkout_url": url,
+            "configured": false,
+            "request_recorded": recorded.is_some(),
+            "session_id": session_id.to_string(),
+            "plan": {
+                "id": plan_id.map(|p| p.to_string()),
+                "slug": plan.as_ref().map(|p| p.0.clone()),
+                "name": plan.as_ref().map(|p| p.1.clone()),
+            }
+        })),
+    )
 }
 
 /// The customer-facing refusal for a plan checkout that cannot start, and the ask it carries.

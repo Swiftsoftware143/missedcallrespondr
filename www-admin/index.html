@@ -2615,6 +2615,11 @@ const App = () => {
         // prefilled price_yearly, so the field was always blank on edit.
         const pm = parseFloat(f.price_monthly); if (!isNaN(pm)) body.price_monthly = pm;
         const py = parseFloat(f.price_yearly); if (!isNaN(py)) body.price_yearly = py;
+        // The plan's own hosted payment page (2026-10-24). Posted as the RAW string, never
+        // `||null`: an empty box must reach the server as '' so it CLEARS the link, while a field
+        // the operator never touched carries the value the modal was seeded with (so a rename
+        // cannot silently take a plan off sale-by-link).
+        body.purchase_url = (f.purchase_url == null ? '' : String(f.purchase_url).trim());
         if (modal.mode === 'edit') await API.put('/admin/plans/' + modal.id, body);
         else await API.post('/admin/plans', body);
         setModal(null); flash(modal.mode === 'edit' ? 'Plan updated' : 'Plan created'); await load();
@@ -2655,7 +2660,7 @@ const App = () => {
         <h2 class="text-xl font-bold">Plans & Features</h2>
         <div class="flex gap-2">
           <button class="btn btn-sm btn-outline" disabled=${busy}
-            onClick=${() => setModal({ mode: 'create', form: { name: '', slug: '', description: '', price_monthly: '', price_yearly: '', is_active: true } })}>+ New Plan</button>
+            onClick=${() => setModal({ mode: 'create', form: { name: '', slug: '', description: '', price_monthly: '', price_yearly: '', purchase_url: '', is_active: true } })}>+ New Plan</button>
           <button class="btn btn-sm" disabled=${busy} onClick=${grantTop}>Grant top tier every feature</button>
         </div>
       </div>
@@ -2706,14 +2711,15 @@ const App = () => {
 
       <div class="card">
         <h3 class="font-semibold mb-2">Plans</h3>
-        <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Price / mo</th><th>Status</th><th>Actions</th></tr></thead>
+        <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Price / mo</th><th>Payment page</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>${plans.map(p => html`<tr data-plan-id=${p.id}>
             <td class="font-medium">${p.name} ${p.is_top ? html`<span class="badge badge-purple">top</span>` : ''}</td>
             <td class="text-gray-500 font-mono">${p.slug}</td>
             <td>$${p.price_monthly != null ? Number(p.price_monthly).toFixed(2) : '0.00'}</td>
+            <td>${p.purchase_url ? html`<span class="badge badge-green" title=${p.purchase_url}>payment link</span>` : html`<span class="text-gray-400 text-xs">—</span>`}</td>
             <td>${p.is_active ? html`<span class="badge badge-green">active</span>` : html`<span class="badge badge-yellow">inactive</span>`}</td>
             <td>
-              <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: (p.price_yearly != null ? p.price_yearly : ''), is_active: p.is_active } })}>Edit</button>
+              <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: (p.price_yearly != null ? p.price_yearly : ''), purchase_url: (p.purchase_url || ''), is_active: p.is_active } })}>Edit</button>
               <button class="btn btn-sm btn-red" onClick=${() => delPlan(p)}>Delete</button>
             </td>
           </tr>`)}</tbody>
@@ -2756,6 +2762,16 @@ const App = () => {
                 <input class="input" value=${modal.form.price_yearly}
                   onInput=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { price_yearly: e.target.value }) }))} /></div>
             </div>
+            <!-- A PLAN CAN CARRY ITS OWN PAYMENT PAGE (2026-10-24). The plans.purchase_url column
+                 existed since the table shipped and had NO box here, and the till never read it, so
+                 on an install whose payment_providers is EMPTY (this one) every press on Upgrade
+                 could only be refused even when the operator already had a working way to be paid.
+                 Paste a Stripe Payment Link / PayPal button / any https payment page and the till
+                 hands the buyer to it. Empty = no link (clear it by emptying the box and saving). -->
+            <div><label class="block text-xs text-gray-600 mb-1">Payment link (optional)</label>
+              <input class="input" value=${modal.form.purchase_url} placeholder="https://buy.stripe.com/…"
+                onInput=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { purchase_url: e.target.value }) }))} />
+              <p class="text-xs text-gray-500 mt-1">A hosted payment page for this plan. With a link set, "Upgrade" on a customer's Plan &amp; Billing screen takes them straight there even when no payment provider is connected here. Leave empty for no link.</p></div>
             <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked=${modal.form.is_active}
               onChange=${e => setModal(Object.assign({}, modal, { form: Object.assign({}, modal.form, { is_active: e.target.checked }) }))} /> Active</label>
           </div>
