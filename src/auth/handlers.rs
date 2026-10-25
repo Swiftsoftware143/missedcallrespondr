@@ -180,8 +180,12 @@ pub async fn login(
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
 
-    let valid = verify_password(&req.password, &user.password_hash)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // A stored hash that is not a usable PHC string is NOT a credential: no password can match
+    // it, so the answer is the same generic 401 a wrong password gets. It must never become a 500
+    // — that both echoes the hasher's own parse message ("password hash string missing field") to
+    // an unauthenticated caller and makes a broken row a probe target. WorkflowSwift's login
+    // already states this rule for its placeholder rows (`'x'`, measured live).
+    let valid = verify_password(&req.password, &user.password_hash).unwrap_or_default();
 
     if !valid {
         return Err(AppError::Unauthorized("Invalid email or password".into()));
