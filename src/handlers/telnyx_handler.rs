@@ -721,9 +721,22 @@ pub async fn purchase_number(
 
     if !byok {
         // Use our Telnyx config to purchase the number via API
-        let telnyx_conf = get_telnyx_config(&state.pool)
-            .await?
-            .ok_or_else(|| AppError::Internal("Telnyx not configured by admin".into()))?;
+        let telnyx_conf = get_telnyx_config(&state.pool).await?.ok_or_else(|| {
+            // Nothing is attempted when the OPERATOR has not connected a phone provider, so this is
+            // not a server fault: the fleet's own rule for a missing operator configuration is 503
+            // (see `AppError::ServiceUnavailable`, added for the outbound SMS path in kanban
+            // t_2ed95642 — the same `telnyx_config` emptiness). This arm was MISSED by that change
+            // and answered `500 {"error":"Telnyx not configured by admin"}` to the customer who
+            // pressed "+ Add Number": measured live 2026-10-25 on a free probe workspace, and 500 is
+            // both a false alarm in monitoring and operator jargon in the buyer's face. The sentence
+            // below is what the dashboard prints after "Could not add the number: ", so it says what
+            // happened, that nothing was charged, and what to do next.
+            AppError::ServiceUnavailable(
+                "Phone numbers can't be added yet — the phone service is not set up on this \
+                 deployment. Nothing was charged. Please try again later or contact support."
+                    .into(),
+            )
+        })?;
 
         // Call Telnyx API to purchase the number
         let client = reqwest::Client::new();
