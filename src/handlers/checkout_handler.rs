@@ -530,6 +530,51 @@ pub async fn create_checkout_session(
         .and_then(|s| Uuid::parse_str(s).ok());
     let metadata = req.get("metadata").cloned().unwrap_or(json!({}));
 
+    // ── THE PRICE CHARGED IS THE CATALOGUE'S, NOT THE CALLER'S (2026-10-25) ─────────────────────
+    // MEASURED 2026-10-25 on this live app: this handler took `amount` from the REQUEST BODY and
+    // handed it to the provider as the line item (`create_stripe_session`: `unit_amount =
+    // amount * 100`), so a workspace could POST `amount: 1` against the $199 Enterprise tier and —
+    // the moment an operator configures a key — be charged $1 for it. The paid-session arm seats
+    // the plan from the session's `purchasable_id` WITHOUT comparing what was paid, so the cheap
+    // session would deliver the plan. Proven live here: a probe plan priced 199 carrying a hosted
+    // payment page accepted `amount: 1` (200) and RECORDED `1.00` in `checkout_sessions`. The
+    // server had no opinion on the price it was selling at.
+    //
+    // Every sibling app has one: FunnelSwift derives the amount from the plan row, ADASwift reads
+    // `plan_price`, IncentiveSwift documents that the caller's amount "is echoed on a refusal and
+    // never trusted as the amount", and WorkflowSwift REFUSES a mismatched amount by name. This
+    // app was the last one charging what the buyer asked.
+    //
+    // A plan checkout must name either the tier's monthly price or its yearly price — both are the
+    // catalogue's own numbers, so a future annual button keeps working — and anything else is
+    // refused BEFORE a session row is written or a provider is called. A non-plan purchase keeps
+    // the caller's amount: this route sells nothing else here, and inventing a price for those
+    // would be the same mistake in reverse. A tier with NO price is left to the ladder below, which
+    // already answers that case in its own words.
+    if purchasable_type == "plan" {
+        if let Some(pid) = requested_plan_id {
+            let catalogue: Option<(String, f64, f64)> = sqlx::query_as(
+                "SELECT name, price_monthly::float8, price_yearly::float8 FROM plans WHERE id = $1",
+            )
+            .bind(pid)
+            .fetch_optional(&state.pool)
+            .await?;
+            if let Some((plan_name, monthly, yearly)) = catalogue {
+                let near = |p: f64| p.is_finite() && p > 0.0 && (amount - p).abs() <= 0.005;
+                if !near(monthly) && !near(yearly) {
+                    let priced = if monthly > 0.0 { monthly } else { yearly };
+                    if priced > 0.0 {
+                        return Err(AppError::BadRequest(format!(
+                            "The {} plan costs {:.2} — the request asked for {:.2}. \
+                             Nothing was charged; please reload the Plans screen and try again.",
+                            plan_name, priced, amount
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
     // Resolve payment provider: explicit > plan's payment_provider > error
     let provider_type = if let Some(pt) = req.get("provider_type").and_then(|v| v.as_str()) {
         pt.to_string()
