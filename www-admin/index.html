@@ -2117,6 +2117,12 @@ function isProbeAddress(addr) {
   const a = String(addr || '');
   return RESERVED_ADDR_RE.test(a) || FLEET_PROBE_ADDR_RE.test(a);
 }
+// ONE predicate behind the row badge AND the "Select probes" picker (cron 2026-10-25). The picker
+// counted `probe_harness` alone while the badge also fired on a reserved/fleet-probe owner address,
+// so the button's number and the badges on screen could disagree — which is how a sweep
+// under-counts. Both now read this function.
+const isProbeRow = (t) => !!String((t && t.probe_harness) || '').trim()
+  || isProbeAddress(String((t && (t.owner_email || t.email)) || '').trim());
 const ownerCell = (t) => {
   const oe = String((t && (t.owner_email || t.email)) || '').trim();
   const tag = String((t && t.probe_harness) || '').trim();
@@ -2193,10 +2199,18 @@ const ImpersonateTenants = () => {
    are signed in as, a portfolio company) keeps its reason on screen instead of vanishing behind a
    generic failure. The button is inert until a row is picked and is armed with the count. */
 const TenantsScreen = () => {
-  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true, plans: [] });
+  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true, plans: [], showProbes: false });
+  // PROBE VISIBILITY (cron 2026-10-25). `list_all_tenants` holds harness-tagged workspaces back
+  // unless the caller passes `?include_probe=1` (it binds exactly that bool; `~* '^CNRY'` rows stay
+  // visible because the nightly canary is the proof the sweep works). This console never sent the
+  // flag, so the [probe] badge and "Select probes (n)" could only ever reach rows whose OWNER
+  // ADDRESS happened to look like a probe — a row tagged `probe_harness` with a blank or ordinary
+  // owner was absent from this table and therefore unselectable, i.e. impossible to clear. The
+  // switch re-fetches the SAME listing so rows, badges and the button's count agree.
+  const listPath = () => '/admin/tenants' + (st.showProbes ? '?include_probe=1' : '');
   const load = async () => {
     try {
-      const d = await API.get('/admin/tenants');
+      const d = await API.get(listPath());
       st.list = Array.isArray(d) ? d : ((d && d.tenants) || []);
       st.err = null;
       // The plan picker's vocabulary: read from the SAME catalogue the Plans screen edits, so a
@@ -2215,7 +2229,7 @@ const TenantsScreen = () => {
   // X-Swift-Harness header). The API has returned this since migration 000038, but the table never
   // showed it — so a leftover probe workspace read exactly like a customer's and clearing them out
   // meant guessing from the owner's domain. The badge and the picker below are the surface.
-  const probes = list.filter(t => !!t.probe_harness);
+  const probes = list.filter(t => isProbeRow(t));
   const allPicked = list.length > 0 && picked.length === list.length;
   const pickProbes = () => { st.picked = {}; probes.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
   const toggle = (id, on) => { if (on) st.picked[id] = true; else delete st.picked[id]; renderApp(); };
@@ -2272,12 +2286,13 @@ const TenantsScreen = () => {
     <div class="flex items-center justify-between mb-1">
       <h2 class="text-base font-bold text-gray-800">🗂️ Tenants</h2>
       <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1 text-xs text-gray-600" data-tenants="show-probes-label" title="Probe workspaces a test harness minted. Hidden by default because they are not customers; tick this and they are listed so Select probes can reach them."><input type="checkbox" id="tnShowProbes" data-tenants="show-probes" checked=${st.showProbes ? true : false} onChange=${e => { st.showProbes = !!e.target.checked; st.picked = {}; st.list = null; renderApp(); load(); }} /> show probe workspaces</label>
         <button class="btn btn-sm btn-outline" data-tenants="select-probes" disabled=${probes.length === 0 ? true : false} onClick=${pickProbes}>Select probes (${probes.length})</button>
         <button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button>
         <button class="btn btn-sm btn-red" id="tnDel" data-tenants="delete" disabled=${(picked.length === 0 || st.busy === 'del') ? true : false} onClick=${del}>${picked.length ? 'Delete selected (' + picked.length + ')' : 'Delete selected'}</button>
       </div>
     </div>
-    <p class="text-xs text-gray-500 mb-2">Every workspace on the platform. Tick the rows to retire, then delete them in one call. The workspace you are signed in as and the portfolio companies are refused by the API. A workspace a probe run minted carries a <span class="badge badge-yellow">probe</span> badge — "Select probes" ticks exactly those, so clearing test workspaces out does not mean guessing from the owner's address.</p>
+    <p class="text-xs text-gray-500 mb-2">Every customer workspace on the platform — probe workspaces a test harness minted stay hidden until you tick <b>show probe workspaces</b>. Tick the rows to retire, then delete them in one call. The workspace you are signed in as and the portfolio companies are refused by the API. A probe row carries a <span class="badge badge-yellow">probe</span> badge — "Select probes" ticks exactly those (the recorded harness tag OR a reserved test address), so clearing test workspaces out does not mean guessing from the owner's address.</p>
     ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}" data-tenants="status">${st.msg}</div>`}
     ${st.err && html`<div class="text-sm text-red-600 mb-2" data-tenants="status">Could not list tenants: ${st.err}</div>`}
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
