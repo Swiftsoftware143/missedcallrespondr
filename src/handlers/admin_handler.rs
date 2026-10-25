@@ -526,6 +526,12 @@ fn refusal_message(e: &AppError) -> String {
         | AppError::Unprocessable(m)
         | AppError::ServiceUnavailable(m)
         | AppError::UpstreamRefused(m) => m.clone(),
+        // A paused sign-in never reaches this bulk path (it is answered on the login route), but the
+        // match must stay exhaustive: the refusal's own sentence is the throttle's, not a bare code.
+        AppError::TooManyAttempts { retry_after_secs } => format!(
+            "too many failed sign-in attempts — try again in {}s",
+            retry_after_secs
+        ),
     }
 }
 

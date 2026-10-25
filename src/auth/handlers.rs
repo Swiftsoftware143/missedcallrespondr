@@ -5,6 +5,10 @@ use axum::{
     Json,
 };
 
+use argon2::{
+    password_hash::{rand_core::OsRng, SaltString},
+    Argon2, PasswordHasher,
+};
 use serde_json::Value;
 use sqlx::Row;
 
@@ -18,6 +22,20 @@ use crate::{
     security::email_addr,
     state::AppState,
 };
+
+/// Lazily-generated dummy Argon2 hash used to equalize sign-in timing for an address that has
+/// no account (cron 2026-10-25: measured live at ~1.8 ms for an unknown address against
+/// ~21.8 ms for a known one — a 12x gap that named which addresses are customers).
+fn dummy_password_hash() -> &'static str {
+    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DUMMY.get_or_init(|| {
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(b"missedcall-timing-equalizer", &salt)
+            .map(|h| h.to_string())
+            .unwrap_or_default()
+    })
+}
 
 pub async fn register(
     State(state): State<AppState>,
@@ -167,8 +185,26 @@ pub async fn register(
 
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    // Brute-force throttle (cron 2026-10-25): before this, twenty consecutive wrong passwords
+    // were answered 401 with no limit of any kind — unlimited guessing against a customer
+    // sign-in, and every guess costs a full Argon2 verify. The counter is keyed on the CLIENT
+    // ADDRESS the fronting proxy reports, never on the account: a per-account lockout would
+    // hand an attacker a denial of service against any known customer. See
+    // `crate::login_throttle`.
+    let throttle_key = crate::login_throttle::client_identity(&headers);
+    if let Err(wait) = state.login_throttle.check(&throttle_key) {
+        tracing::warn!(
+            "sign-in paused for {}: failed-attempt allowance spent ({}s left)",
+            throttle_key,
+            wait
+        );
+        return Err(AppError::TooManyAttempts {
+            retry_after_secs: wait,
+        });
+    }
     // The same normalisation `register` stores by, matched case-insensitively so an account stored
     // with capitals (or created before normalisation existed — live has `Zaarhub@gmail.com`) still
     // resolves when the customer retypes their address with different casing. A malformed value is
@@ -177,19 +213,34 @@ pub async fn login(
     let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE lower(email) = $1")
         .bind(email_addr::lookup_key(&req.email))
         .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
+        .await?;
+
+    // One closure for every failed-credential answer, so the counter can never be forgotten
+    // on one arm and not another.
+    let failed = |why: &str| {
+        state.login_throttle.record_failure(&throttle_key);
+        AppError::Unauthorized(why.to_string())
+    };
 
     // A stored hash that is not a usable PHC string is NOT a credential: no password can match
     // it, so the answer is the same generic 401 a wrong password gets. It must never become a 500
     // — that both echoes the hasher's own parse message ("password hash string missing field") to
     // an unauthenticated caller and makes a broken row a probe target. WorkflowSwift's login
     // already states this rule for its placeholder rows (`'x'`, measured live).
-    let valid = verify_password(&req.password, &user.password_hash).unwrap_or_default();
+    let hash_to_check = match &user {
+        Some(u) => u.password_hash.clone(),
+        None => dummy_password_hash().to_string(),
+    };
+    let valid = verify_password(&req.password, &hash_to_check).unwrap_or_default();
 
-    if !valid {
-        return Err(AppError::Unauthorized("Invalid email or password".into()));
-    }
+    let user = match user {
+        Some(user) if valid => user,
+        _ => return Err(failed("Invalid email or password")),
+    };
+
+    // A correct password clears this address's failures, so a customer who mistyped twice
+    // inside the window is not left counting down.
+    state.login_throttle.clear(&throttle_key);
 
     let claims = Claims {
         sub: user.id,

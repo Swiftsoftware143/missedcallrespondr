@@ -91,6 +91,8 @@ pub fn test_state() -> AppState {
         workflowswift_url: "http://127.0.0.1:1".into(),
         coreswift_url: "http://127.0.0.1:1".into(),
         funnelswift_url: "http://127.0.0.1:1".into(),
+        // A fresh counter per test state, so a sign-in probe in one test cannot pause another.
+        login_throttle: crate::login_throttle::LoginThrottle::new(),
     }
 }
 

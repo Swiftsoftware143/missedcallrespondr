@@ -47,10 +47,22 @@ pub enum AppError {
     /// action and that action failed), and a 4xx, which the edge passes through verbatim. Verified
     /// through the edge after deploy: the browser sees this JSON body.
     UpstreamRefused(String),
+    /// 429 — too many failed sign-ins from one client address (`crate::login_throttle`).
+    /// Carries the seconds left on the pause so the answer can put it in a header as well
+    /// as in the sentence.
+    TooManyAttempts {
+        retry_after_secs: u64,
+    },
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        // The paused-sign-in answer carries its retry budget in a header as well as in the
+        // sentence, so a client (and a log reader) can obey the pause without parsing prose.
+        let retry_after_secs = match &self {
+            AppError::TooManyAttempts { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        };
         let (status, message) = match self {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
@@ -62,8 +74,28 @@ impl IntoResponse for AppError {
             AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
             AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             AppError::UpstreamRefused(msg) => (StatusCode::FAILED_DEPENDENCY, msg),
+            AppError::TooManyAttempts { retry_after_secs } => {
+                let minutes = retry_after_secs.div_ceil(60).max(1);
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!(
+                        "Too many failed sign-in attempts from this address. Try again in about \
+                         {minutes} minute{}. If you have forgotten your password, use \
+                         \"Forgot your password?\".",
+                        if minutes == 1 { "" } else { "s" }
+                    ),
+                )
+            }
         };
-        (status, Json(json!({"error": message}))).into_response()
+        let mut response = (status, Json(json!({"error": message}))).into_response();
+        if let Some(value) = retry_after_secs
+            .and_then(|secs| axum::http::HeaderValue::from_str(&secs.to_string()).ok())
+        {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+        response
     }
 }
 

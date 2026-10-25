@@ -11,6 +11,7 @@ mod feature_registry;
 mod features;
 mod handlers;
 mod image_store;
+mod login_throttle;
 mod models;
 // Attribution for a workspace a test harness mints through the public signup
 // (`X-Swift-Harness`, kanban t_4a744754) — see `probe_harness`.
@@ -167,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
         workflowswift_url,
         coreswift_url,
         funnelswift_url,
+        login_throttle: crate::login_throttle::LoginThrottle::new(),
     };
 
     let app = routes::create_router(app_state);
