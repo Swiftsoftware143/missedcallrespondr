@@ -2793,19 +2793,23 @@ async fn hand_off_to_payment_link(
 /// `request_recorded` tells that console the ask is already filed, so it need not file a twin.
 fn no_provider_refusal(plan_request: Option<Value>) -> (StatusCode, Json<Value>) {
     let recorded = plan_request.is_some();
+    // THE BUYER'S BODY AND THE OPERATOR'S SETUP NOTE ARE DIFFERENT AUDIENCES (2026-10-25).
+    // The note used to be appended to `message`, which this route hands to the CUSTOMER: the console
+    // paints it into the upgrade panel and every other client (a mobile app, a direct API caller)
+    // shows it verbatim, so "connect a provider's key in the admin panel" was an instruction
+    // addressed to the operator being delivered to the person trying to pay. It is logged here
+    // instead, which is where the operator actually reads it.
+    tracing::warn!("checkout: {NO_PROVIDER_OPERATOR_NOTE}");
     let message = if recorded {
-        format!(
-            "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
-             Your request has been recorded for the platform team, who can switch this workspace \
-             onto the plan you picked by hand. {}",
-            NO_PROVIDER_OPERATOR_NOTE
-        )
+        "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
+         Your request has been recorded for the platform team, who can switch this workspace \
+         onto the plan you picked by hand."
+            .to_string()
     } else {
-        format!(
-            "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
-             Upgrades are not switched on for this installation yet. {}",
-            NO_PROVIDER_OPERATOR_NOTE
-        )
+        "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
+         Upgrades are not switched on for this installation yet, and your request could not be \
+         recorded this time. Press Upgrade again in a moment; if it keeps failing, contact support."
+            .to_string()
     };
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -2980,6 +2984,14 @@ mod provider_sentinel_tests {
             "buyer line missing: {msg:?}"
         );
         assert!(!msg.to_ascii_lowercase().contains(NO_PROVIDER_SENTINEL));
+        // 2026-10-25: the operator's setup note belongs in the log, never in the buyer's body.
+        // This route's `message` is painted into the CUSTOMER's upgrade panel (and shown verbatim
+        // by every non-console client), so "connect a provider's key in the admin panel" must not
+        // appear here at all.
+        assert!(
+            !msg.contains("Operator:") && !msg.contains("admin panel"),
+            "the buyer's line carries the operator's setup note: {msg:?}"
+        );
         assert_eq!(value["request_recorded"], serde_json::Value::Bool(false));
     }
 
