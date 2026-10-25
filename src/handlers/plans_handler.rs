@@ -184,6 +184,27 @@ pub async fn get_plan(
     }})))
 }
 
+/// A plan's `purchase_url` is a hosted payment page the OPERATOR types in, so refuse a typo at
+/// SAVE time instead of at the till.
+///
+/// The till already drops an unusable link (`checkout_handler::is_hosted_payment_url`) — but the
+/// operator only found out when a customer pressed Buy: measured live 2026-10-25,
+/// `POST /api/v1/admin/plans` stored `buy.stripe.com/not-a-url` and answered "Plan created", after
+/// which every press on Upgrade fell through to the refusal arm on a plan the operator believed was
+/// sellable. A blank box stays allowed (a free plan, or one sold another way, carries no link).
+fn require_hosted_payment_url(raw: &str) -> Result<(), AppError> {
+    let u = raw.trim();
+    if u.is_empty() || crate::handlers::checkout_handler::is_hosted_payment_url(u) {
+        return Ok(());
+    }
+    Err(AppError::BadRequest(
+        "The payment link must be a full https:// address, for example https://buy.stripe.com/abc123. \
+         It is where a buyer is sent when they pick this plan, so a link without https:// cannot take \
+         a payment. Leave the box empty if this plan is not sold by link."
+            .to_string(),
+    ))
+}
+
 pub async fn create_plan(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -241,6 +262,9 @@ pub async fn create_plan(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    if let Some(url) = purchase_url.as_deref() {
+        require_hosted_payment_url(url)?;
+    }
 
     sqlx::query(
         r#"INSERT INTO plans (id, name, slug, description, price_monthly, price_yearly, features, is_active, payment_provider, purchase_url)
@@ -356,6 +380,7 @@ pub async fn update_plan(
                 if trimmed.is_empty() {
                     None
                 } else {
+                    require_hosted_payment_url(trimmed)?;
                     Some(trimmed.to_string())
                 }
             }

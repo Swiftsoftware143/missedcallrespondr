@@ -2660,7 +2660,7 @@ async fn hosted_payment_link(pool: &sqlx::PgPool, plan_id: Option<Uuid>) -> Opti
 /// mistakes an operator actually makes (a bare `stripe.com/pay` with no scheme, a pasted line with a
 /// trailing space or a newline in the middle) without pretending to be a URL parser. Same rule as
 /// ADASwift/IncentiveSwift/FunnelSwift, so the fleet judges a link the same way.
-fn is_hosted_payment_url(raw: &str) -> bool {
+pub(crate) fn is_hosted_payment_url(raw: &str) -> bool {
     let u = raw.trim();
     let Some(rest) = u.strip_prefix("https://") else {
         return false;
