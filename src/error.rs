@@ -231,9 +231,9 @@ fn extractor_message(bytes: &[u8], status: StatusCode) -> String {
     if raw.is_empty() {
         return match status {
             StatusCode::UNSUPPORTED_MEDIA_TYPE => {
-                "Expected request with `Content-Type: application/json`".to_string()
+                "Send this form as JSON with a Content-Type of application/json.".to_string()
             }
-            _ => "invalid request body".to_string(),
+            _ => "The request body could not be read.".to_string(),
         };
     }
 
@@ -241,9 +241,91 @@ fn extractor_message(bytes: &[u8], status: StatusCode) -> String {
         .iter()
         .find_map(|prefix| raw.strip_prefix(prefix))
     {
-        Some(rest) if !rest.trim().is_empty() => rest.trim().to_string(),
+        Some(rest) if !rest.trim().is_empty() => plain_english(rest.trim(), status),
+        // Not the extractor's sentence — the caller's own words, left exactly as they arrived.
         _ => raw.to_string(),
     }
+}
+
+/// Turn the extractor's words into a sentence a person can act on: specific about WHICH field is
+/// at fault, silent about struct names, byte offsets and JSON grammar.
+///
+/// Before this, the layer above stripped the framing and handed the REST through, so the account
+/// screen showed the customer `email: invalid type: integer `12345`, expected a string at line 1
+/// column 15` (measured live 2026-10-26). Every sibling app answers a plain sentence; this one was
+/// the last leak. Grammar never reaches a caller — it only tells them our parser's opinion of
+/// their JSON.
+fn plain_english(raw: &str, status: StatusCode) -> String {
+    let lower = raw.to_ascii_lowercase();
+
+    if status == StatusCode::PAYLOAD_TOO_LARGE || lower.contains("length limit") {
+        return "That upload is too large. Choose a smaller file.".to_string();
+    }
+    if status == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+        return "Send this form as JSON with a Content-Type of application/json.".to_string();
+    }
+
+    if let Some(rest) = lower.split("missing field").nth(1) {
+        let field = rest
+            .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_')
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        return match field.as_str() {
+            "email" | "to" => "Enter an email address.".to_string(),
+            "name" | "first_name" => "Enter a name.".to_string(),
+            "phone" | "phone_number" => "Enter a phone number.".to_string(),
+            "password" => "Enter your password.".to_string(),
+            "message" | "body" => "Enter the message text.".to_string(),
+            "" => "A required field is missing from this form.".to_string(),
+            other => format!("The form is missing {other}."),
+        };
+    }
+
+    if lower.contains("invalid type")
+        || lower.contains("invalid value")
+        || lower.contains("invalid length")
+    {
+        let shape = lower.contains("expected struct")
+            || lower.starts_with("invalid type: null")
+            || lower.contains("invalid length");
+        return match leading_field(raw) {
+            Some(field) => format!("{field}: that value is not valid for this form."),
+            None if shape => "Send the form's fields as a JSON object.".to_string(),
+            None => "One of the values in this form is not valid.".to_string(),
+        };
+    }
+
+    if lower.contains("eof while parsing")
+        || lower.contains("expected value")
+        || lower.contains("invalid unicode")
+        || lower.contains("key must be a string")
+        || lower.contains("control character")
+        || lower.contains("expected `,`")
+        || lower.contains("expected ident")
+    {
+        return "The request body was not valid JSON.".to_string();
+    }
+
+    if let Some(field) = leading_field(raw) {
+        return format!("{field}: that value is not valid for this form.");
+    }
+
+    "The request body could not be read.".to_string()
+}
+
+/// The framework prefixes a field-scoped complaint with `field: `. Only take a token that looks
+/// like a field name, so an unrecognised sentence never becomes `Failed to: that value is not…`.
+fn leading_field(raw: &str) -> Option<String> {
+    let (head, _) = raw.split_once(':')?;
+    let head = head.trim();
+    let looks_like_field = !head.is_empty()
+        && head.len() <= 40
+        && head
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+    looks_like_field.then(|| head.replace('_', " "))
 }
 
 #[cfg(test)]
@@ -266,22 +348,35 @@ mod tests {
     }
 
     #[test]
-    fn strips_the_extractors_framing_and_keeps_the_field() {
+    fn a_wrong_type_names_the_field_but_never_the_json_grammar() {
         assert_eq!(
             extractor_message(
                 b"Failed to deserialize the JSON body into the target type: template_type: \
                   invalid type: integer `123`, expected a string at line 1 column 45",
                 StatusCode::UNPROCESSABLE_ENTITY
             ),
-            "template_type: invalid type: integer `123`, expected a string at line 1 column 45"
+            "template type: that value is not valid for this form."
         );
+        // The leak this mapping was added for, measured live 2026-10-26 on /api/v1/auth/login.
+        let msg = extractor_message(
+            b"Failed to deserialize the JSON body into the target type: email: invalid type: \
+              integer `12345`, expected a string at line 1 column 15",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        );
+        for leak in ["invalid type", "expected a string", "at line", "column"] {
+            assert!(!msg.contains(leak), "leaked {leak}: {msg}");
+        }
+    }
+
+    #[test]
+    fn broken_json_says_so_instead_of_quoting_the_parser() {
         assert_eq!(
             extractor_message(
                 b"Failed to parse the request body as JSON: name: EOF while parsing a value \
                   at line 1 column 8",
                 StatusCode::BAD_REQUEST
             ),
-            "name: EOF while parsing a value at line 1 column 8"
+            "The request body was not valid JSON."
         );
     }
 
@@ -296,11 +391,11 @@ mod tests {
         );
         assert_eq!(
             extractor_message(b"  ", StatusCode::UNSUPPORTED_MEDIA_TYPE),
-            "Expected request with `Content-Type: application/json`"
+            "Send this form as JSON with a Content-Type of application/json."
         );
         assert_eq!(
             extractor_message(b"", StatusCode::BAD_REQUEST),
-            "invalid request body"
+            "The request body could not be read."
         );
     }
 
