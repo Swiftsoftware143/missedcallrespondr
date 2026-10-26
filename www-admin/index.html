@@ -39,6 +39,12 @@ window.appGuidePages = {
   "deals": { title: "Deals", desc: "The opportunities in play, with their value and the stage they have reached.", actions: ["Add a deal", "Move a deal to the next stage"] },
   "campaigns": { title: "Campaigns", desc: "Outbound callbacks and messages sent to a set of contacts. Choose the audience and watch how it performs.", actions: ["Create a campaign", "Pick the audience", "Send or schedule it"] },
   "lists": { title: "Lists", desc: "Named groups of contacts that a campaign or a rule can target as one.", actions: ["Create a list", "Add or remove members"] },
+  // FOLLOW-UPS HAD NO ENTRY (cron 2026-10-26) while the other 23 operator screens do, so the guide's
+  // "?" simply disappeared on this tab. Measured two ways: the console's own `appGuidePages` object
+  // lists 23 keys for 24 `data-tab` screens, and in Chromium the toggle is absent here while present
+  // on Follow-Ups' neighbours. The screen is a real operator queue (create, complete, delete), so the
+  // entry names exactly what it does.
+  "follow-ups": { title: "Follow-Ups", desc: "Every follow-up this install is holding, across all workspaces, with Pending, Done and All views. A callback response rule queues one automatically when a call comes in; a person can also add one by hand. Overdue rows are counted at the top so nothing quietly rots.", actions: ["Filter Pending / Done / All", "Add a follow-up by hand", "Mark one done or delete it"] },
   "core": { title: "CoreSwift Integration", desc: "The link to CoreSwift: the status of the connection, and the personal API key that turns it on. Leads pushed here land in your CoreSwift contact pool.", actions: ["Check the connection status", "Paste a CoreSwift API key on this screen", "Test the connection", "Disconnect"] },
   "tickets": { title: "Tickets", desc: "Support requests raised on this workspace, with the status of each.", actions: ["Open a ticket", "Update its status"] },
   "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
@@ -2318,7 +2324,7 @@ const ImpersonateTenants = () => {
       <thead><tr><th>Tenant</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th></th></tr></thead>
       <tbody>${st.list.map(t => html`<tr>
         <td class="font-medium">${t.name || '-'}</td><td>${ownerCell(t)}</td><td class="text-gray-500">${t.slug || '-'}</td>
-        <td>${t.user_count == null ? '-' : t.user_count}</td><td class="text-gray-500">${t.plan_name || '—'}</td>
+        <td>${t.user_count == null ? '-' : t.user_count}</td><td class="text-gray-500" data-plan-cell=${t.plan_slug || t.plan_effective_name || ''}>${t.plan_name || (t.plan_effective_name ? 'No plan · ' + t.plan_effective_name + ' limits' : '—')}</td>
         <td><button class="btn btn-sm btn-blue" disabled=${st.busy === t.id} onClick=${() => go(t)}>${st.busy === t.id ? '...' : '🔑 Impersonate'}</button></td>
       </tr>`)}</tbody></table></div>`
       : (st.err ? '' : html`<div class="text-xs text-gray-400">loading tenants...</div>`)}
