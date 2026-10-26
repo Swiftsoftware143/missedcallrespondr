@@ -58,7 +58,13 @@ window.appGuidePages = {
   contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list.", actions: ["Search your contacts", "Open a contact's history"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
-  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Pressing a plan opens the payment provider's own secure checkout when self-serve checkout is open on that plan; while it is not open, the same press sends your request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] }
+  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Pressing a plan opens the payment provider's own secure checkout when self-serve checkout is open on that plan; while it is not open, the same press sends your request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] },
+  // EMAIL BRANDING HAD NO ENTRY (cron 2026-10-26): every other screen on this console carries one,
+  // so the guide's "?" simply disappeared on this tab — measured live in Chromium by opening all
+  // thirteen customer screens and reading which ones offer the toggle. The screen is real and does
+  // four things, so the entry names them: the logo, the display name, the colour, and the preview
+  // that mails the sample to the customer's own address.
+  branding:     { title: "Email Branding", desc: "Your logo, business name and colour, as they appear at the top of every email this account sends \u2014 welcome, password reset and receipts. Anything left blank keeps the MissedCall Respondr header.", actions: ["Upload your logo", "Save your brand name and colour", "Press Send me a preview email to see the real header in your own inbox"] },
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
@@ -1664,11 +1670,56 @@ const Billing = () => {
   // app.missedcallrespondr.com/dashboard/ (the only tile on the screen whose price line was not a
   // price). Same "$X / month" shape as the paid tiles now, for every plan including free.
   const priceLine = p => '$' + (monthly(p) % 1 === 0 ? monthly(p).toFixed(0) : monthly(p).toFixed(2)) + ' / month';
+  // WHAT THE BUYER READS ON A TILE (cron 2026-10-26). The tile used to print the plan row's own
+  // JSON keys verbatim — "included credits: 50", "max phone numbers: 1", "multi_tenant" — so the
+  // one screen where a customer decides to pay showed lower-case database slugs, and the Free
+  // tile listed the same 50 credits twice under two key names. Measured live on
+  // app.missedcallrespondr.com/dashboard/ against the Free / Pro Monthly / Enterprise rows.
+  // These labels add NO claim the stored row does not already carry: an unknown key falls back to
+  // its own slug in sentence case, a numeric value keeps its own number (thousands separators
+  // only), capabilities are listed before allowances, and two keys that resolve to the same
+  // sentence collapse into one so a tile cannot show the same thing twice.
+  const fmtNum = n => { const v = Number(n); return isFinite(v) ? v.toLocaleString('en-US') : String(n); };
+  const sentence = k => String(k).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase());
+  const FEATURE_LINE = {
+    unlimited_leads: () => 'Unlimited leads',
+    advanced_tags: () => 'Advanced tags',
+    dual_routing: () => 'Dual routing',
+    multi_tenant: () => 'Multi-tenant',
+    white_label: () => 'White label',
+    priority_support: () => 'Priority support',
+    starter_credits: v => fmtNum(v) + ' starter credits',
+    included_credits: v => fmtNum(v) + ' included credits',
+    bonus_credits: v => fmtNum(v) + ' bonus credits',
+    max_phone_numbers: v => 'Up to ' + fmtNum(v) + (Number(v) === 1 ? ' phone number' : ' phone numbers'),
+    max_leads: v => (Number(v) ? 'Up to ' + fmtNum(v) + ' leads' : 'Unlimited leads'),
+    max_tags: v => (Number(v) ? 'Up to ' + fmtNum(v) + ' tags' : 'Unlimited tags')
+  };
+  const FEATURE_ORDER = ['unlimited_leads', 'advanced_tags', 'dual_routing', 'multi_tenant', 'white_label',
+    'priority_support', 'included_credits', 'bonus_credits', 'starter_credits', 'max_phone_numbers',
+    'max_leads', 'max_tags'];
   const features = p => {
     const f = p.features;
     if (!f) return [];
-    if (Array.isArray(f)) return f.map(x => String(x).replace(/_/g, ' '));
-    return Object.keys(f).map(k => k.replace(/_/g, ' ') + ': ' + f[k]);
+    let pairs = Array.isArray(f) ? f.map(x => [String(x), null]) : Object.keys(f).map(k => [k, f[k]]);
+    // ONE FACT, ONE LINE: `starter_credits` and `included_credits` describe the same starter
+    // allowance when they hold the same number — the Free row stores 50 in both — and printing both
+    // read as a duplicate on the only tile a free customer is asked to upgrade from. The value is
+    // kept (it comes from the row), only the second sentence goes.
+    const get = k => { const hit = pairs.find(([key]) => key === k); return hit ? hit[1] : undefined; };
+    if (get('starter_credits') != null && String(get('starter_credits')) === String(get('included_credits'))) {
+      pairs = pairs.filter(([k]) => k !== 'starter_credits');
+    }
+    // A fixed reading order (capabilities, then the allowances the row really stores), with any
+    // key the map does not know kept after them in stored order.
+    const rank = k => { const i = FEATURE_ORDER.indexOf(k); return i === -1 ? FEATURE_ORDER.length : i; };
+    pairs.sort((a, b) => rank(a[0]) - rank(b[0]));
+    const lines = pairs.map(([k, v]) => {
+      const label = FEATURE_LINE[k];
+      if (label) return label(v);
+      return v == null ? sentence(k) : sentence(k) + ': ' + (typeof v === 'number' ? fmtNum(v) : String(v));
+    });
+    return [...new Set(lines)];
   };
   const buy = async p => {
     st.busy = true; st.buying = keyOf(p); st.notice = null; st.error = null; st.requestFor = null; renderApp();
