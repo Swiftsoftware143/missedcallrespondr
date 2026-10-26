@@ -368,8 +368,9 @@ const Dashboard = () => {
   }
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Dashboard</h2>
-    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="stat-card"><div class="stat-value">${st.total_rules ?? '...'}</div><div class="stat-label">Response Rules</div></div>
+      <div class="stat-card" data-dash-follow-ups="1" style="cursor:pointer" onClick=${() => { S.view = 'follow-ups'; renderApp(); }}><div class="stat-value" style="color:${(st.follow_ups_pending || 0) > 0 ? '#92400e' : '#1e293b'}">${st.follow_ups_pending ?? '...'}</div><div class="stat-label">Follow-ups pending</div></div>
       <div class="stat-card"><div class="stat-value">${st.total_templates ?? '...'}</div><div class="stat-label">Templates</div></div>
       <div class="stat-card"><div class="stat-value">${st.total_contacts ?? '...'}</div><div class="stat-label">Contacts</div></div>
       <div class="stat-card"><div class="stat-value">${st.total_responses ?? '...'}</div><div class="stat-label">Auto-Responses Sent</div></div>
@@ -1118,6 +1119,139 @@ const Tickets = () => {
             <div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${f.priority} onChange=${e => { f.priority = e.target.value; }}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
             <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button><button class="btn" onClick=${() => save({subject: f.subject, status: f.status, priority: f.priority})}>${st.editItem ? 'Save' : 'Add'}</button></div>
           </div>`; })()}
+      </div>
+    </div>`}
+  </div>`;
+};
+
+
+// ---- FOLLOW-UPS ----
+// The workspace's follow-up queue (cron 2026-10-26). The routes have existed all along —
+// `GET|POST /api/v1/follow-ups` and `PUT|DELETE /api/v1/follow-ups/:id`, plan-gated on
+// `max_follow_ups` — and a `callback` response rule writes rows into the table automatically
+// (`response_rule_eval.rs`). `GET /dashboard/stats` even computes `follow_ups_pending`. But the
+// console had NO nav entry, NO panel and never rendered that count, so a queued return call was
+// invisible: it could not be seen, completed or deleted. That is the "backend route with no UI"
+// defect: a paid feature a customer cannot reach.
+const FollowUps = () => {
+  const st = viewState('follow_ups', { list: [], callList: [], calls: {}, showModal: false, editItem: null, filter: 'pending', busy: false });
+  const load = async () => {
+    try {
+      const rows = await API.get('/follow-ups');
+      let calls = [];
+      try { calls = await API.get('/calls'); } catch (e) { calls = []; }
+      st.list = Array.isArray(rows) ? rows : [];
+      st.callList = Array.isArray(calls) ? calls : [];
+      const map = {};
+      st.callList.forEach(c => { map[c.id] = c; });
+      st.calls = map;
+      renderApp();
+    } catch (e) { console.error(e); }
+  };
+  if (!st._loaded) { st._loaded = true; load(); }
+  const callLabel = (id) => {
+    const c = st.calls[id];
+    if (!c) return 'Call ' + String(id || '').slice(0, 8);
+    const who = c.caller_name || c.caller_number || 'Unknown caller';
+    return c.caller_name && c.caller_number ? who + ' \u00b7 ' + c.caller_number : who;
+  };
+  const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
+  const hide = () => { st.showModal = false; renderApp(); };
+  const save = async (data) => {
+    try {
+      if (st.editItem) await API.put('/follow-ups/' + st.editItem.id, data);
+      else await API.post('/follow-ups', data);
+      st.showModal = false; load();
+    } catch (e) { alert(e.message); }
+  };
+  // `completed_at` is a naive-UTC column, so it is stamped without a zone suffix — the same rule the
+  // calendar form follows (see the utcIso/utcStamp helpers above).
+  const nowUtc = () => new Date().toISOString().slice(0, 19);
+  const complete = async (item) => {
+    if (st.busy) return;
+    st.busy = true;
+    try {
+      await API.put('/follow-ups/' + item.id, { status: 'completed', completed_at: nowUtc() });
+      st.busy = false; load();
+    } catch (e) { st.busy = false; renderApp(); alert('Could not mark it done: ' + e.message); }
+  };
+  const remove = async (id) => {
+    if (!confirm('Delete this follow-up?')) return;
+    try { await API.del('/follow-ups/' + id); load(); } catch (e) { alert(e.message); }
+  };
+  const isPending = (f) => f.status === 'pending';
+  const isOverdue = (f) => isPending(f) && !!f.scheduled_at && new Date(utcIso(f.scheduled_at)).getTime() < Date.now();
+  const pendingRows = st.list.filter(isPending);
+  const doneRows = st.list.filter(f => !isPending(f));
+  const shown = st.filter === 'pending' ? pendingRows : (st.filter === 'done' ? doneRows : st.list);
+  const overdueCount = pendingRows.filter(isOverdue).length;
+  return html`<div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Follow-Ups</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ New Follow-Up</button></div>
+    <div class="flex items-center gap-2 mb-3" id="fu-filter-row">
+      <button id="fu-filter-pending" class=${'btn btn-sm' + (st.filter === 'pending' ? '' : ' btn-outline')} onClick=${() => { st.filter = 'pending'; renderApp(); }}>Pending (${pendingRows.length})</button>
+      <button id="fu-filter-done" class=${'btn btn-sm' + (st.filter === 'done' ? '' : ' btn-outline')} onClick=${() => { st.filter = 'done'; renderApp(); }}>Done (${doneRows.length})</button>
+      <button id="fu-filter-all" class=${'btn btn-sm' + (st.filter === 'all' ? '' : ' btn-outline')} onClick=${() => { st.filter = 'all'; renderApp(); }}>All (${st.list.length})</button>
+      <span class="text-xs text-gray-500">${overdueCount ? plural(overdueCount, 'follow-up is', 'follow-ups are') + ' overdue.' : 'Every pending follow-up is still within its due time.'}</span>
+    </div>
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Caller</th><th>Type</th><th>Due (UTC)</th><th>Status</th><th>Notes</th><th>Actions</th></tr></thead>
+        <tbody>${shown.map(f => html`<tr data-follow-up-id=${f.id || ''} data-follow-status=${f.status || ''}>
+          <td class="font-medium">${callLabel(f.call_id)}</td>
+          <td class="text-gray-500">${(f.follow_type || '-').replace(/_/g, ' ')}</td>
+          <td class="text-gray-500 text-sm">${utcStamp(f.scheduled_at)}</td>
+          <td>${isPending(f)
+            ? html`<span class=${'badge ' + (isOverdue(f) ? 'badge-red' : 'badge-yellow')}>${isOverdue(f) ? 'Overdue' : 'Pending'}</span>`
+            : html`<span class="badge badge-green">${f.status === 'completed' ? 'Done' : (f.status || '-')}</span>`}</td>
+          <td class="text-gray-500 text-sm">${f.notes || '\u2014'}</td>
+          <td>
+            ${isPending(f) && html`<button class="btn btn-sm btn-green" data-fu-complete=${f.id || ''} onClick=${() => complete(f)}>Done</button>`}
+            <button class="btn btn-sm btn-outline" onClick=${() => { show(f); }}>Edit</button>
+            <button class="btn btn-sm btn-red" onClick=${() => remove(f.id)}>Delete</button>
+          </td>
+        </tr>`)}
+        ${shown.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8" id="fu-empty">${st.filter === 'done' ? 'Nothing has been completed yet.' : (st.filter === 'pending' ? 'No follow-ups waiting. A callback response rule queues one automatically.' : 'No follow-ups yet.')}</td></tr>`}
+      </tbody></table>
+    </div>
+    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
+      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'New'} Follow-Up</h3>
+        ${(() => {
+          const f = viewState('follow_ups_form', { call_id: '', follow_type: 'call_back', scheduled_at: '', notes: '' });
+          if (!st.formSeeded) {
+            f.call_id = st.editItem?.call_id || '';
+            f.follow_type = st.editItem?.follow_type || 'call_back';
+            f.scheduled_at = st.editItem?.scheduled_at ? String(st.editItem.scheduled_at).slice(0, 16) : '';
+            f.notes = st.editItem?.notes || '';
+            st.formSeeded = true;
+          }
+          // A follow-up hangs off a CALL (`follow_ups.call_id` is NOT NULL and a foreign key), so on
+          // create the operator must pick which call this return contact belongs to.
+          const payload = () => {
+            const when = f.scheduled_at ? (f.scheduled_at.length === 16 ? f.scheduled_at + ':00' : f.scheduled_at) : '';
+            const base = { follow_type: f.follow_type, scheduled_at: when, notes: f.notes || null };
+            if (st.editItem) return base;
+            return Object.assign({ call_id: f.call_id }, base);
+          };
+          return html`<div class="space-y-3">
+            ${!st.editItem && html`<div><label class="text-sm font-medium block mb-1">Which call</label>
+              <select class="input" value=${f.call_id} onChange=${e => { f.call_id = e.target.value; }}>
+                <option value="">Select a call…</option>
+                ${st.callList.slice(0, 300).map(c => html`<option value=${c.id}>${(c.caller_name || c.caller_number || 'Unknown') + ' \u00b7 ' + utcStamp(c.call_time)}</option>`)}
+              </select>
+              ${st.callList.length === 0 && html`<p class="text-xs text-gray-500 mt-1">No calls on this workspace yet — a follow-up is attached to an inbound call.</p>`}
+            </div>`}
+            <div><label class="text-sm font-medium block mb-1">Type</label>
+              <select class="input" value=${f.follow_type} onChange=${e => { f.follow_type = e.target.value; }}>
+                <option value="call_back">Call back</option>
+                <option value="email">Email</option>
+                <option value="meeting">Meeting</option>
+                <option value="follow_up">Follow up</option>
+              </select></div>
+            <div><label class="text-sm font-medium block mb-1">Due (UTC)</label><input class="input" type="datetime-local" value=${f.scheduled_at} onInput=${e => { f.scheduled_at = e.target.value; }} /></div>
+            <div><label class="text-sm font-medium block mb-1">Notes</label><textarea class="input" rows="3" value=${f.notes || ''} onInput=${e => { f.notes = e.target.value; }} placeholder="What to say or do when this comes due."></textarea></div>
+            <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button>
+              <button class="btn" onClick=${() => { if (!st.editItem && !f.call_id) { alert('Pick which call this follow-up belongs to.'); return; } if (!f.scheduled_at) { alert('Set a due date and time.'); return; } save(payload()); }}>${st.editItem ? 'Save' : 'Add'}</button></div>
+          </div>`;
+        })()}
       </div>
     </div>`}
   </div>`;
@@ -2477,6 +2611,9 @@ const App = () => {
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'leads', label: 'Leads', icon: '🎯' },
     { id: 'deals', label: 'Deals', icon: '💰' },
+    // cron 2026-10-26 — the follow-up queue had routes, a plan limit and a dashboard count
+    // but no screen at all. See the FollowUps component for the measurement.
+    { id: 'follow-ups', label: 'Follow-Ups', icon: '⏰' },
     // kanban t_66cfccff — the `workflows` nav entry (and its view) is RETIRED with the module.
     { id: 'campaigns', label: 'Campaigns', icon: '📣' },
     { id: 'lists', label: 'Lists', icon: '📇' },
@@ -3214,7 +3351,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
   </div>`;
 };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
