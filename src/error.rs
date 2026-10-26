@@ -157,6 +157,12 @@ const EXTRACTOR_PREFIXES: [&str; 2] = [
     "Failed to parse the request body as JSON: ",
 ];
 
+/// The prefix axum's `PathRejection` body carries. A malformed id in the URL is not a bad
+/// request: it addresses a row that cannot exist, so it answers 404 rather than 400 with the
+/// framework's sentence ("Invalid URL: UUID parsing failed: invalid character: found `n` at 0")
+/// — measured live 2026-10-26 on nine id routes of this app.
+const PATH_PARSER_PREFIX: &str = "Invalid URL: UUID parsing failed";
+
 /// Largest rejection body we will buffer before giving up and answering generically.
 const REJECTION_BODY_LIMIT: usize = 64 * 1024;
 
@@ -180,12 +186,31 @@ pub async fn rejection_as_json(req: Request, next: Next) -> Response {
 
     let status = res.status();
     let (_, body) = res.into_parts();
-    let message = match to_bytes(body, REJECTION_BODY_LIMIT).await {
-        Ok(bytes) => extractor_message(&bytes, status),
-        Err(_) => format!("request body could not be read (HTTP {})", status.as_u16()),
+    let bytes = match to_bytes(body, REJECTION_BODY_LIMIT).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            let msg = format!("request body could not be read (HTTP {})", status.as_u16());
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
+        }
     };
 
+    // A malformed path id is not a bad REQUEST — the URL names a row that cannot exist. Answer
+    // the same 404 an id that parses to nothing gets, instead of repeating axum's grammar
+    // lesson back to the caller ("found `n` at 0"). Measured live 2026-10-26: nine id routes
+    // (/tags/{id}, /leads/{id}, /tickets/{id}, /lists/{id}/leads, /messages/{id},
+    // /import-logs/{id}, /tag-groups/{id}, /portfolio-companies/{id}, /triggers/*/{id}).
+    if is_path_parser_refusal(&bytes) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))).into_response();
+    }
+
+    let message = extractor_message(&bytes, status);
+
     (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+}
+
+/// Is this rejection body axum's path-parser refusal (a URL segment that is not a uuid)?
+fn is_path_parser_refusal(bytes: &[u8]) -> bool {
+    bytes.starts_with(PATH_PARSER_PREFIX.as_bytes())
 }
 
 fn is_json_response(res: &Response<Body>) -> bool {
@@ -224,6 +249,21 @@ fn extractor_message(bytes: &[u8], status: StatusCode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_malformed_path_id_is_recognised_as_a_not_found_not_a_bad_request() {
+        // The exact body axum 0.7 produces for `Path<Uuid>` (measured live 2026-10-26).
+        assert!(is_path_parser_refusal(
+            b"Invalid URL: UUID parsing failed: invalid character: found `n` at 0"
+        ));
+        // A body-shaped rejection must NOT be reclassified: those really are bad requests.
+        assert!(!is_path_parser_refusal(
+            b"Failed to deserialize the JSON body into the target type: name: missing field"
+        ));
+        assert!(!is_path_parser_refusal(b""));
+        // A handler's own sentence that merely mentions a uuid stays a 400.
+        assert!(!is_path_parser_refusal(b"invalid uuid in payload"));
+    }
 
     #[test]
     fn strips_the_extractors_framing_and_keeps_the_field() {
