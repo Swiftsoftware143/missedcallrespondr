@@ -1672,8 +1672,25 @@ const loadPlanRequests = async (st) => {
   renderApp();
 };
 
+// Taking back a plan request the workspace no longer wants (cron 2026-10-27). The app already
+// serves a credential-scoped DELETE /api/v1/tickets/{id}, so nothing new is exposed here: the
+// button only appears while the row can really go — an applied switch or a closed request keeps
+// its record. Same confirm-then-reload shape the other delete buttons in this console use.
+const withdraw = async (st, t) => {
+  if (!confirm('Withdraw this plan request? Nothing has been charged, and you can ask again later.')) return;
+  st.withdrawing = t.id; st.notice = null; st.error = null; renderApp();
+  try {
+    await API.del('/tickets/' + t.id);
+    st.notice = 'That request is withdrawn. Nothing was charged, and you can ask again any time.';
+    await loadPlanRequests(st);
+  } catch (e) {
+    st.error = 'That request could not be withdrawn: ' + e.message;
+  }
+  st.withdrawing = null; renderApp();
+};
+
 const Billing = () => {
-  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false });
+  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, withdrawing: null });
   if (!st.loaded && !st.busy) {
     st.busy = true;
     loadPlanRequests(st);
@@ -1884,7 +1901,12 @@ const Billing = () => {
       <ul class="text-sm text-gray-700" style="list-style:none;padding:0;margin:0">
         ${st.requests.map(t => html`<li class="flex items-center justify-between" style="border-top:1px solid #eee;padding:6px 0" data-request=${t.id}>
           <span>${String(t.subject || 'Plan request')}</span>
-          <span class="badge badge-blue" data-request-state=${String(t.status || 'open')}>${String(t.status || 'open').replace(/_/g, ' ')}</span>
+          <span class="flex items-center gap-2">
+            <span class="badge badge-blue" data-request-state=${String(t.status || 'open')}>${String(t.status || 'open').replace(/_/g, ' ')}</span>
+            ${(t.plan_slug && !t.plan_applied_at && t.status !== 'resolved' && t.status !== 'closed')
+              ? html`<button class="btn btn-sm btn-outline" data-withdraw=${t.id} disabled=${st.withdrawing === t.id} onClick=${() => withdraw(st, t)}>${st.withdrawing === t.id ? 'Withdrawing…' : 'Withdraw'}</button>`
+              : null}
+          </span>
         </li>`)}
       </ul>
     </div>` : null}
