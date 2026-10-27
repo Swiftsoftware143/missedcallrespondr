@@ -316,6 +316,38 @@ const Overview = () => {
     if (a.action === 'contact.created') return m.name ? ': ' + clipAct(m.name, 60) : '';
     return '';
   };
+  // cron 2026-10-27 — a brand-new workspace lands on this screen as a grid of zeros with no next
+  // step: the two things a customer MUST do before a single call can be answered (connect a number,
+  // write a response rule) were only discoverable by reading the sidebar and guessing the order.
+  // This card names them in order and links each to the screen that does it.
+  //   * It paints only once BOTH reads behind it have answered (`/dashboard/stats` for the call
+  //     counts, `/me/usage` for the rule and number counts), so a failed read can never make a busy
+  //     workspace look new.
+  //   * It removes itself the moment a number, a rule or a call exists — never permanent furniture.
+  //   * It promises only what this app actually does: a number is what callers dial, and the rule is
+  //     what a missed caller gets (a text back, or a callback queued in Follow-ups). The Telnyx
+  //     credential is the PLATFORM's, not the customer's, so it is not a step here.
+  const firstSteps = () => {
+    if (typeof u.rules !== 'number' || typeof u.phone_numbers !== 'number') return '';
+    if (u.rules > 0 || u.phone_numbers > 0) return '';
+    if (Number(st.total_calls) > 0) return '';
+    const steps = [
+      ['Connect a phone number', 'This is the number your callers dial. Until one is connected nothing can reach MissedCall, so there is no call to answer.', 'phoneNumbers', 'Connect a number'],
+      ['Write your first response rule', 'The rule decides what a missed caller gets: a text back, or a callback queued for you in Follow-ups.', 'rules', 'Add a rule'],
+    ];
+    return html`<div class="card" data-first-steps="1" style="margin-bottom:16px">
+      <h3 class="font-semibold" style="margin:0 0 2px">Get set up</h3>
+      <p class="text-sm text-gray-500" style="margin:0 0 10px">Two steps and your next missed call answers itself. This card goes away once either one is done.</p>
+      ${steps.map((s, i) => html`<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0${i ? ';border-top:1px solid #e2e8f0' : ''}">
+        <div style="flex:0 0 24px;height:24px;border-radius:50%;background:#eef2ff;color:#4338ca;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center">${i + 1}</div>
+        <div style="flex:1">
+          <div class="font-semibold text-sm">${s[0]}</div>
+          <div class="text-sm text-gray-500" style="margin:2px 0 6px;max-width:60ch">${s[1]}</div>
+          <button type="button" class="btn btn-sm" data-first-step=${s[2]} onClick=${() => { S.view = s[2]; renderApp(); }}>${s[3]}</button>
+        </div>
+      </div>`)}
+    </div>`;
+  };
   const totalCalls = st.total_calls;
   // `response_rate` is ALREADY a percentage — the handler computes answered/total*100. The console
   // multiplied it by 100 a second time, so any tenant with a real call history read e.g. "5000%".
@@ -323,6 +355,7 @@ const Overview = () => {
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Overview</h2>
     <div class="card"><p class="text-sm text-gray-600">Welcome back, <b>${c.name || c.email || 'there'}</b>. Here's what's happening with your auto-response setup.</p></div>
+    ${firstSteps()}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
       <div class="stat-card"><div class="stat-value">${num(st.total_calls)}</div><div class="stat-label">Calls received</div></div>
       <div class="stat-card"><div class="stat-value">${num(st.missed_calls)}</div><div class="stat-label">Missed calls</div></div>
