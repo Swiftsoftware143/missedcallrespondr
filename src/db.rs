@@ -387,6 +387,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000045_signup_password_undelivered",
             include_str!("../migrations/000045_signup_password_undelivered.sql"),
         ),
+        // When each person last signed in, so the Tenants screen can say whether a workspace has
+        // ever been used (parity with the four sibling consoles, 2026-10-27). `ADD COLUMN IF NOT
+        // EXISTS` + `CREATE INDEX IF NOT EXISTS`, because this runner re-executes every file each
+        // boot and keeps no ledger.
+        (
+            "000046_users_last_login_at",
+            include_str!("../migrations/000046_users_last_login_at.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

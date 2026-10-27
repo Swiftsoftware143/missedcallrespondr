@@ -267,6 +267,18 @@ pub async fn login(
     // inside the window is not left counting down.
     state.login_throttle.clear(&throttle_key);
 
+    // Stamp the sign-in on the ACCOUNT (migration 000046), which is what the Tenants screen reads
+    // to answer "has anyone ever used this workspace?". Best-effort on purpose: the credential is
+    // already proven here, so a bookkeeping write must not turn a correct password into a 500 —
+    // the fault is logged and the sign-in proceeds.
+    if let Err(e) = sqlx::query("UPDATE users SET last_login_at = NOW() WHERE id = $1")
+        .bind(user.id)
+        .execute(&state.pool)
+        .await
+    {
+        tracing::warn!(user_id = %user.id, error = %e, "could not stamp last_login_at");
+    }
+
     let claims = Claims {
         sub: user.id,
         email: user.email.clone(),

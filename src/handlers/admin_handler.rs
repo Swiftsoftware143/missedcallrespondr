@@ -328,6 +328,10 @@ pub async fn list_all_tenants(
             p.price_yearly::float8 AS price_yearly,
             p.features->>'included_credits' as included_credits,
             (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count,
+            -- The workspace's newest successful sign-in (migration 000046). NULL = nobody in the
+            -- workspace has ever signed in, which the console prints as "never" instead of a
+            -- blank cell or a zero date.
+            (SELECT max(u.last_login_at) FROM users u WHERE u.tenant_id = t.id) as last_sign_in,
             (SELECT u.email FROM users u WHERE u.tenant_id = t.id
              ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
                            THEN 0 ELSE 1 END,
@@ -366,6 +370,7 @@ pub async fn list_all_tenants(
             "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
+            "last_sign_in": r.try_get::<Option<chrono::DateTime<Utc>>,_>("last_sign_in").ok().flatten().map(|d| d.to_string()),
             "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
             // The harness marker the signup door stamps from the `X-Swift-Harness` HEADER
             // (`auth::signup::create_account`). It was written since 2026-10-15 and read by
