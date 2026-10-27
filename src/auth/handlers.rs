@@ -159,6 +159,17 @@ pub async fn register(
     let credentials_emailed =
         ids.credentials_emailed && crate::security::probe_addr::harness_domain(&email).is_none();
 
+    // The latch that makes the "choose your own password" door ONE-SHOT (migration 000045). Set only
+    // when this door minted the password and nothing delivered it — i.e. exactly the state in which
+    // the customer has an account and no way in. `set_initial_password` clears it in the same
+    // statement that writes the password, so the offer cannot be used twice even inside one second.
+    if minted_password && !credentials_emailed {
+        sqlx::query("UPDATE users SET password_undelivered = true WHERE id = $1")
+            .bind(ids.user_id)
+            .execute(&state.pool)
+            .await?;
+    }
+
     let claims = Claims {
         sub: ids.user_id,
         email: email.clone(),
@@ -375,7 +386,8 @@ pub async fn change_password(
     // SESSION REVOCATION (kanban t_80787a0f): a password change/reset also ends every JWT
     // minted BEFORE it (`users.sessions_valid_from`), refused at the boundary read.
     sqlx::query(
-        "UPDATE users SET password_hash = $1, sessions_valid_from = NOW(), updated_at = NOW() \
+        "UPDATE users SET password_hash = $1, password_undelivered = false, \
+                sessions_valid_from = NOW(), updated_at = NOW() \
            WHERE id = $2",
     )
     .bind(&new_hash)
@@ -420,16 +432,24 @@ pub async fn set_initial_password(
     }
 
     let new_hash = hash_password(&req.password).map_err(|e| AppError::Internal(e.to_string()))?;
+    // `AND password_undelivered` is the whole safety of this door: it can be used exactly ONCE per
+    // account, and only while the minted first password was never delivered. Measured live
+    // 2026-10-27: with the JWT claim alone, a second call in the same second passed the
+    // `sessions_valid_from` comparison and silently REPLACED the password the first call had set.
     let updated = sqlx::query(
-        "UPDATE users SET password_hash = $1, sessions_valid_from = NOW(), updated_at = NOW() \
-           WHERE id = $2",
+        "UPDATE users SET password_hash = $1, password_undelivered = false, \
+                sessions_valid_from = NOW(), updated_at = NOW() \
+           WHERE id = $2 AND password_undelivered",
     )
     .bind(&new_hash)
     .bind(claims.sub)
     .execute(&state.pool)
     .await?;
     if updated.rows_affected() == 0 {
-        return Err(AppError::Unauthorized("User not found".into()));
+        return Err(AppError::Unauthorized(
+            "A password has already been set for this account. Sign in with it, or use the reset code."
+                .into(),
+        ));
     }
 
     tracing::info!(
@@ -722,7 +742,8 @@ pub async fn reset_password(
     // SESSION REVOCATION (kanban t_80787a0f): a password change/reset also ends every JWT
     // minted BEFORE it (`users.sessions_valid_from`), refused at the boundary read.
     sqlx::query(
-        "UPDATE users SET password_hash = $1, sessions_valid_from = NOW(), updated_at = NOW() \
+        "UPDATE users SET password_hash = $1, password_undelivered = false, \
+                sessions_valid_from = NOW(), updated_at = NOW() \
            WHERE id = $2",
     )
     .bind(&new_hash)

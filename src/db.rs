@@ -378,6 +378,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000044_workspace_delete_cascades",
             include_str!("../migrations/000044_workspace_delete_cascades.sql"),
         ),
+        // The one-shot latch behind the "your login email could not be sent — choose a password now"
+        // door (commit ab0721f). The JWT claim alone could not make the offer one-shot: a replay in
+        // the same second still passed `sessions_valid_from`, and the second call overwrote the
+        // password the first had just set. `ADD COLUMN IF NOT EXISTS`, so live is a no-op after the
+        // first boot; `create_account` sets it only when the minted password was NOT delivered.
+        (
+            "000045_signup_password_undelivered",
+            include_str!("../migrations/000045_signup_password_undelivered.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

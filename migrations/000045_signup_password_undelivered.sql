@@ -1,0 +1,19 @@
+-- 000045_signup_password_undelivered.sql
+--
+-- ONE-SHOT LATCH FOR THE SIGNUP DOOR'S OWN PASSWORD.
+--
+-- A signup door mints the first password and mails it. When that send fails, the account exists with
+-- a password nobody has ever seen, and the signup page lets that ONE session choose a password
+-- directly (POST /api/v1/auth/initial-password). The JWT claim alone cannot make that offer one-shot:
+-- `sessions_valid_from` is compared in whole seconds, so a replay inside the same second still
+-- passes. Measured live on 2026-10-27 — the second call overwrote the password the first one set,
+-- and the customer's brand-new credential was silently replaced.
+--
+-- This column is the exact latch: TRUE means "a first password was minted and never delivered, so
+-- this account may still be claimed from the signup session". The claim is flipped FALSE in the same
+-- statement that writes the password (`WHERE password_undelivered`), so a second attempt updates zero
+-- rows. Every other password writer (change, reset) clears it too.
+--
+-- `ADD COLUMN IF NOT EXISTS` + the runner's re-execute-every-boot means running it on live is a no-op
+-- after the first time, which is what this app's migration style requires.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_undelivered boolean NOT NULL DEFAULT false;
