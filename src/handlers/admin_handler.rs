@@ -328,9 +328,10 @@ pub async fn list_all_tenants(
             p.price_yearly::float8 AS price_yearly,
             p.features->>'included_credits' as included_credits,
             (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) as user_count,
-            -- The workspace's newest successful sign-in (migration 000046). NULL = nobody in the
-            -- workspace has ever signed in, which the console prints as "never" instead of a
-            -- blank cell or a zero date.
+            -- The workspace's newest successful sign-in (migration 000046). NULL is rendered by the
+            -- console as "not recorded" rather than "never": the column starts empty and earlier
+            -- sign-ins were not tracked, so "never" would be a claim about a customer this table
+            -- cannot make. Either way the cell is never blank and never a zero date.
             (SELECT max(u.last_login_at) FROM users u WHERE u.tenant_id = t.id) as last_sign_in,
             (SELECT u.email FROM users u WHERE u.tenant_id = t.id
              ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
