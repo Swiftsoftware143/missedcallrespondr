@@ -14,7 +14,9 @@
 //! joined (card t_7bdfcc4a — PROTECTED, so the two anonymous lists are untouched); the 119/104
 //! quoted here until then was one adrift of the code (the tenant plan catalogue of card
 //! t_a57ae7db had been added to the router and to the census TEST but not to this prose), so the
-//! numbers below are the measured ones: 126 = 16 anonymous + 110 protected (re-measured
+//! numbers below are the measured ones: 127 = 16 anonymous + 111 protected (re-measured
+//! 2026-10-27 after the failed-mail signup door `POST /api/v1/auth/initial-password` joined — a
+//! PROTECTED mount, so both anonymous lists are untouched; before it, re-measured
 //! 2026-10-24 after the email-branding preview `POST /api/v1/settings/branding/preview` joined —
 //! a PROTECTED mount, so both anonymous lists are untouched; before it, re-measured
 //! 2026-10-20 after the operator platform-stats read `GET /api/v1/admin/stats` joined — a
@@ -27,10 +29,10 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   126 mounted `.route(..)` entries in the one routing file, 126 distinct paths (every path is
+//!   127 mounted `.route(..)` entries in the one routing file, 127 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   110 entries reach `protected_routes`, which carries `auth_middleware`
+//!   111 entries reach `protected_routes`, which carries `auth_middleware`
 //!    16 entries reach the ANONYMOUS `public_routes`:
 //!        13 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
@@ -509,6 +511,10 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             16
         );
+        // 127 entries / 127 distinct paths (the failed-mail signup door
+        // `POST /api/v1/auth/initial-password` joined on 2026-10-27 — a PROTECTED mount beside
+        // `PUT /api/v1/auth/password`, so both anonymous lists are untouched and protected went
+        // 110 → 111; before it, the email-branding preview
         // 126 entries / 126 distinct paths (the email-branding preview
         // `POST /api/v1/settings/branding/preview` joined on 2026-10-24, card t_b4c67a35 — a
         // PROTECTED mount, so both anonymous lists are untouched and protected went
@@ -528,11 +534,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 126, "mounted .route entries");
+        assert_eq!(lits.len(), 127, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 126, "distinct mounted paths");
+        assert_eq!(uniq.len(), 127, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
