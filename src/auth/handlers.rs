@@ -171,8 +171,15 @@ pub async fn register(
     // The live inbound hub path is handlers::coreswift_external::push_lead_to_coreswift
     // (tenant BYOK csk_ key), fired on real captures - not on signup.
 
+    // A reserved/harness address is WITHHELD at the sender (it answers Ok without queueing
+    // anything), so it counts as not delivered — otherwise a probe signup would report a mail that
+    // never existed. Same predicate ADASwift's register applies to this field.
+    let credentials_emailed =
+        ids.credentials_emailed && crate::security::probe_addr::harness_domain(&email).is_none();
+
     Ok(Json(AuthResponse {
         token,
+        credentials_emailed: Some(credentials_emailed),
         team_member: TeamMemberResponse {
             id: ids.user_id,
             email,
@@ -256,6 +263,7 @@ pub async fn login(
 
     Ok(Json(AuthResponse {
         token,
+        credentials_emailed: None,
         team_member: user.into(),
     }))
 }

@@ -210,6 +210,12 @@ pub struct LoginRequest {
 pub struct AuthResponse {
     pub token: String,
     pub team_member: TeamMemberResponse,
+    /// `Some(..)` on the REGISTER answer only: whether the login mail carrying the first password
+    /// actually left the building. A customer whose mail failed held an account nobody could sign
+    /// into while the page told them to check an inbox that would stay empty (the same defect
+    /// FunnelSwift, ADASwift and IncentiveSwift answer this field for). Absent on login.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credentials_emailed: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

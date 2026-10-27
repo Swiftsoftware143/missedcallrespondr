@@ -94,6 +94,12 @@ pub struct NewAccountIds {
     pub user_id: Uuid,
     pub account_name: String,
     pub account_slug: String,
+    /// Whether the credentials/welcome mail carrying the first password was ACCEPTED for delivery.
+    /// `false` when the send returned an error — the account is real either way, but its owner has
+    /// no password, so the door that minted it has to say so instead of telling them to check an
+    /// inbox that will stay empty. The spawned (user-chosen-password) arm cannot know and reports
+    /// `true`, which is the posture it has always had.
+    pub credentials_emailed: bool,
 }
 
 /// Is this address already a login in this app? The ONE idempotency rule of every account door
@@ -296,6 +302,7 @@ pub async fn create_account(
     //     password it generates, and the reason that path is awaited too.
     //   * a user-CHOSEN password (the public signup): `welcome`, no password placeholder, spawned
     //     exactly as before so the signup response never waits on the mail round-trip.
+    let mut credentials_emailed = true;
     if let Some(pw) = a.password_plain {
         let vars = serde_json::json!({
             "name": a.name,
@@ -306,6 +313,7 @@ pub async fn create_account(
             crate::email::send_template_email(db, account_id, a.email, "welcome_credentials", &vars)
                 .await
         {
+            credentials_emailed = false;
             tracing::error!(
                 "account {} created but the CREDENTIALS EMAIL FAILED for {} — the customer has no password: {}",
                 account_id,
@@ -343,6 +351,7 @@ pub async fn create_account(
         account_id,
         user_id,
         account_name: a.account_name.to_string(),
+        credentials_emailed,
         account_slug,
     })
 }

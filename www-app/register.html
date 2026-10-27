@@ -86,15 +86,27 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
     const data = await res.json();
     if (res.ok) {
       var escEmail = email.replace(/[<>&"]/g, '');
+      // The send can FAIL server-side (SMTP outage, provider refusal) while the account is
+      // still created. The server answers `credentials_emailed`; telling a new customer to
+      // "check your email" when nothing was delivered sends them to an inbox that stays
+      // empty, holding an account whose first password never arrived. Say what happened and
+      // hand them the door that actually works.
+      var mailed = data.credentials_emailed !== false;
       var qEmail = encodeURIComponent(email);
-      ok.innerHTML = '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + escEmail + '.<br><br>You can change your password any time in your profile settings.'
+      ok.innerHTML = (mailed
+        ? '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + escEmail + '.'
+        : '<strong>Your account is created — but the email with your login details could NOT be sent.</strong><br>Nothing reached ' + escEmail + '. Set your own password below and you can sign in straight away.')
+        + '<br><br>You can change your password any time in your profile settings.'
         + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
-        + 'Nothing in your inbox after a minute? Check your spam folder, then '
-        + '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
-        + ' or <a href="/login" style="color:#2563eb;font-weight:600">sign in</a>.'
+        + (mailed
+            ? 'Nothing in your inbox after a minute? Check your spam folder, then '
+              + '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
+              + ' or <a href="/login" style="color:#2563eb;font-weight:600">sign in</a>.'
+            : '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">Set your password now</a>'
+              + ' — it emails you a reset code, which is how you get into the account we just made.')
         + '</div>';
       ok.style.display = 'block';
-      btn.textContent = 'Check your email';
+      btn.textContent = mailed ? 'Check your email' : 'Set your password';
       btn.disabled = true;
       return;
     } else {
