@@ -124,6 +124,20 @@ API.put = async (p, b) => _put(p, b).catch(e => { if (e.message && e.message.ind
 API.del = async (p) => _del(p).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
 
 const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
+// ── The operator's OWN identity, read once from /auth/me ────────────────────────────────────
+// The login payload carries id/email/name/account/role but NOT the plan, and a reload restores
+// only what was parked in sessionStorage — so the sidebar had nothing honest to print and showed
+// no operator identity at all: a signed-in operator could not see who they were or which tier the
+// platform workspace sits on. `/auth/me` resolves the REAL plan name (never the raw role word), so
+// it is read here once and re-read after each sign-in. Guarded by `meLoaded` so a re-render can
+// never turn this into a fetch loop; a failed read leaves the badge an em dash, never an invented
+// "Free".
+let meLoaded = false;
+const loadMe = async () => {
+  if (!API.token || meLoaded) return;
+  meLoaded = true;
+  try { const d = await API.get('/auth/me'); if (d) { S.me = d.user || d; renderApp(); } } catch (e) {}
+};
 
 // ---- PLATFORM ADMIN SURFACE (kanban t_d11d4157) ----
 // ONE definition of platform admin, mirroring the API that actually enforces it
@@ -172,6 +186,9 @@ const LoginView = () => {
         return;
       }
       API.setAuth(r.token, u); S.sessionEnded = false; f.email = ''; f.pw = ''; S.view = 'dashboard';
+      // Read the account once HERE, so the sidebar paints the operator's name and REAL tier on the
+      // first paint after signing in rather than one reload later.
+      meLoaded = false; await loadMe();
     } catch(err) { S.error = err.message; }
     S.loading = false; renderApp();
   };
@@ -372,8 +389,34 @@ const Dashboard = () => {
       <p class="text-xs text-gray-500 mt-4">These are the whole install's figures, not one workspace's. Calls received counts every workspace's inbound calls.</p>
     </div>`;
   }
+  // GET SET UP (2026-10-27): a brand-new workspace landed on seven zeros and nothing to press —
+  // the same wall of zeros the customer dashboards stopped showing. MEASURED first: a fresh
+  // signup here really is all zeros (rules 0, templates 0, contacts 0, calls 0), so the
+  // discriminator is "no response rule written and nothing answered yet". Painted ONLY when both
+  // counts are real numbers in the payload, so a failed or in-flight load can never render it,
+  // and it clears itself the moment a rule exists or the first auto-reply goes out.
+  const hasCounts = st.total_rules !== undefined && st.total_rules !== null
+    && isFinite(Number(st.total_rules))
+    && st.total_responses !== undefined && st.total_responses !== null
+    && isFinite(Number(st.total_responses));
+  const fresh = hasCounts && Number(st.total_rules) === 0 && Number(st.total_responses) === 0;
+  const go = (id) => { S.view = id; renderApp(); };
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Dashboard</h2>
+    ${fresh && html`<div class="card" data-console="get-set-up" style="border-left:4px solid #2563eb;margin-bottom:16px">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="font-size:26px;line-height:1">🚀</div>
+        <div>
+          <h3 style="margin:0 0 4px;font-size:16px;font-weight:700;color:#1e293b">Get set up</h3>
+          <p style="margin:0;font-size:14px;color:#475569;line-height:1.5">Nothing has been answered yet, so every figure below is still zero. A response rule is the text this workspace sends when a call goes unanswered — write one, point your phone number at it, and the first missed call fills in the counts and the response rate.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+            <button type="button" class="btn" data-step="rules" onClick=${() => go('rules')}>Write your first auto-reply</button>
+            <button type="button" class="btn btn-outline" data-step="core" onClick=${() => go('core')}>Connect your phone number</button>
+            <a class="btn btn-outline" data-step="admin-guide" href="/admin-guide.html" style="text-decoration:none;display:inline-block">Read the admin guide</a>
+          </div>
+        </div>
+      </div>
+    </div>`}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="stat-card"><div class="stat-value">${st.total_rules ?? '...'}</div><div class="stat-label">Response Rules</div></div>
       <div class="stat-card" data-dash-follow-ups="1" style="cursor:pointer" onClick=${() => { S.view = 'follow-ups'; renderApp(); }}><div class="stat-value" style="color:${(st.follow_ups_pending || 0) > 0 ? '#92400e' : '#1e293b'}">${st.follow_ups_pending ?? '...'}</div><div class="stat-label">Follow-ups pending</div></div>
@@ -2438,7 +2481,7 @@ const TenantsScreen = () => {
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
       <thead><tr>
         <th style="width:36px"><input type="checkbox" id="tnAll" data-tenants="select-all" checked=${allPicked ? true : false} onChange=${e => toggleAll(e.target.checked)} /></th>
-        <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Created</th>
+        <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Last sign-in</th><th>Created</th>
       </tr></thead>
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
@@ -2447,6 +2490,7 @@ const TenantsScreen = () => {
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
         <td>${planCell(t)}</td>
+        <td class="text-gray-500 text-xs" data-tenants="last-sign-in" title=${t.last_sign_in ? new Date(t.last_sign_in).toLocaleString() : 'No sign-in recorded since this column began (27 Oct 2026). Sign-ins before then were not tracked, so this is "nothing recorded", not proof that nobody has signed in.'}>${t.last_sign_in ? new Date(t.last_sign_in).toLocaleString() : 'not recorded'}</td>
         <td class="text-gray-500 text-xs">${t.created_at ? String(t.created_at).slice(0, 10) : '-'}</td>
       </tr>`)}</tbody></table></div>`
       : (st.err ? '' : html`<div class="text-xs text-gray-400">loading tenants...</div>`)}
@@ -2595,6 +2639,20 @@ const OpsConsole = () => {
 
 const App = () => {
   if(!API.token) return html`<${LoginView} />`;
+
+  // The ONE reader of the operator's identity is /auth/me (see loadMe above), so the name in the
+  // sidebar can never disagree with the row. The badge is the REAL plan name — never the raw role
+  // word ("User"), which is the stray label this removes — and an account whose tier was not read
+  // paints an em dash, NEVER an invented "Free": telling a paying workspace it is on Free because a
+  // read failed is a false statement about what they bought. `plan` is a plan OBJECT on some
+  // endpoints, so it is read by `.name`, never interpolated.
+  loadMe();
+  const me = S.me || (API.user || {});
+  const meName = me.name || me.email || 'Account';
+  const meInitial = (String(meName) + '?').charAt(0).toUpperCase();
+  const mePlanRaw = me.plan_name != null ? me.plan_name
+    : (typeof me.plan === 'string' ? me.plan : (me.plan && me.plan.name));
+  const mePlan = mePlanRaw == null ? '' : String(mePlanRaw).trim();
 
   // `adminOnly` entries are OPERATOR surfaces (Operator Console, Plans & Features,
   // Provisioning, Tenants, Site Config) and every one of them answers 403
@@ -3365,6 +3423,15 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       <div class="flex items-center gap-2 px-3 py-4 mb-2">
         <span class="text-2xl">📞</span>
         <span class="nav-text font-bold text-gray-800">MissedCall</span>
+      </div>
+      <div class="flex items-center gap-2 px-3 pb-3 mb-2" style="border-bottom:1px solid #f1f5f9">
+        <span id="me-avatar" style="width:28px;height:28px;border-radius:50%;background:#0ea5e9;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px;flex-shrink:0">${meInitial}</span>
+        <div style="min-width:0">
+          <div class="nav-text" id="me-name" title=${meName} style="font-size:13px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meName}</div>
+          <div class="nav-text" id="me-plan" style="margin-top:3px">${mePlan
+            ? html`<span class="badge" style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500">${mePlan}</span>`
+            : html`<span style="color:#94a3b8;font-size:11px">\u2014</span>`}</div>
+        </div>
       </div>
       <div class="flex-1 space-y-1">
         ${nav.filter(n => !n.adminOnly || (API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0)).map(n => html`<button type="button" class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }} aria-label=${n.label}>
