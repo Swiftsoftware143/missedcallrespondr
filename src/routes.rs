@@ -163,6 +163,15 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
+        // The door for a customer whose first password never arrived: `register` mints it and mails
+        // it, and when that send fails the account is otherwise unreachable (a reset code would fail
+        // the same way). Authenticated by the token `register` returned, and accepted ONLY while that
+        // token's `pwd_minted` claim is set — every other session carries `false`, so this can never
+        // become a password-overwrite path. See `auth_handlers::set_initial_password`.
+        .route(
+            "/api/v1/auth/initial-password",
+            post(auth_handlers::set_initial_password),
+        )
         // The REQUEST half of the sign-in-address change (kanban t_0d1aa081). Authenticated on
         // purpose: it writes the SESSION's own `users` row (no path id to spoof) and only a pending
         // `email_changes` row — the address itself moves when the link mailed to the NEW address is

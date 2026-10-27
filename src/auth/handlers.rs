@@ -15,8 +15,9 @@ use sqlx::Row;
 use super::models::{create_token, hash_password, verify_password};
 use crate::{
     config::{
-        AuthResponse, ChangePasswordRequest, Claims, ForgotPasswordRequest, LoginRequest,
-        MeResponse, RegisterRequest, ResetPasswordRequest, TeamMember, TeamMemberResponse,
+        AuthResponse, ChangePasswordRequest, Claims, ForgotPasswordRequest, InitialPasswordRequest,
+        LoginRequest, MeResponse, RegisterRequest, ResetPasswordRequest, TeamMember,
+        TeamMemberResponse,
     },
     error::AppError,
     security::email_addr,
@@ -81,7 +82,8 @@ pub async fn register(
     // David's signup model (as IncentiveSwift/FunnelSwift ship): the page collects NAME + EMAIL
     // only, so `password` may arrive empty. The server then mints one and mails it; the user
     // confirms their address by signing in with it. A caller that still supplies one is honoured.
-    let password = if req.password.is_empty() {
+    let minted_password = req.password.is_empty();
+    let password = if minted_password {
         super::signup::generate_temp_password()
     } else {
         req.password.clone()
@@ -151,11 +153,22 @@ pub async fn register(
         );
     }
 
+    // A reserved/harness address is WITHHELD at the sender (it answers Ok without queueing
+    // anything), so it counts as not delivered — otherwise a probe signup would report a mail that
+    // never existed. Same predicate ADASwift's register applies to this field.
+    let credentials_emailed =
+        ids.credentials_emailed && crate::security::probe_addr::harness_domain(&email).is_none();
+
     let claims = Claims {
         sub: ids.user_id,
         email: email.clone(),
         aid: ids.account_id,
         role: "account_owner".into(),
+        // THE ONE FACT THE PAGE NEEDS WHEN THE MAIL FAILS: this door minted the first password
+        // and nothing delivered it, so the customer holds an account with a password they have
+        // never seen. The claim is what `set_initial_password` accepts, and no other mint
+        // (login, impersonation, password reset) ever sets it.
+        pwd_minted: minted_password && !credentials_emailed,
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
     };
@@ -170,12 +183,6 @@ pub async fn register(
     // fleet-wide INTERNAL_SYNC_KEY env secret, which the platform standard forbids.
     // The live inbound hub path is handlers::coreswift_external::push_lead_to_coreswift
     // (tenant BYOK csk_ key), fired on real captures - not on signup.
-
-    // A reserved/harness address is WITHHELD at the sender (it answers Ok without queueing
-    // anything), so it counts as not delivered — otherwise a probe signup would report a mail that
-    // never existed. Same predicate ADASwift's register applies to this field.
-    let credentials_emailed =
-        ids.credentials_emailed && crate::security::probe_addr::harness_domain(&email).is_none();
 
     Ok(Json(AuthResponse {
         token,
@@ -254,6 +261,9 @@ pub async fn login(
         email: user.email.clone(),
         aid: user.tenant_id,
         role: user.role.clone(),
+        // A sign-in proves the caller HAS a working password, so this session may never set one
+        // without the current value — `change_password` keeps that rule.
+        pwd_minted: false,
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
     };
@@ -376,6 +386,57 @@ pub async fn change_password(
     Ok(Json(
         serde_json::json!({"message": "Password updated successfully"}),
     ))
+}
+
+/// `POST /api/v1/auth/initial-password` — `{password}`.
+///
+/// THE DOOR FOR A CUSTOMER WHOSE FIRST PASSWORD NEVER ARRIVED. `register` mints the first password
+/// and mails it; when that send fails the account exists but nobody can sign into it, and the signup
+/// page used to send the customer to a reset-code email that would fail for the same reason. This
+/// endpoint lets that ONE session — the token `register` returned, whose claim `pwd_minted` says
+/// "a password was minted and was not delivered" — choose a password directly.
+///
+/// Refused for every other credential: a `login` token and an impersonation token carry
+/// `pwd_minted: false`, so a session that already PROVES knowledge of a password can never replace
+/// it without `change_password`'s current-password check.
+///
+/// On success the hash is written AND `sessions_valid_from` moves to now — which invalidates the very
+/// token used here, so the claim cannot be replayed, and ends every session minted before this
+/// moment. Answers `{"status":"ok"}`; the page then sends the customer to sign in with it.
+pub async fn set_initial_password(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(req): Json<InitialPasswordRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if !claims.pwd_minted {
+        return Err(AppError::Unauthorized(
+            "This session may not set a password without the current one".into(),
+        ));
+    }
+    if req.password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "Password must be at least 8 characters".into(),
+        ));
+    }
+
+    let new_hash = hash_password(&req.password).map_err(|e| AppError::Internal(e.to_string()))?;
+    let updated = sqlx::query(
+        "UPDATE users SET password_hash = $1, sessions_valid_from = NOW(), updated_at = NOW() \
+           WHERE id = $2",
+    )
+    .bind(&new_hash)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(AppError::Unauthorized("User not found".into()));
+    }
+
+    tracing::info!(
+        user = %claims.sub,
+        "initial password chosen by the signup session — the minted one never reached the customer"
+    );
+    Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
 /// `PUT /api/v1/auth/profile` — `{name?, username?, company?}` (programme t_2cb77960, card

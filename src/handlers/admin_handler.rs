@@ -255,6 +255,9 @@ pub async fn impersonate(
         email: format!("impersonated@{}", target_tenant_id),
         aid: target_tenant_id,
         role: "impersonated".to_string(),
+        // An impersonation session is not a signup door: it may never claim the minted-password
+        // privilege that `set_initial_password` accepts.
+        pwd_minted: false,
         exp: now + 900,
         iat: now,
     };

@@ -177,6 +177,13 @@ pub struct Claims {
     pub email: String,
     pub aid: uuid::Uuid,
     pub role: String,
+    /// TRUE only on the token `register` returns when it had to MINT the first password and the
+    /// mail carrying it did not leave the building. `set_initial_password` is the only handler that
+    /// accepts it, and setting the password ends the token (`sessions_valid_from`), so the claim can
+    /// never be replayed. Every other mint leaves it `false`; `#[serde(default)]` keeps tokens
+    /// issued before this field existed decodable (they were all delivered-password sessions).
+    #[serde(default)]
+    pub pwd_minted: bool,
     pub exp: usize,
     pub iat: usize,
 }
@@ -275,6 +282,11 @@ pub struct MeResponse {
 pub struct ChangePasswordRequest {
     pub current_password: String,
     pub new_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InitialPasswordRequest {
+    pub password: String,
 }
 
 #[derive(Debug, Deserialize)]

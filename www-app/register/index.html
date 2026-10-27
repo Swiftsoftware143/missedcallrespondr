@@ -102,22 +102,69 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
       // empty, holding an account whose first password never arrived. Say what happened and
       // hand them the door that actually works.
       var mailed = data.credentials_emailed !== false;
+      var initQEmail = encodeURIComponent(email);
+      // THE PASSWORD FIELD IS REAL, NOT A PROMISE. When the credentials mail fails, the reset door
+      // mails a code — through the same mailer that just failed, so it would fail too. The only path
+      // that survives a broken mailer is to choose the password HERE, on the session the signup just
+      // returned: POST /api/v1/auth/initial-password accepts that token and nothing else (a sign-in
+      // token carries no such privilege), and saving it ends the token so it cannot be replayed.
       ok.innerHTML = (mailed
         ? '<strong>Account created!</strong><br>Check your email — we sent your login details to ' + escEmail + '.'
-        : '<strong>Your account is created — but the email with your login details could NOT be sent.</strong><br>Nothing reached ' + escEmail + '. Set your own password below and you can sign in straight away.')
-        + (pickedPlan && PLAN_LABELS[pickedPlan] ? '<br><br>Your interest in ' + PLAN_LABELS[pickedPlan] + ' is noted \u2014 the team sets that up with you; nothing was charged.' : '')
+        : '<strong>Your account is created — but the email with your login details could NOT be sent.</strong><br>Nothing reached ' + escEmail + '. Choose your password below and you can sign in straight away.')
         + '<br><br>You can change your password any time in your profile settings.'
-        + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
         + (mailed
-            ? 'Nothing in your inbox after a minute? Check your spam folder, then '
-              + '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
+            ? '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
+              + 'Nothing in your inbox after a minute? Check your spam folder, then '
+              + '<a href="/forgot-password.html?email=' + initQEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
               + ' or <a href="/login" style="color:#2563eb;font-weight:600">sign in</a>.'
-            : '<a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">Set your password now</a>'
-              + ' — it emails you a reset code, which is how you get into the account we just made.')
-        + '</div>';
+              + '</div>'
+            : '<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,.08)">'
+              + '<label for="initPw" style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Choose your password (at least 8 characters)</label>'
+              + '<input id="initPw" type="password" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:15px">'
+              + '<button type="button" id="initPwBtn" style="margin-top:10px;width:100%;padding:11px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:15px;cursor:pointer">Save my password</button>'
+              + '<div id="initPwMsg" style="margin-top:8px;font-size:13px"></div>'
+              + '</div>');
       ok.style.display = 'block';
       btn.textContent = mailed ? 'Check your email' : 'Set your password';
       btn.disabled = true;
+      if (!mailed) {
+        var pwBtn = document.getElementById('initPwBtn');
+        pwBtn.addEventListener('click', async function () {
+          var msg = document.getElementById('initPwMsg');
+          var pw = document.getElementById('initPw').value;
+          if (pw.length < 8) {
+            msg.style.color = '#b91c1c';
+            msg.textContent = 'Use at least 8 characters.';
+            return;
+          }
+          pwBtn.disabled = true;
+          pwBtn.textContent = 'Saving...';
+          try {
+            var r = await fetch('/api/v1/auth/initial-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + data.token },
+              body: JSON.stringify({ password: pw })
+            });
+            var d = await r.json().catch(function () { return {}; });
+            if (r.ok) {
+              msg.style.color = '#15803d';
+              msg.innerHTML = 'Password saved. <a href="/login" style="color:#15803d;font-weight:700;text-decoration:underline">Sign in with ' + escEmail + '</a>.';
+              pwBtn.textContent = 'Saved';
+              document.getElementById('initPw').disabled = true;
+            } else {
+              msg.style.color = '#b91c1c';
+              msg.textContent = d.error || d.message || 'That did not save. Please try again.';
+              pwBtn.disabled = false;
+              pwBtn.textContent = 'Save my password';
+            }
+          } catch (e) {
+            msg.style.color = '#b91c1c';
+            msg.textContent = 'Network error. Please try again.';
+            pwBtn.disabled = false;
+            pwBtn.textContent = 'Save my password';
+          }
+        });
+      }
       return;
     } else {
       // An address that is ALREADY registered used to reach a dead end here: the server's
