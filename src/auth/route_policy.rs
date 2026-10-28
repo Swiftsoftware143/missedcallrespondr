@@ -511,7 +511,10 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             16
         );
-        // 127 entries / 127 distinct paths (the failed-mail signup door
+        // 128 entries / 128 distinct paths (the email-branding preview BODY read
+        // `GET /api/v1/settings/branding/preview-body` joined on 2026-10-28 — a PROTECTED mount
+        // beside the mailed preview, so both anonymous lists are untouched and protected went
+        // 111 → 112; before it, 127 entries / 127 distinct paths with the failed-mail signup door
         // `POST /api/v1/auth/initial-password` joined on 2026-10-27 — a PROTECTED mount beside
         // `PUT /api/v1/auth/password`, so both anonymous lists are untouched and protected went
         // 110 → 111; before it, the email-branding preview
@@ -534,11 +537,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 127, "mounted .route entries");
+        assert_eq!(lits.len(), 128, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 127, "distinct mounted paths");
+        assert_eq!(uniq.len(), 128, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

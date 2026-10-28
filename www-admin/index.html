@@ -50,7 +50,7 @@ window.appGuidePages = {
   "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
-  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why.", actions: ["Upload your logo", "Set your brand name and colour", "Press Send me a preview email to see the real header in your own inbox"] },
+  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it.", actions: ["Upload your logo", "Set your brand name and colour", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, and the password-reset mail. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
   "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on"] },
@@ -219,7 +219,7 @@ const LoginView = () => {
 // upload convention, and the public GET /api/v1/branding/logo/:tenant_id streams it back for a mail
 // client's <img src>. A backend route with no UI is a defect.
 const Branding = () => {
-  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null, previewBusy: false, previewMsg: null });
+  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null, previewBusy: false, previewMsg: null, bodyBusy: false, bodyHtml: null, bodySubject: '', bodyMsg: null });
   if (!st._loaded) { st._loaded = true;
     API.get('/settings/branding').then(b => {
       b = b && typeof b === 'object' ? b : {};
@@ -296,6 +296,29 @@ const Branding = () => {
     }
     if (blank) blank.style.display = (hasLogo || (st.brand_name || '').trim()) ? 'none' : 'block';
   };
+  // The EXACT email, rendered by the BACKEND (cron 2026-10-28). The block above is a hand-drawn
+  // mirror of Branding::header_html, so it can drift from what a caller actually receives; this
+  // asks the app for the bytes its mail path would emit — same template, same merge fields, same
+  // header — and sends nothing. It is the only place an operator can see their UPLOADED logo in
+  // the outgoing message without waiting on an inbox.
+  const showBody = async () => {
+    st.bodyBusy = true; st.bodyMsg = null; renderApp();
+    try {
+      const r = await API.get('/settings/branding/preview-body');
+      st.bodyHtml = (r && r.html) || '';
+      st.bodySubject = (r && r.subject) || '';
+      if (!st.bodyHtml) {
+        st.bodyMsg = 'This app renders the sample as plain text, so there is no HTML part: ' + (((r || {}).text) || '').slice(0, 400);
+      } else if (r && r.logo_is_own) {
+        st.bodyMsg = 'Your own logo is at the top — this is exactly what your callers receive.';
+      } else if (r && r.branded) {
+        st.bodyMsg = 'Your brand name is at the top. Add a logo to complete the header.';
+      } else {
+        st.bodyMsg = 'Nothing of your own is set yet, so it carries the MissedCall Respondr header.';
+      }
+    } catch (e) { st.bodyMsg = 'Could not render the email: ' + e.message; st.bodyHtml = null; }
+    st.bodyBusy = false; renderApp();
+  };
   return html`<div>
     <h2 class="text-xl font-bold mb-4">🎨 Email Branding</h2>
     <div class="card">
@@ -346,6 +369,15 @@ const Branding = () => {
           <span class="text-xs text-gray-400">Mails the sample above, with your logo and colour, to your own address.</span>
         </div>
         ${st.previewMsg && html`<div class="mt-2 text-sm ${st.previewMsg.ok ? 'text-green-600' : 'text-red-600'}">${st.previewMsg.text}</div>`}
+        <div class="mt-3 flex items-center gap-3 flex-wrap">
+          <button id="brand-body-btn" class="btn btn-outline btn-sm" disabled=${st.bodyBusy} onClick=${showBody}>${st.bodyBusy ? 'Rendering…' : 'Show the exact email'}</button>
+          <span class="text-xs text-gray-400">Renders the real message the app would send — same template, same header — and sends nothing.</span>
+        </div>
+        ${st.bodyMsg && html`<div class="mt-2 text-sm text-gray-600">${st.bodyMsg}</div>`}
+        ${st.bodyHtml !== null && html`<div class="mt-2" style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#fff">
+          <div class="text-xs text-gray-500" style="padding:6px 10px;border-bottom:1px solid #e2e8f0">Subject: ${st.bodySubject}</div>
+          <iframe title="The exact email" style="width:100%;height:420px;border:0;background:#fff" srcdoc=${st.bodyHtml}></iframe>
+        </div>`}
       </div>
       ${st.msg && html`<div class="mt-3 text-sm ${st.msg.ok ? 'text-green-600' : 'text-red-600'}">${st.msg.ok ? 'OK - ' : 'Error - '}${st.msg.text}</div>`}
     </div>

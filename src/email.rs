@@ -456,14 +456,7 @@ async fn send_inline(
             // so the copy reads the `logo_is_own` merge field instead of assuming the logo above is
             // the operator's: an upload they never made must not be described as theirs, and this
             // app's own header must not be called "YOUR branding" (kanban t_6a8af451).
-            let header_line = if vars.get("logo_is_own").and_then(|v| v.as_str()) == Some("yes") {
-                "The header above this line is YOUR branding: your logo, your display name and your colour. If it is right here, it is right on every missed-call reply, invite and password email your callers receive."
-            } else {
-                "No logo of your own is set yet, so this message carries the MissedCall Respondr wordmark and name. Upload a logo under Email Branding on your dashboard, save it, and send yourself another preview to see your own."
-            };
-            let body = format!(
-                "Hi {name},\n\nThis is a sample of the mail {app_name} sends on your behalf.\n\n{header_line}\n\nChange it any time under Email Branding on your dashboard: {app_url}/dashboard\n\n- The {app_name} Team"
-            );
+            let body = inline_branding_preview_body(vars, app_name, app_url);
             send_email_request(
                 pool,
                 tenant_id,
@@ -558,6 +551,95 @@ pub async fn send_branding_preview_email(
         "app_url": "https://app.missedcallrespondr.com",
     });
     send_template_email(pool, tenant_id, to, "branding_preview", &vars).await
+}
+
+/// One rendered `branding_preview` sample, ready to judge — never delivered.
+pub struct RenderedPreview {
+    pub subject: String,
+    pub html: String,
+    pub text: String,
+    /// True when the header above the body is THIS account's own logo, not this app's wordmark.
+    pub own_logo: bool,
+    /// True when the account has saved branding at all (a name or a logo).
+    pub branded: bool,
+}
+
+/// The EXACT parts a `branding_preview` sample would carry, rendered but NOT sent.
+///
+/// WHY (cron 2026-10-28): the console's "What your callers see" block draws its OWN mirror of
+/// [`branding::Branding::header_html`], so it can drift from the renderer — an operator then
+/// approves a header that is not the one their callers receive. It also meant the fleet could never
+/// prove an UPLOADED logo reaches the outgoing body without sending real mail to a real inbox
+/// (2026-10-19 sweep: "could not be observed"). This answers the panel with the bytes the mail path
+/// would emit — same merge fields, same template lookup, same [`apply_branding`] call, in the same
+/// order as [`send_email_request`] — and delivers nothing.
+pub async fn render_branding_preview(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    name: &str,
+    to: &str,
+) -> RenderedPreview {
+    let app_name = "MissedCall Respondr";
+    let app_url = "https://app.missedcallrespondr.com";
+    let mut vars = with_app_vars(
+        &json!({ "name": name, "email": to, "app_url": app_url }),
+        app_name,
+        app_url,
+    );
+    let stored = branding::load(pool, tenant_id).await;
+    bind_branding(&mut vars, stored.as_ref());
+    let (subject, html, text) = match lookup_db_template(pool, tenant_id, "branding_preview").await
+    {
+        Some(t) => {
+            let subject = render_template(
+                &t.subject
+                    .clone()
+                    .unwrap_or_else(|| get_default_subject("branding_preview", app_name)),
+                &vars,
+            );
+            let html = t
+                .html_body
+                .as_ref()
+                .map(|h| render_template(h, &vars))
+                .unwrap_or_default();
+            let text = render_template(&t.body.clone().unwrap_or_default(), &vars);
+            let use_html = t.is_html.unwrap_or(true);
+            (subject, if use_html { html } else { String::new() }, text)
+        }
+        None => (
+            get_default_subject("branding_preview", app_name),
+            String::new(),
+            inline_branding_preview_body(&vars, app_name, app_url),
+        ),
+    };
+    let own_logo = stored
+        .as_ref()
+        .and_then(|b| b.resolve_logo_url(branding::APP_URL))
+        .is_some();
+    let branded = stored.is_some();
+    let effective = stored.unwrap_or_else(app_default_branding);
+    let (text_out, html_out) = apply_branding(Some(&effective), &text, &html);
+    RenderedPreview {
+        subject,
+        html: html_out,
+        text: text_out,
+        own_logo,
+        branded,
+    }
+}
+
+/// The inline `branding_preview` body. Shared by the SENDER and the panel's render so the sample an
+/// operator judges can never drift from the sample a caller receives.
+fn inline_branding_preview_body(vars: &serde_json::Value, app_name: &str, app_url: &str) -> String {
+    let name = vars.get("name").and_then(|v| v.as_str()).unwrap_or("there");
+    let header_line = if vars.get("logo_is_own").and_then(|v| v.as_str()) == Some("yes") {
+        "The header above this line is YOUR branding: your logo, your display name and your colour. If it is right here, it is right on every missed-call reply, invite and password email your callers receive."
+    } else {
+        "No logo of your own is set yet, so this message carries the MissedCall Respondr wordmark and name. Upload a logo under Email Branding on your dashboard, save it, and send yourself another preview to see your own."
+    };
+    format!(
+        "Hi {name},\n\nThis is a sample of the mail {app_name} sends on your behalf.\n\n{header_line}\n\nChange it any time under Email Branding on your dashboard: {app_url}/dashboard\n\n- The {app_name} Team"
+    )
 }
 
 /// Host of `api_url` for logging — the URL carries no secret, but the key never goes near a log.

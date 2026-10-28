@@ -286,6 +286,41 @@ pub async fn preview_email(
     }
 }
 
+/// `GET /api/v1/settings/branding/preview-body` — the email this account's branding produces,
+/// rendered and returned, NOT sent (cron 2026-10-28).
+///
+/// The pane's "What your callers see" block used to be a hand-drawn mirror of the renderer, so it
+/// could drift from the mail a caller receives. This answers it with the bytes the mail path would
+/// emit, so an operator judges the REAL header (logo, display name, colour rule) without waiting for
+/// an inbox and without a send. It is also the only arm that can prove an UPLOADED logo reached the
+/// rendered body on this app: `email_send_log` records sends without their body.
+pub async fn preview_body(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
+    let to: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?;
+    let to = to.unwrap_or_default().trim().to_string();
+    let name: String = sqlx::query_scalar("SELECT name FROM tenants WHERE id = $1")
+        .bind(claims.aid)
+        .fetch_optional(&state.pool)
+        .await?
+        .filter(|n: &String| !n.trim().is_empty())
+        .unwrap_or_else(|| "there".to_string());
+    let r = crate::email::render_branding_preview(&state.pool, claims.aid, &name, &to).await;
+    Ok(Json(json!({
+        "sent": false,
+        "to": to,
+        "subject": r.subject,
+        "html": r.html,
+        "text": r.text,
+        "branded": r.branded,
+        "logo_is_own": r.own_logo,
+    })))
+}
+
 /// `GET /api/v1/branding/logo/:tenant_id` — stream an account's logo. No credential (see the module
 /// docs); ids are unguessable uuids and no other tenant datum is reachable from here.
 pub async fn get_logo(

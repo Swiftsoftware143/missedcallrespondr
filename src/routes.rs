@@ -222,6 +222,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/settings/branding/preview",
             post(crate::handlers::branding_handler::preview_email),
         )
+        // The SAME sample, rendered and returned instead of mailed (cron 2026-10-28). The pane
+        // draws its "what your callers see" block from this, so what the operator approves is the
+        // bytes the mail path emits — not a hand-drawn mirror of it. Nothing is delivered.
+        .route(
+            "/api/v1/settings/branding/preview-body",
+            get(crate::handlers::branding_handler::preview_body),
+        )
         // Calls
         .route(
             "/api/v1/calls",
