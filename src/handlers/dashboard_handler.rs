@@ -52,12 +52,19 @@ pub async fn get_dashboard_stats(
     };
 
     // The four counts the dashboard tiles render, in ONE round trip. Each is scoped to the caller's
-    // own tenant: rules and contacts by `tenant_id`, templates by `aid` (that table's column for the
-    // owning account), and auto-responses = the outbound messages this tenant has sent.
+    // own tenant: rules and contacts by `tenant_id`, templates by `tenant_id` on `message_templates`
+    // (the customer's own templates — the ones the Templates tab lists and the response path sends),
+    // and auto-responses = the outbound messages this tenant has sent.
+    //
+    // This used to read `email_templates WHERE aid = $1`. That is the PLATFORM-ADMIN table behind
+    // `GET|POST /api/v1/email-templates` (403 for an account_owner), so the count was structurally
+    // zero for every customer: measured 2026-10-28 (cron `default`) on a fresh account that had just
+    // created one message template — `GET /api/v1/message-templates` listed it, and
+    // `GET /api/v1/dashboard/stats` still answered `total_templates: 0`.
     let (total_rules, total_templates, total_contacts, total_responses): (i64, i64, i64, i64) =
         sqlx::query_as(
             "SELECT (SELECT COUNT(*) FROM response_rules WHERE tenant_id = $1), \
-                    (SELECT COUNT(*) FROM email_templates WHERE aid = $1), \
+                    (SELECT COUNT(*) FROM message_templates WHERE tenant_id = $1), \
                     (SELECT COUNT(*) FROM contacts WHERE tenant_id = $1), \
                     (SELECT COUNT(*) FROM messages WHERE tenant_id = $1 AND direction = 'outbound')",
         )
