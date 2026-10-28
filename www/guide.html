@@ -702,10 +702,25 @@
 
   <h3>Your Details</h3>
   <ul>
-    <li><strong>Email</strong> — shown read-only; it identifies the account.</li>
-    <li><strong>Name</strong> — editable, saved with <strong>Save profile</strong>
-      (<code>PUT /api/v1/auth/profile</code>).</li>
+    <li><strong>Picture</strong> — <strong>Upload picture</strong> (or <strong>Change picture</strong>)
+      takes a PNG, JPEG, GIF or WebP up to 2 MB and shows it in the console header;
+      <strong>Remove picture</strong> puts the initials back. One picture per account, so a new
+      upload replaces the old one.</li>
+    <li><strong>Name</strong> — the name in the console header and in the messages this app sends you.</li>
+    <li><strong>Company</strong> — optional; clear it when there is nothing to show.</li>
+    <li><strong>Username</strong> — optional short handle for your account; clear it to remove it.</li>
+    <li><strong>Level</strong> — the plan this workspace is actually on, read from the plan itself
+      (<a href="#plan-billing">Plans &amp; Billing</a> shows the allowance and the upgrade path).</li>
+    <li><strong>Email</strong> — the address you sign in with. It is not edited in the field above;
+      use the <strong>Sign-in email</strong> card below to move it.</li>
   </ul>
+  <p>Changes are saved with <strong>Save changes</strong> (<code>PUT /api/v1/auth/profile</code>);
+    the screen confirms when they are stored, and a refusal appears in place with its reason.</p>
+
+  <h3>Moving your sign-in email</h3>
+  <p>The <strong>Sign-in email</strong> card shows the address on file. Enter the new one and press
+    <strong>Send confirmation link</strong>: a confirmation goes to the NEW address and your current
+    address keeps working until that link is opened, so a typo cannot lock you out.</p>
 
   <h3>Change Password</h3>
   <p>
@@ -715,7 +730,7 @@
 
   <div class="callout warning">
     <strong>There is no Settings page</strong>
-    Phone, timezone, company profile, notification preferences and business hours are not part
+    Phone, timezone, notification preferences and business hours are not part
     of the console, and the account-settings and API-key routes were removed from the API — nothing
     read a stored tenant setting, so those screens were deliberately not built. The one branding
     control that <em>does</em> exist is the <a href="#email-branding">Email Branding</a> tab (your
