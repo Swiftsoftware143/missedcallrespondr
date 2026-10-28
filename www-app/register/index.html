@@ -127,6 +127,19 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
       ok.style.display = 'block';
       btn.textContent = mailed ? 'Check your email' : 'Set your password';
       btn.disabled = true;
+      // WHAT HAPPENED TO THE TIER THEY PICKED (cron 2026-10-28). The server files a Plan Request
+      // ticket and, since this change, says so in the answer. Before this the page printed
+      // "Account created!" and nothing else, so a visitor who chose "Pro Monthly $49" on the pricing
+      // page had no way to tell whether they had bought it, been declined, or been ignored — their
+      // workspace simply started on Free. Name the tier, say no money moved, and say who acts next.
+      if (data.plan_request && data.plan_request.plan_name) {
+        var asked = String(data.plan_request.plan_name).replace(/[<>&"]/g, '');
+        ok.innerHTML += '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
+          + 'You asked for the <strong>' + asked + '</strong> plan. Your workspace starts on '
+          + '<strong>Free</strong> and no payment has been taken — your request is recorded and the '
+          + 'team will switch it on for you.'
+          + '</div>';
+      }
       if (!mailed) {
         var pwBtn = document.getElementById('initPwBtn');
         pwBtn.addEventListener('click', async function () {
