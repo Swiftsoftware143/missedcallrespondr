@@ -139,19 +139,39 @@ pub async fn register(
     // Requests queue knew a paid tier had been asked for. Files the same `plan_request` ticket the
     // dashboard's upgrade button files. BEST-EFFORT: a bad slug or a DB hiccup must never refuse an
     // account that has already been minted.
-    if let Err(e) = crate::handlers::tickets_handler::record_signup_plan_request(
+    // The filed tier's catalogue NAME is published back to the page below (cron 2026-10-28). The
+    // ticket was always filed; the visitor was never told, so a customer who picked "Pro Monthly $49"
+    // read "Account created!" and then found themselves on Free with no explanation. The three sibling
+    // signup doors publish `plan_request` for exactly this and their pages render it.
+    let plan_request_name = match crate::handlers::tickets_handler::record_signup_plan_request(
         &state.pool,
         ids.account_id,
         &req.plan,
     )
     .await
     {
-        tracing::warn!(
-            "register: signup plan request '{}' could not be filed for tenant {}: {e:?}",
-            req.plan,
-            ids.account_id
-        );
-    }
+        Ok(name) => name,
+        Err(e) => {
+            tracing::warn!(
+                "register: signup plan request '{}' could not be filed for tenant {}: {e:?}",
+                req.plan,
+                ids.account_id
+            );
+            None
+        }
+    };
+    // The slug is normalised the same way `record_signup_plan_request` normalises it, so the name and
+    // the slug always describe the SAME tier.
+    let plan_request = plan_request_name.map(|plan_name| crate::config::PlanRequestNotice {
+        plan_name,
+        plan_slug: req
+            .plan
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .collect(),
+    });
 
     // A reserved/harness address is WITHHELD at the sender (it answers Ok without queueing
     // anything), so it counts as not delivered — otherwise a probe signup would report a mail that
@@ -198,6 +218,7 @@ pub async fn register(
     Ok(Json(AuthResponse {
         token,
         credentials_emailed: Some(credentials_emailed),
+        plan_request,
         team_member: TeamMemberResponse {
             id: ids.user_id,
             email,
@@ -297,6 +318,7 @@ pub async fn login(
     Ok(Json(AuthResponse {
         token,
         credentials_emailed: None,
+        plan_request: None,
         team_member: user.into(),
     }))
 }

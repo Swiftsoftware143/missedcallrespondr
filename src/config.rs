@@ -223,6 +223,23 @@ pub struct AuthResponse {
     /// FunnelSwift, ADASwift and IncentiveSwift answer this field for). Absent on login.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credentials_emailed: Option<bool>,
+    /// `Some(..)` on the REGISTER answer only, when the visitor arrived from the pricing page with
+    /// a PAID tier picked: the tier the operator's Plan Requests queue now holds for them. The other
+    /// three signup doors (FunnelSwift, ADASwift, IncentiveSwift) publish this, and the signup page
+    /// reads it to tell the visitor what happened to their pick; this door filed the ticket and said
+    /// nothing, so a customer who chose "Pro Monthly $49" was seated on Free with no word about it.
+    /// Absent when no request was filed (no pick, a free pick, a retired slug, or a DB hiccup) — the
+    /// page must then say nothing rather than invent a promise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_request: Option<PlanRequestNotice>,
+}
+
+/// The tier a signup asked for, in the shape the signup page renders (`plan_name` is the catalogue's
+/// own name, e.g. "Pro Monthly", never a slug).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlanRequestNotice {
+    pub plan_name: String,
+    pub plan_slug: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
