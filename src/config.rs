@@ -290,6 +290,15 @@ pub struct MeResponse {
     /// The real plan tier name for this account's tenant ("Free", "Pro", …). Never the literal
     /// word "User" — that stray label is the FunnelSwift defect this programme removes.
     pub plan_name: String,
+    /// Whether that tier was actually CHOSEN — i.e. the workspace holds an active
+    /// `tenant_plans` row — as opposed to `plan_name` being the enforced fallback.
+    ///
+    /// `plan_name` alone cannot carry this: it falls back to "Free" for a workspace with no
+    /// row at all, so a screen that badges "current plan" from the name tells a customer they
+    /// hold a plan they never picked. ADASwift and FunnelSwift settled this on 2026-10-28
+    /// (`plan.assigned` / `plan_assigned`); this is the same flag under the same name. Always
+    /// serialised (not optional) so the console has one shape to read.
+    pub plan_assigned: bool,
     /// `/api/v1/auth/avatar/<id>` when the account has uploaded a picture, absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,

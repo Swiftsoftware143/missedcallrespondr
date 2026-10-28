@@ -323,16 +323,27 @@ pub async fn login(
     }))
 }
 
-/// The real plan tier name for a tenant (programme t_2cb77960, card t_9cd2c8f2).
+/// The real plan tier name for a tenant, AND whether the workspace actually chose it
+/// (programme t_2cb77960, card t_9cd2c8f2; `assigned` added 2026-10-28).
 ///
-/// `tenant_plans` holds at most one row per tenant (000020) and joins `plans` for the display name.
-/// A tenant with no row — or a tournament of rows where none is active — falls back to "Free", the
-/// same default the console's own Free posture already uses: a label the account can always read,
-/// never a blank and never the literal word "User". A database hiccup is NOT fatal here (this is a
-/// display field, not an authorization decision), so it degrades to the default rather than 500-ing
-/// the whole account screen.
-async fn plan_name_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> String {
-    sqlx::query_scalar::<_, String>(
+/// `tenant_plans` holds at most one row per tenant (000020) and joins `plans` for the display
+/// name. A tenant with no row — or a tournament of rows where none is active — falls back to
+/// "Free", the same default the console's own Free posture already uses: a label the account can
+/// always read, never a blank and never the literal word "User".
+///
+/// That fallback is the tier the WRITE GATES really apply, but it is not a plan the customer
+/// ever picked, and the two are different things a screen must not conflate. So this returns
+/// `(name, assigned)`: `assigned` is false when the tenant holds NO active `tenant_plans` row.
+/// Measured live 2026-10-28: two missedcall workspaces hold no plan row at all, and the Plan
+/// screen badged the Free tile as their *current plan* from the name alone, telling those
+/// customers they held a plan they never chose. ADASwift and FunnelSwift fixed exactly this on
+/// the same day (`plan.assigned` / `plan_assigned`); this is the same distinction, same name.
+///
+/// A database hiccup degrades to the old default (the name still renders, `assigned` false)
+/// rather than 500-ing the whole account screen: this is a display field, not an authorization
+/// decision.
+async fn plan_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> (String, bool) {
+    match sqlx::query_scalar::<_, String>(
         "SELECT p.name FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id \
          WHERE tp.tenant_id = $1 AND tp.status = 'active' \
          ORDER BY tp.created_at DESC LIMIT 1",
@@ -342,7 +353,10 @@ async fn plan_name_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> String {
     .await
     .ok()
     .flatten()
-    .unwrap_or_else(|| "Free".to_string())
+    {
+        Some(name) => (name, true),
+        None => ("Free".to_string(), false),
+    }
 }
 
 /// `GET /api/v1/auth/me` — the signed-in account, INCLUDING the real plan tier (card t_9cd2c8f2).
@@ -364,7 +378,7 @@ pub async fn me(
     .ok_or_else(|| AppError::NotFound("User not found".into()))?;
 
     let tenant_id: uuid::Uuid = row.try_get("tenant_id")?;
-    let plan_name = plan_name_for(&state.pool, tenant_id).await;
+    let (plan_name, plan_assigned) = plan_for(&state.pool, tenant_id).await;
 
     let has_avatar: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_avatars WHERE user_id = $1)")
@@ -381,6 +395,7 @@ pub async fn me(
         tenant_id,
         role: row.try_get("role")?,
         plan_name,
+        plan_assigned,
         avatar_url: if has_avatar {
             Some(format!("/api/v1/auth/avatar/{}", claims.sub))
         } else {
