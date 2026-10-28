@@ -671,6 +671,9 @@ const Profile = () => {
             <input id="profile-name" class="input" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} /></div>
           <div><label class="text-sm font-medium block mb-1">Company</label>
             <input id="profile-company" class="input" value=${st.company || ''} onInput=${e => { st.company = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium block mb-1">Username</label>
+            <input id="profile-username" class="input" maxlength="255" placeholder="Optional" value=${st.username || ''} onInput=${e => { st.username = e.target.value; }} />
+            <p class="text-xs text-gray-400 mt-1">Optional. A short name the console can show in place of your full name. Clear it to remove it.</p></div>
           <div><label class="text-sm font-medium block mb-1">Level</label>
             <div style="padding:8px 0"><span id="profile-level" class="badge badge-blue">${c.plan_name || '\u2014'}</span></div></div>
           <button id="save-profile" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save changes</button>
