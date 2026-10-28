@@ -1710,9 +1710,15 @@ const Billing = () => {
   const current = me.plan_name ? String(me.plan_name).trim().toLowerCase() : '';
   const nameOf = p => p.name || p.slug || 'Plan';
   const keyOf = p => p.slug || p.name || String(p.id);
+  // A plan the workspace HOLDS is not the same as the tier it is bounded by (2026-10-28).
+  // `/auth/me` publishes `plan_assigned` for exactly this: false when the workspace holds no
+  // active tenant_plans row, in which case `plan_name` is the fallback the write gates apply,
+  // not a plan the customer ever picked. Absent (older payload) is read as assigned so this
+  // change cannot make a genuinely-subscribed workspace look plan-less.
+  const assigned = me.plan_assigned !== false;
   const isCurrent = p => {
     const a = String(p.name || '').trim().toLowerCase(), b = String(p.slug || '').trim().toLowerCase();
-    return !!current && (a === current || b === current);
+    return assigned && !!current && (a === current || b === current);
   };
   const monthly = p => Number(p.price_monthly || 0);
   // The price slot must carry a PRICE, not a second copy of the plan's own name. It read
@@ -1915,7 +1921,9 @@ const Billing = () => {
     </div>` : null}
     <div class="card">
       <h3 class="font-semibold mb-1">Your current plan</h3>
-      <p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || '\u2014'}</span></p>
+      ${assigned
+        ? html`<p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || '\u2014'}</span></p>`
+        : html`<p class="text-sm text-gray-600" data-plan-state="none">No plan chosen yet — this workspace runs on the <strong>${me.plan_name || 'Free'}</strong> limits below, which is what every screen here enforces. Pick a plan to move up.</p>`}
       <p class="text-sm text-gray-500 mt-2">Pressing a button below opens the payment provider's own secure checkout when self-serve checkout is open on that plan. While it is not open, the same press sends your request to our team, who complete the switch by hand — nothing is charged. No card details are entered on this site either way.</p>
     </div>
     ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans…</div>` : null}
