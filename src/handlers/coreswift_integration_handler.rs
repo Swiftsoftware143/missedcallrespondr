@@ -66,8 +66,7 @@ pub async fn lists(
             // list), which is exactly the "control calls a missing address" misread this fleet has
             // hit before. 400 keeps the two CoreSwift entry points consistent.
             AppError::BadRequest(
-                "CoreSwift is not connected — store your csk_ key in the Integration Center first"
-                    .to_string(),
+                "CoreSwift is not connected — save your csk_ key first".to_string(),
             )
         })?;
 
@@ -134,8 +133,7 @@ pub async fn push(
     let connected = is_connected(&state, &claims.aid).await;
     if !connected {
         return Err(AppError::BadRequest(
-            "CoreSwift is not connected — store your csk_ key in the Integration Center first"
-                .to_string(),
+            "CoreSwift is not connected — save your csk_ key first".to_string(),
         ));
     }
 

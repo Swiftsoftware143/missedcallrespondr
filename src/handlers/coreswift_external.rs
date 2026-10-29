@@ -208,10 +208,7 @@ pub async fn push_lead_to_coreswift_detailed(
 
     let Some((api_key, base_url)) = get_coreswift_connection(state, account_id).await else {
         // Not connected to CoreSwift — nothing to do (this is the no-CRM user case).
-        return Err(
-            "CoreSwift is not connected — store your csk_ key in the Integration Center first"
-                .to_string(),
-        );
+        return Err("CoreSwift is not connected — save your csk_ key first".to_string());
     };
 
     let mut body = Map::new();
