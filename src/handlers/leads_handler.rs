@@ -231,9 +231,10 @@ pub async fn update(
             .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Lead not found".into()))?;
-    // The value the UPDATE will actually store: the request's own address when it sends one,
-    // otherwise the row's existing one — so an unrelated edit cannot re-save junk either.
-    check_deliverable_email(req.email.as_deref().or(existing.email.as_deref()))?;
+    // Only the address the REQUEST carries is judged (fleet reference: FunnelSwift
+    // lead_handler.rs:592). Re-checking the row's existing value would block an unrelated edit on a
+    // lead captured before this guard — and the UPDATE keeps that value either way, untouched.
+    check_deliverable_email(req.email.as_deref())?;
     let now = chrono::Utc::now();
     sqlx::query(
         "UPDATE leads SET name=$1, phone=$2, email=$3, source=$4, status=$5, notes=$6, tags=$7, call_id=$8, updated_at=$9 WHERE id=$10",
