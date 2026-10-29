@@ -327,17 +327,37 @@ const Overview = () => {
   //   * It promises only what this app actually does: a number is what callers dial, and the rule is
   //     what a missed caller gets (a text back, or a callback queued in Follow-ups). The Telnyx
   //     credential is the PLATFORM's, not the customer's, so it is not a step here.
+  // cron 2026-10-29 — the card used to vanish the moment EITHER step was done, and the state it
+  // left behind is the ONE state where the product fails silently: a workspace with a number
+  // connected and NO response rule answers nothing, so every missed call on it is lost with no
+  // sentence anywhere on the screen. Measured live on app.missedcallrespondr.com with a probe
+  // workspace holding one number and zero rules: `data-first-steps` was absent and the page never
+  // mentioned the missing rule. The card now stays while a step is MISSING, lists only the steps
+  // still outstanding, and names the consequence of the half-done state. It still paints only after
+  // both reads have answered, so a failed read cannot make a busy workspace look new, and it still
+  // removes itself once BOTH a number and a rule exist — it is not permanent furniture.
   const firstSteps = () => {
     if (typeof u.rules !== 'number' || typeof u.phone_numbers !== 'number') return '';
-    if (u.rules > 0 || u.phone_numbers > 0) return '';
-    if (Number(st.total_calls) > 0) return '';
-    const steps = [
-      ['Connect a phone number', 'This is the number your callers dial. Until one is connected nothing can reach MissedCall, so there is no call to answer.', 'phoneNumbers', 'Connect a number'],
-      ['Write your first response rule', 'The rule decides what a missed caller gets: a text back, or a callback queued for you in Follow-ups.', 'rules', 'Add a rule'],
-    ];
-    return html`<div class="card" data-first-steps="1" style="margin-bottom:16px">
-      <h3 class="font-semibold" style="margin:0 0 2px">Get set up</h3>
-      <p class="text-sm text-gray-500" style="margin:0 0 10px">Two steps and your next missed call answers itself. This card goes away once either one is done.</p>
+    const needNumber = !(u.phone_numbers > 0);
+    const needRule = !(u.rules > 0);
+    if (!needNumber && !needRule) return '';
+    const stepNumber = ['Connect a phone number', 'This is the number your callers dial. Until one is connected nothing can reach MissedCall, so there is no call to answer.', 'phoneNumbers', 'Connect a number'];
+    const stepRule = ['Write your first response rule', 'The rule decides what a missed caller gets: a text back, or a callback queued for you in Follow-ups.', 'rules', 'Add a rule'];
+    // A recorded call proves a number exists even if the count read is stale, so the number step is
+    // only offered while there really is none — never ask a working workspace to connect a second one.
+    const steps = [];
+    if (needNumber && !(Number(st.total_calls) > 0)) steps.push(stepNumber);
+    if (needRule) steps.push(stepRule);
+    if (!steps.length) return '';
+    const state = (needNumber && needRule) ? 'both' : (needRule ? 'rule-missing' : 'number-missing');
+    const headline = state === 'both'
+      ? 'Two steps and your next missed call answers itself.'
+      : (state === 'rule-missing'
+        ? 'Your number is connected, but no response rule exists yet — a missed call on it gets no reply at all. Write the rule below and the next one answers itself.'
+        : 'Your rule is ready, but no number is connected yet — nothing can reach MissedCall until one is. Connect a number and the rule starts answering.');
+    return html`<div class="card" data-first-steps="1" data-first-setup="${state}" style="margin-bottom:16px">
+      <h3 class="font-semibold" style="margin:0 0 2px">${state === 'both' ? 'Get set up' : 'Finish setting up'}</h3>
+      <p class="text-sm text-gray-500" style="margin:0 0 10px">${headline}</p>
       ${steps.map((s, i) => html`<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0${i ? ';border-top:1px solid #e2e8f0' : ''}">
         <div style="flex:0 0 24px;height:24px;border-radius:50%;background:#eef2ff;color:#4338ca;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center">${i + 1}</div>
         <div style="flex:1">
@@ -348,6 +368,7 @@ const Overview = () => {
       </div>`)}
     </div>`;
   };
+
   const totalCalls = st.total_calls;
   // `response_rate` is ALREADY a percentage — the handler computes answered/total*100. The console
   // multiplied it by 100 a second time, so any tenant with a real call history read e.g. "5000%".
