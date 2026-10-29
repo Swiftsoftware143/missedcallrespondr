@@ -10,7 +10,7 @@ use crate::{
     error::AppError,
     models::client::{Client, CreateClientRequest, UpdateClientRequest},
     state::AppState,
-    validation::{check_len, check_opt_len, max},
+    validation::{check_deliverable_email, check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -60,6 +60,11 @@ pub async fn create(
     check_opt_len("email", req.email.as_deref(), max::CLIENTS_EMAIL)?;
     check_opt_len("phone", req.phone.as_deref(), max::CLIENTS_PHONE)?;
     check_opt_len("source", req.source.as_deref(), max::CLIENTS_SOURCE)?;
+    // `clients.email` is a real send target downstream (campaign, export, the WorkflowSwift
+    // hand-off): a stored `not-an-email` is a guaranteed bounce against the sending domain, and the
+    // client is captured but can never be mailed. Empty stays legal (a client captured by phone
+    // alone is complete) and the value is never rewritten. Same guard the leads door carries.
+    check_deliverable_email(req.email.as_deref())?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
     sqlx::query(
@@ -116,6 +121,10 @@ pub async fn update(
             .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Client not found".into()))?;
+    // Only the address the REQUEST carries is judged (fleet reference: the leads edit door,
+    // leads_handler.rs:236). Re-checking the row's stored value would block an unrelated edit on a
+    // client captured before this guard, and the UPDATE keeps that value either way.
+    check_deliverable_email(req.email.as_deref())?;
     let now = chrono::Utc::now();
     sqlx::query(
         "UPDATE clients SET name=$1, email=$2, phone=$3, source=$4, notes=$5, updated_at=$6 WHERE id=$7",
