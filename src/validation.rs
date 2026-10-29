@@ -126,6 +126,26 @@ pub mod max {
     pub const IMPORT_LOGS_STATUS: usize = 32;
 }
 
+/// Refuse an address no mail system could deliver, with the sentence the console shows.
+///
+/// The RULE and the SYNTAX live in one place ([`crate::security::email_addr::check_lead_address`]);
+/// this is only the wording. An absent or blank value is legal everywhere it is used — a contact or
+/// a lead may carry only a name and a phone — and nothing is rewritten on the way in.
+pub fn check_deliverable_email(value: Option<&str>) -> Result<(), AppError> {
+    let Some(raw) = value else {
+        return Ok(());
+    };
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    crate::security::email_addr::check_lead_address(raw).map_err(|reason| {
+        AppError::Unprocessable(format!(
+            "That email address is not valid — {}.",
+            reason.trim_start_matches("email:").trim()
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +196,23 @@ mod tests {
         assert!(check_len("color", "#6366f1", max::TAGS_COLOR).is_ok());
         let msg = refusal("color", "#6366f1a", max::TAGS_COLOR).expect("8 must be refused");
         assert_eq!(msg, "color is too long: 8 characters, the maximum is 7");
+    }
+}
+
+#[cfg(test)]
+mod deliverable_email_tests {
+    use super::check_deliverable_email;
+
+    #[test]
+    fn a_captured_address_must_be_deliverable_but_may_be_absent() {
+        assert!(check_deliverable_email(None).is_ok());
+        assert!(check_deliverable_email(Some("")).is_ok());
+        assert!(check_deliverable_email(Some("  ")).is_ok());
+        // The literals that exposed this class: both were accepted and stored before.
+        assert!(check_deliverable_email(Some("not-an-email")).is_err());
+        assert!(check_deliverable_email(Some("a@b")).is_err());
+        // Real addresses stay legal.
+        assert!(check_deliverable_email(Some("person@example.com")).is_ok());
+        assert!(check_deliverable_email(Some("a+b@example.co.uk")).is_ok());
     }
 }

@@ -10,7 +10,7 @@ use crate::{
     error::AppError,
     models::lead::{CreateLeadRequest, Lead, UpdateLeadRequest},
     state::AppState,
-    validation::{check_len, check_opt_len, max},
+    validation::{check_deliverable_email, check_len, check_opt_len, max},
 };
 
 #[derive(Deserialize)]
@@ -84,6 +84,9 @@ pub async fn create(
     check_opt_len("email", req.email.as_deref(), max::LEADS_EMAIL)?;
     check_opt_len("source", req.source.as_deref(), max::LEADS_SOURCE)?;
     check_opt_len("status", req.status.as_deref(), max::LEADS_STATUS)?;
+    // `leads.email` is a real send target downstream (export, campaign, the WorkflowSwift hand-off):
+    // a stored `not-an-email` is a guaranteed bounce against the sending domain. Empty stays legal.
+    check_deliverable_email(req.email.as_deref())?;
     crate::features::enforce_feature_limit(&state.pool, claims.aid, "max_leads", "Leads").await?;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
@@ -228,6 +231,9 @@ pub async fn update(
             .fetch_optional(&state.pool)
             .await?
             .ok_or_else(|| AppError::NotFound("Lead not found".into()))?;
+    // The value the UPDATE will actually store: the request's own address when it sends one,
+    // otherwise the row's existing one — so an unrelated edit cannot re-save junk either.
+    check_deliverable_email(req.email.as_deref().or(existing.email.as_deref()))?;
     let now = chrono::Utc::now();
     sqlx::query(
         "UPDATE leads SET name=$1, phone=$2, email=$3, source=$4, status=$5, notes=$6, tags=$7, call_id=$8, updated_at=$9 WHERE id=$10",

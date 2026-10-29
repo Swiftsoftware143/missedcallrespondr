@@ -11,7 +11,7 @@ use crate::{
     features,
     models::contact::{Contact, CreateContactRequest, UpdateContactRequest},
     state::AppState,
-    validation::check_len,
+    validation::{check_deliverable_email, check_len},
 };
 
 // ---- contact field limits ------------------------------------------------------------------------
@@ -54,11 +54,10 @@ fn validate_contact(
         let email = email.trim();
         if !email.is_empty() {
             check_len("email", email, MAX_CONTACT_EMAIL)?;
-            if !email.contains('@') || email.contains(char::is_whitespace) {
-                return Err(AppError::Unprocessable(
-                    "That email address is not valid — it needs an @ and no spaces.".into(),
-                ));
-            }
+            // ONE rule for the whole app: the inline "has an @ and no spaces" test let `a@b` through
+            // to a column that is a real send target. The shared check refuses anything that could
+            // not be delivered and keeps the console's sentence.
+            check_deliverable_email(Some(email))?;
         }
     }
     if let Some(company) = company {

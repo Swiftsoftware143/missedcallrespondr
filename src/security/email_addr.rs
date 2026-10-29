@@ -123,6 +123,20 @@ pub fn is_reserved_address(email: &str) -> bool {
     }
 }
 
+/// Validate a LEAD/CONTACT address — a capture, not a login identity.
+///
+/// Empty is legal: a lead or a contact may carry only a name and a phone. A non-empty value must be
+/// something a mail system could address, because these columns are what an export, a campaign, or
+/// the WorkflowSwift hand-off later sends TO. The value is deliberately NOT rewritten here (no
+/// trim/lowercase): the record is what a person typed. ONE rule fleet-wide — the reference
+/// implementation is `FunnelSwift/src/security/email_addr.rs::check_lead_address` (a5bf9fa).
+pub fn check_lead_address(raw: &str) -> Result<(), String> {
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    normalize(raw).map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
