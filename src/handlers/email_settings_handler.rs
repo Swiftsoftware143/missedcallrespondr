@@ -237,6 +237,22 @@ pub async fn test_email_config(
         None => claims.email.clone(),
     };
 
+    // An address no mail system could deliver must never reach the provider from here: the send
+    // would leave this domain as a hard bounce, which is the one thing a "does sending work?"
+    // button must not do. Refused in the SAME shape every other refusal on this route uses
+    // (`success:false` + `detail`), so the panel prints one sentence and sends nothing.
+    if let Err(reason) = crate::security::email_addr::check_lead_address(&to) {
+        return Json(json!({
+            "success": false,
+            "source": "invalid",
+            "detail": format!(
+                "'{}' is not an address that can receive mail — {}.",
+                to,
+                reason.trim_start_matches("email:").trim()
+            )
+        }));
+    }
+
     let subject = "MissedCall Respondr system email test";
     let text = "This is a test of the MissedCall Respondr system email provider.\n\nIf you received it, sending works.\n\n- MissedCall Respondr";
     let result = email_provider::deliver(&cfg, &to, subject, text, None).await;
