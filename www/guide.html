@@ -455,11 +455,14 @@
 
   <h3>What an SMS Needs</h3>
   <p>
-    A text leaves through Telnyx, from the number the caller dialed. Until an administrator has saved
-    the Telnyx <em>API key</em> and <em>messaging profile</em> under
-    <strong>Admin &rarr; Telnyx Config</strong>, no text can go out — a rule still fires and is
-    logged, but the Messages screen stays empty because nothing was attempted. Queued, sent,
-    delivered and failed on the Messages screen are always the provider's own answer.
+    A text leaves through Telnyx, from the number the caller dialed. On a number the platform
+    provides, the message goes out on the platform's own Telnyx account, so there is nothing for you
+    to enter. A Pro or Enterprise account that has connected its own Telnyx key under
+    <a href="#integrations">Integrations</a> sends on that account instead. If this installation has no
+    Telnyx account saved yet, a rule still fires and is logged, but the Messages screen stays empty
+    because nothing was attempted — mail <strong>support@swiftsoftware.net</strong> and our team
+    switches it on. Queued, sent, delivered and failed on the Messages screen are always the
+    provider's own answer.
   </p>
 
   <h3>Managing Rules</h3>
@@ -649,10 +652,10 @@
     <strong>ℹ️ Sending needs a connected number</strong>
     <p>
       The <strong>From</strong> number must be a number this account holds — see the
-      <strong>Phone Numbers</strong> tab in the app. If the platform has no Telnyx credential saved
+      <strong>Phone Numbers</strong> tab in the app. If this installation has no Telnyx account saved
       yet, sending answers
-      <em>"Text delivery is not configured"</em> and nothing is recorded: an operator has to save the
-      Telnyx API key and the messaging profile of a messaging-enabled number first.
+      <em>"Text delivery is not configured"</em> and nothing is recorded — mail
+      <strong>support@swiftsoftware.net</strong> and our team switches it on for you.
     </p>
   </div>
 
