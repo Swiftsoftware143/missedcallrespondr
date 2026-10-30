@@ -91,7 +91,11 @@ const API = (() => {
   let token = sessionStorage.getItem('mc_token');
   let user = JSON.parse(sessionStorage.getItem('mc_user') || 'null');
   const headers = () => ({ 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) });
-  const handle = async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || d.message || 'Request failed'); return d; };
+  // The refusal BODY rides along on the Error (2026-10-29): a checkout refusal answers
+  // machine-readable facts beside its sentence (`request_recorded`, `plan_request.already_open`),
+  // and a caller that only ever sees `e.message` cannot tell "we just filed it" from "you
+  // already had one" — see buy().
+  const handle = async (r) => { const d = await r.json(); if (!r.ok) { const err = new Error(d.error || d.message || 'Request failed'); err.body = d; throw err; } return d; };
   // A 401 on a request that CARRIED a session means the session the server knows about is gone: the
   // token's 7 days are up (`exp: now + 86400 * 7`, src/auth/handlers.rs) or it was revoked. Ending
   // it HERE is the only way this console can get back to a sign-in — measured in real Chromium on
@@ -1836,7 +1840,16 @@ const Billing = () => {
       // 2026-10-18: when the install has no payment provider, the screen files a billing request
       // and the team performs the switch by hand. Same shape here, on this app's own ticket route
       // (POST /api/v1/tickets), so a tenant can still move plan while checkout is closed.
-      st.requestFor = noProvider
+      // THE REFUSAL ALREADY FILED IT (measured live 2026-10-29 on this app: the 503 body of
+      // POST /checkout/create carries request_recorded:true and plan_request.already_open:false, so
+      // the SERVER records the ask in the same press that refuses the checkout). Filing through
+      // /tickets afterwards only made the server answer `already_open` for the row it had just
+      // written, and this screen then told the customer "You already have an open request" on their
+      // FIRST press. Read the server's flag: file only when it did NOT record.
+      const rb = (e && e.body) || {};
+      var recorded = rb.request_recorded === true;
+      var alreadyOpen = !!(rb.plan_request && rb.plan_request.already_open === true);
+      st.requestFor = (noProvider && !recorded)
         ? { key: keyOf(p), slug: (p.slug || ''), name: nameOf(p), price: monthly(p) }
         : null;
       // ONE PRESS FILES IT (cron 2026-10-20). Measured LIVE in Chromium on
@@ -1845,7 +1858,7 @@ const Billing = () => {
       // returned 0 — the customer had to press a second button before anything reached the team.
       // File it on the same press here; the button remains for the failure case (requestPlan's catch
       // arm leaves st.requestFor set and the button enabled, so pressing it retries).
-      var autoFiled = noProvider;
+      var autoFiled = noProvider && !recorded;
       // The customer line stands ALONE on the no-provider arm. It used to have the server's own
       // sentence appended, which is how a buyer came to read "No active none provider configured"
       // (measured live 2026-10-19) — `none` is the placeholder `plans.payment_provider` carries on a
@@ -1872,6 +1885,17 @@ const Billing = () => {
     if (autoFiled) {
       await requestPlan();
       if (st.notice) st.error = null;
+      renderApp();
+    } else if (recorded) {
+      // The checkout refusal already filed it: confirm what actually happened, and keep the dedupe
+      // sentence for the case where the server itself says an open request already existed.
+      st.notice = alreadyOpen
+        ? 'You already have an open request for the ' + nameOf(p) + ' plan \u2014 our team is on it,'
+          + ' and its live status is in the list below.'
+        : 'Request recorded \u2014 nothing was charged. Our team will move this workspace to the '
+          + nameOf(p) + ' plan and confirm here; its live status is in the list below.';
+      st.error = null;
+      loadPlanRequests(st);
       renderApp();
     }
   };
