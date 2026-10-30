@@ -116,9 +116,24 @@ const API = (() => {
   };
 })();
 
-const S = { view: 'dashboard', loading: false, error: null, views: {} };
+const S = { view: 'dashboard', loading: false, error: null, views: {}, loadError: null };
 const _get = API.get, _post = API.post, _put = API.put, _del = API.del;
-API.get = async (p) => _get(p).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
+// A FAILED READ MUST NEVER READ AS AN EMPTY SCREEN (2026-10-29). Every list view loads through
+// API.get, and fifteen of them caught the failure with `console.error(e)` only — so an API 500 (or a
+// 403 the browser never surfaced) left the operator reading "No clients yet." / "No calendar events
+// yet.", which is a statement about their DATA that was really a statement about the REQUEST. The
+// shell now prints the failure above the view until the screen loads again; `session ended` is
+// excluded because the console has already signed out and there is no screen left to explain.
+API.get = async (p) => _get(p)
+  .then(d => { if (S.loadError) { S.loadError = null; } return d; })
+  .catch(e => {
+    if (e.message && e.message.indexOf("Upgrade") >= 0) showUpgradePrompt(e.message);
+    if (e && e.message && e.message !== 'session ended') {
+      S.loadError = e.message;
+      try { renderApp(); } catch (_) { /* first paint: renderApp arrives below */ }
+    }
+    throw e;
+  });
 API.post = async (p, b) => _post(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
 API.put = async (p, b) => _put(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
 API.del = async (p) => _del(p).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
@@ -3489,6 +3504,10 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       </button>
     </div>
     <div class="main flex-1 p-6 overflow-auto">
+      ${S.loadError && html`<div data-load-error="1" style="margin-bottom:12px;padding:10px 14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:10px;font-size:13px;display:flex;gap:10px;align-items:flex-start">
+        <span style="flex:1"><strong>This screen could not load.</strong> The panel was not told what is on it, so any empty list below may be empty because the request failed, not because you have no records. (${S.loadError})</span>
+        <button type="button" style="background:#fff;border:1px solid #fecaca;border-radius:8px;padding:2px 10px;color:#991b1b;cursor:pointer" onClick=${() => { S.loadError = null; renderApp(); }}>Dismiss</button>
+      </div>`}
       <${CurrentView} />
     </div>
   </div>`;
