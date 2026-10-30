@@ -517,7 +517,7 @@ const Portfolio = () => {
           <td class="font-medium">${c.name}</td><td class="text-gray-500">${c.slug || c.domain || '-'}</td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="3" class="text-center text-gray-400 py-8">No portfolio companies yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="3" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No portfolio companies yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -590,7 +590,7 @@ const ResponseRules = () => {
           <td><span class="badge ${r.is_active ? 'badge-green' : 'badge-red'}">${r.is_active ? 'Active' : 'Inactive'}</span></td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { show(r); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8">No response rules yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="6" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No response rules yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -691,7 +691,7 @@ const EmailTemplates = () => {
           <td class="text-gray-500" style="font-size:12px">${when(t.updated_at)}</td>
           <td><button class="btn btn-sm btn-outline" style="margin-right:8px" onClick=${() => show(t)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t)}>Delete</button></td>
         </tr>`)}
-        ${(st.list || []).length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400" style="padding:28px">No templates yet. Every mail falls back to the app's built-in copy.</td></tr>`}
+        ${(st.list || []).length === 0 && html`<tr><td colspan="6" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'}" style="padding:28px">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : "No templates yet. Every mail falls back to the app's built-in copy."}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && hide()}>
@@ -751,7 +751,7 @@ const Templates = () => {
           <td class="font-medium">${t.name || '-'}</td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { show(t); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(t.id)}>Delete</button></td>
         </tr>`)}
-        ${st.list.length === 0 && html`<tr><td colspan="2" class="text-center text-gray-400 py-8">No templates yet.</td></tr>`}
+        ${st.list.length === 0 && html`<tr><td colspan="2" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No templates yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -914,7 +914,7 @@ const Contacts = () => {
           <td class="text-gray-500 text-sm">${utcDate(c.created_at)}</td>
           <td><button class="btn btn-sm btn-outline" data-contacts="contact-fields" onClick=${() => openFields(c)}>Fields</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No contacts yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No contacts yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showFields && html`<div class="modal" onClick=${e => { if (e.target === e.currentTarget) { st.showFields = false; renderApp(); } }}>
@@ -954,7 +954,7 @@ const Leads = () => {
           <td>${renderTags(c.tags)}</td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="7" class="text-center text-gray-400 py-8">No leads yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="7" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No leads yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -1013,7 +1013,7 @@ const Deals = () => {
           <td class="text-gray-500">${d.probability ?? 10}%</td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { move(d, 'won'); }}>✅ Won</button><button class="btn btn-sm btn-outline" onClick=${() => { show(d); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(d.id)}>Delete</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No deals yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No deals yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -1075,7 +1075,7 @@ const Campaigns = () => {
           <td class="text-gray-500 text-sm">auto-${c.name || ''}</td>
           <td><button class="btn btn-sm ${c.status === 'active' ? 'btn-outline' : 'btn-green'}" onClick=${() => toggle(c)}>${c.status === 'active' ? 'Pause' : 'Activate'}</button><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
         </tr>`)}
-        ${st.list.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-8">No campaigns yet.</td></tr>`}
+        ${st.list.length === 0 && html`<tr><td colspan="6" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No campaigns yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -1480,7 +1480,7 @@ const Lists = () => {
         ${st.expanded && html`<tr><td colspan="4" class="bg-gray-50"><div class="p-3"><div class="font-semibold text-sm mb-2">Leads in ${(st.list.find(l=>String(l.id)===String(st.expanded))||{}).name||'list'}</div>
           ${st.expandedLeads.length === 0 ? html`<p class="text-gray-400 text-sm">No leads in this list yet.</p>` : html`<table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Tags</th></tr></thead><tbody>${st.expandedLeads.map(ld => html`<tr><td class="font-medium">${ld.name||'-'}</td><td class="text-gray-500">${ld.phone||'-'}</td><td class="text-gray-500">${ld.email||'-'}</td><td><span class="badge badge-blue">${ld.status||'new'}</span></td><td class="text-gray-500 text-sm">${(ld.tags||[]).join(', ')||'-'}</td></tr>`)}</tbody></table>`}
         </div></td></tr>`}
-        ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No lists yet. Create a campaign to auto-generate its list, or add a standalone list here.</td></tr>`}
+        ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No lists yet.'} Create a campaign to auto-generate its list, or add a standalone list here.</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
@@ -1596,7 +1596,7 @@ const CoreIntegration = () => {
     <div class="card">
       <h3 class="font-semibold mb-2">Campaign → CoreSwift List</h3>
       <p class="text-sm text-gray-500 mb-2">Leads that carry a campaign's linked tag are pushed to that campaign's own list (via CoreSwift contact sync) and appear under the campaign's list view.</p>
-      <table class="table"><thead><tr><th>Campaign</th><th>Linked Tag</th><th>Auto list</th></tr></thead><tbody>${st.campaigns.map(c => html`<tr><td class="font-medium">${c.name||'-'}</td><td class="text-gray-500">${(c.metadata&&c.metadata.coreswift&&c.metadata.coreswift.tag_id)||'-'}</td><td class="text-gray-500">${c.name||'-'}</td></tr>`)}${st.campaigns.length===0&&html`<tr><td colspan="3" class="text-center text-gray-400 py-6">No campaigns yet.</td></tr>`}</tbody></table>
+      <table class="table"><thead><tr><th>Campaign</th><th>Linked Tag</th><th>Auto list</th></tr></thead><tbody>${st.campaigns.map(c => html`<tr><td class="font-medium">${c.name||'-'}</td><td class="text-gray-500">${(c.metadata&&c.metadata.coreswift&&c.metadata.coreswift.tag_id)||'-'}</td><td class="text-gray-500">${c.name||'-'}</td></tr>`)}${st.campaigns.length===0&&html`<tr><td colspan="3" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-6">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No campaigns yet.'}</td></tr>`}</tbody></table>
     </div>`}
   </div>`;
 };
