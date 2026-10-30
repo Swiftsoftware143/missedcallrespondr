@@ -1373,7 +1373,7 @@ const Clients = () => {
           <td class="font-medium">${c.name || '-'}</td><td class="text-gray-500">${c.email || '-'}</td><td class="text-gray-500">${c.phone || '-'}</td><td class="text-gray-500">${c.source || '-'}</td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No clients yet.</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="5" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your clients. The reason is at the top of the screen.' : 'No clients yet.'}</td></tr>`}
       </tbody></table>
     </div>
     ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
