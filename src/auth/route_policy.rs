@@ -29,12 +29,12 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   127 mounted `.route(..)` entries in the one routing file, 127 distinct paths (every path is
+//!   129 mounted `.route(..)` entries in the one routing file, 129 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   111 entries reach `protected_routes`, which carries `auth_middleware`
-//!    16 entries reach the ANONYMOUS `public_routes`:
-//!        13 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   112 entries reach `protected_routes`, which carries `auth_middleware`
+//!    17 entries reach the ANONYMOUS `public_routes`:
+//!        14 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -126,6 +126,16 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // provider picker from it. Returns the platform integration vocabulary (key, name, icon) and is
     // scoped by no account.
     "/api/v1/available-providers",
+    // The ACTIVE price list the marketing site sells from (cron 2026-10-30). A visitor reads the
+    // pricing page before they have any account, so this arm cannot demand a session: it returns
+    // only the tiers the install currently sells (name, slug, description, monthly/yearly price,
+    // features) and nothing about any tenant, user or usage. The tenant catalogue
+    // (`/api/v1/plans`, which carries the same rows plus ids/timestamps) stays on the GATED router.
+    // Why it exists: this app's marketing page carried a hand-written card set that had drifted
+    // from the records the app enforces (it offered Enterprise as "Custom" while the install sells
+    // Enterprise at $199/month). The other five apps read their own live plan records; this is the
+    // same read, mounted where a marketing page can reach it.
+    "/api/v1/public/plans",
     // --- telephony receiver whose own SIGNATURE is the credential ------------------------------
     // Telnyx posts call-control and message-delivery events here with no session. The receiver is
     // the app's inbound telephony door; it is mounted on the anonymous router because Telnyx cannot
@@ -504,12 +514,14 @@ mod tests {
     /// from the code without a test failing.
     #[test]
     fn the_census_shape_is_what_the_docs_say() {
-        assert_eq!(super::PUBLIC_ROUTES.len(), 13, "PUBLIC_ROUTES size");
+        assert_eq!(super::PUBLIC_ROUTES.len(), 14, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
-        // The 16 anonymous mounts the census found: 13 deliberate + 3 key receivers.
+        // The 17 anonymous mounts the census found: 14 deliberate + 3 key receivers.
+        // (`GET /api/v1/public/plans` joined on 2026-10-30 — the marketing site's price list, so
+        // PUBLIC_ROUTES went 13 → 14 and the anonymous total 16 → 17.)
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            16
+            17
         );
         // 128 entries / 128 distinct paths (the email-branding preview BODY read
         // `GET /api/v1/settings/branding/preview-body` joined on 2026-10-28 — a PROTECTED mount
@@ -537,11 +549,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 128, "mounted .route entries");
+        assert_eq!(lits.len(), 129, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 128, "distinct mounted paths");
+        assert_eq!(uniq.len(), 129, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

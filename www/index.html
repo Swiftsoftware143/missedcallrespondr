@@ -208,8 +208,13 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
 <section id="pricing" class="py-20 px-6 bg-[#111827]">
   <div class="max-w-5xl mx-auto text-center">
     <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Simple <span class="gradient-text">Pricing</span></h2>
-    <p class="text-gray-400 mb-16 max-w-xl mx-auto">Start free. Upgrade as your call volume grows. No contracts, cancel anytime.</p>
-    <div class="grid md:grid-cols-3 gap-8">
+    <p class="text-gray-400 mb-4 max-w-xl mx-auto">Start free. Upgrade as your call volume grows. No contracts, cancel anytime.</p>
+    <p class="text-gray-500 text-sm mb-12 max-w-2xl mx-auto">Every plan below is the one this install actually sells — the cards are read from the same plan records the app enforces, so a price or an allowance changed in the operator console shows up here on the next load.</p>
+    <!-- Rendered from GET /api/v1/public/plans. The three cards that follow are the no-JavaScript /
+         failed-fetch fallback, carrying the plans this install was last set up with. A live fetch
+         replaces them in place. -->
+    <p class="text-amber-400 text-sm mb-6" id="plansStale" hidden></p>
+    <div class="grid md:grid-cols-3 gap-8" id="plansGrid">
       <div class="card-hover bg-[#1a1f2e] border border-gray-800 rounded-2xl p-8 text-left">
         <h3 class="text-xl font-semibold text-white mb-2">Free</h3>
         <p class="text-gray-400 text-sm mb-6">For solo businesses just getting started.</p>
@@ -225,7 +230,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       <div class="card-hover bg-[#1a1f2e] border-2 border-blue-500/50 rounded-2xl p-8 text-left relative">
         <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">MOST POPULAR</div>
         <h3 class="text-xl font-semibold text-white mb-2">Pro Monthly</h3>
-        <p class="text-gray-400 text-sm mb-6">For growing teams and agencies.</p>
+        <p class="text-gray-400 text-sm mb-6">Monthly subscription with 5,000 credits + 1,500 bonus credits every month.</p>
         <div class="text-4xl font-extrabold text-white mb-1">$49<span class="text-lg text-gray-400 font-normal">/mo</span></div>
         <p class="text-gray-500 text-sm mb-8">5,000 included credits every month</p>
         <ul class="space-y-3 mb-8">
@@ -239,7 +244,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       <div class="card-hover bg-[#1a1f2e] border border-gray-800 rounded-2xl p-8 text-left">
         <h3 class="text-xl font-semibold text-white mb-2">Enterprise</h3>
         <p class="text-gray-400 text-sm mb-6">For high-volume call centers.</p>
-        <div class="text-4xl font-extrabold text-white mb-1">Custom</div>
+        <div class="text-4xl font-extrabold text-white mb-1">$199<span class="text-lg text-gray-400 font-normal">/mo</span></div>
         <p class="text-gray-500 text-sm mb-8">Unlimited calls &amp; numbers</p>
         <ul class="space-y-3 mb-8">
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Everything in Pro Monthly</li>
@@ -247,11 +252,109 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> White-label option</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Priority support</li>
         </ul>
-        <a href="https://app.missedcallrespondr.com/register/?plan=enterprise" class="block w-full text-center border border-gray-600 text-white rounded-xl py-3 font-medium hover:bg-gray-700/50 transition-colors">Contact Sales</a>
+        <a href="https://app.missedcallrespondr.com/register/?plan=enterprise" class="block w-full text-center border border-gray-600 text-white rounded-xl py-3 font-medium hover:bg-gray-700/50 transition-colors">Get Started</a>
       </div>
     </div>
   </div>
 </section>
+<script>
+/* The price cards above are the fallback. A live read of GET /api/v1/public/plans (public, active
+   plans only — the same records the app enforces) replaces them, so the page can never advertise a
+   price or a plan the install does not sell. Measured 2026-10-30: the hand-written set said
+   "Enterprise — Custom" while the install sells Enterprise at $199/month. */
+(function () {
+  var grid = document.getElementById('plansGrid');
+  var stale = document.getElementById('plansStale');
+  if (!grid) return;
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function money(v) {
+    var n = Number(v || 0);
+    if (!isFinite(n)) n = 0;
+    return '$' + (Math.round(n * 100) / 100).toLocaleString('en-US');
+  }
+  function words(s) { return String(s || '').replace(/_/g, ' '); }
+
+  function card(p, popular, isFree) {
+    var wrap = el('div', popular
+      ? 'card-hover bg-[#1a1f2e] border-2 border-blue-500/50 rounded-2xl p-8 text-left relative'
+      : 'card-hover bg-[#1a1f2e] border border-gray-800 rounded-2xl p-8 text-left');
+    if (popular) wrap.appendChild(el('div', 'absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full', 'MOST POPULAR'));
+    wrap.appendChild(el('h3', 'text-xl font-semibold text-white mb-2', p.name || 'Plan'));
+    if (p.description) wrap.appendChild(el('p', 'text-gray-400 text-sm mb-6', p.description));
+
+    var price = el('div', 'text-4xl font-extrabold text-white mb-1');
+    var monthly = Number(p.price_monthly || 0);
+    if (!monthly) {
+      price.textContent = 'Free';
+    } else {
+      price.textContent = money(monthly);
+      price.appendChild(el('span', 'text-lg text-gray-400 font-normal', '/mo'));
+    }
+    wrap.appendChild(price);
+    if (Number(p.price_yearly || 0) > 0) {
+      wrap.appendChild(el('p', 'text-gray-500 text-sm mb-2', 'or ' + money(p.price_yearly) + ' billed yearly'));
+    }
+
+    var f = p.features;
+    var allowance = null;
+    var bullets = [];
+    if (f && !Array.isArray(f) && typeof f === 'object') {
+      if (Number(f.included_credits || 0) > 0) {
+        allowance = Number(f.included_credits).toLocaleString('en-US') + ' included credits';
+        if (Number(f.bonus_credits || 0) > 0) allowance += ' + ' + Number(f.bonus_credits).toLocaleString('en-US') + ' bonus';
+      }
+      if (Number(f.max_phone_numbers || 0) > 0) bullets.push(Number(f.max_phone_numbers) + (Number(f.max_phone_numbers) === 1 ? ' phone number' : ' phone numbers'));
+    } else if (Array.isArray(f)) {
+      allowance = 'Unlimited calls & numbers';
+      for (var i = 0; i < f.length; i++) bullets.push(words(f[i]).charAt(0).toUpperCase() + words(f[i]).slice(1));
+    }
+    if (allowance) wrap.appendChild(el('p', 'text-gray-500 text-sm mb-8', allowance));
+
+    var ul = el('ul', 'space-y-3 mb-8');
+    for (var j = 0; j < bullets.length; j++) {
+      var li = el('li', 'flex items-start gap-2 text-sm text-gray-300');
+      li.appendChild(el('span', 'text-green-400 mt-0.5', '\u2713'));
+      li.appendChild(document.createTextNode(' ' + bullets[j]));
+      ul.appendChild(li);
+    }
+    wrap.appendChild(ul);
+
+    var a = el('a', isFree
+      ? 'block w-full text-center border border-gray-600 text-white rounded-xl py-3 font-medium hover:bg-gray-700/50 transition-colors'
+      : 'block w-full text-center cta-gradient text-white rounded-xl py-3 font-semibold hover:opacity-90 transition-opacity',
+      isFree ? 'Get Started Free' : 'Get Started');
+    a.href = 'https://app.missedcallrespondr.com/register/' + (p.slug ? ('?plan=' + encodeURIComponent(p.slug)) : '');
+    wrap.appendChild(a);
+    return wrap;
+  }
+
+  fetch('/api/v1/public/plans', { headers: { 'Accept': 'application/json' } })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (d) {
+      var plans = (d && Array.isArray(d.plans)) ? d.plans : [];
+      if (!plans.length) throw new Error('no plans returned');
+      plans.sort(function (a, b) { return Number(a.price_monthly || 0) - Number(b.price_monthly || 0); });
+      var paid = plans.filter(function (p) { return Number(p.price_monthly || 0) > 0; });
+      var popularId = paid.length ? paid[0].slug : null;   // cheapest paid tier, as the fallback does
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < plans.length; i++) {
+        frag.appendChild(card(plans[i], plans[i].slug === popularId, Number(plans[i].price_monthly || 0) === 0));
+      }
+      grid.innerHTML = '';
+      grid.appendChild(frag);
+    })
+    .catch(function (e) {
+      stale.hidden = false;
+      stale.textContent = 'The live plan list could not be read just now (' + e.message + '), so this page shows the plans the install was last set up with. Reload to try again.';
+    });
+})();
+</script>
 
 <!-- CTA -->
 <section class="py-24 px-6 hero-gradient grid-pattern">

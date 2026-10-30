@@ -66,6 +66,20 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/branding/logo/:tenant_id",
             get(crate::handlers::branding_handler::get_logo),
         )
+        // The PRICE LIST the marketing site sells from (cron 2026-10-30). The other five apps'
+        // pricing pages read their own install's active plans; this app's marketing page carried a
+        // HAND-WRITTEN card set instead, and it had drifted from the records the app enforces —
+        // measured live: the page said "Enterprise — Custom" while the install sells Enterprise at
+        // $199/month, so a visitor was told to contact sales about a plan with a published price.
+        // The tenant catalogue (`/api/v1/plans`) stays on the gated router; this is a SEPARATE,
+        // read-only arm that serves only ACTIVE plans and only the fields a buyer needs (name, slug,
+        // description, monthly/yearly price, features). Named in
+        // `crate::auth::route_policy::PUBLIC_ROUTES` — a marketing page is read before any session
+        // exists, exactly like `/api/v1/available-providers` above.
+        .route(
+            "/api/v1/public/plans",
+            get(crate::handlers::plans_handler::list_active_plans),
+        )
         .route(
             "/api/v1/internal/portfolio-companies",
             post(portfolio_handler::internal_create_portfolio_company),
