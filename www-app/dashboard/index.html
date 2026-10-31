@@ -2052,8 +2052,10 @@ const Team = () => {
     st.busy = true; renderApp();
     try {
       const d = await API.post('/team/invite', { name: name || null, email: email });
-      st.notice = d.detail || 'Their login has been created.';
-      if (d.credentials_emailed === false && d.detail) st.notice = d.detail;
+      // The server says whether the password mail actually LEFT. A created login whose mail failed
+      // (or a reserved test address the sender withholds) must not be painted as a success.
+      const mailed = d.credentials_emailed !== false;
+      st.notice = { ok: mailed, text: d.detail || (mailed ? 'Their login has been created.' : 'Their login was created, but the password email did not leave.') };
       form.name = ''; form.email = '';
     } catch (e) { st.error = 'Could not add them: ' + e.message; }
     st.busy = false; load();
@@ -2078,7 +2080,7 @@ const Team = () => {
     <h2 class="text-xl font-bold mb-1">Your team</h2>
     <p class="text-sm text-gray-500 mb-4">Everyone with their own login to this workspace. ${seats()}.</p>
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
-    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    ${st.notice && html`<div class="card" id="team-notice" style=${'border-left:4px solid ' + (st.notice.ok ? '#059669' : '#d97706')}><p class="text-sm" style=${st.notice.ok ? '' : 'color:#b45309'}>${st.notice.text}</p></div>`}
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Name</th><th>Email</th><th>Access</th><th>Added</th><th></th></tr></thead>
         <tbody>

@@ -181,30 +181,50 @@ pub async fn invite_teammate(
 
     // The credentials mail — awaited, like the tag door: it is the ONLY delivery of this password, so
     // its failure has to be reported to the inviter instead of looking like a successful invite.
-    let vars = json!({ "name": name, "email": email, "password": password });
-    let credentials_emailed = match crate::email::send_template_email(
-        &state.pool,
-        claims.aid,
-        &email,
-        "welcome_credentials",
-        &vars,
-    )
-    .await
-    {
-        Ok(()) => true,
-        Err(e) => {
-            tracing::error!(
-                "teammate {} ({}) was created in tenant {} but the CREDENTIALS EMAIL FAILED: {}",
-                user_id,
-                email,
-                claims.aid,
-                e
-            );
-            false
+    //
+    // A RESERVED / HARNESS address is WITHHELD at the sender, which answers Ok without queueing
+    // anything — so a plain `Ok(())` test reported "their password is on its way" for a message that
+    // never existed (measured live 2026-10-31 on the first proof run: an invite to a
+    // `@example.invalid` probe address answered credentials_emailed:true). Same rule the branding
+    // preview already follows: name WHICH reason instead of claiming a send.
+    let reserved_domain = crate::security::probe_addr::harness_domain(&email);
+    let credentials_emailed = if reserved_domain.is_some() {
+        false
+    } else {
+        let vars = json!({ "name": name, "email": email, "password": password });
+        match crate::email::send_template_email(
+            &state.pool,
+            claims.aid,
+            &email,
+            "welcome_credentials",
+            &vars,
+        )
+        .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::error!(
+                    "teammate {} ({}) was created in tenant {} but the CREDENTIALS EMAIL FAILED: {}",
+                    user_id,
+                    email,
+                    claims.aid,
+                    e
+                );
+                false
+            }
         }
     };
 
     let (used, limit) = seats(&state, claims.aid).await;
+    let detail = if credentials_emailed {
+        "Their login has been created and their password is on its way to that address.".to_string()
+    } else if let Some(domain) = reserved_domain {
+        format!(
+            "Their login was created, but '{domain}' is a reserved test address, so no password email could be sent to it."
+        )
+    } else {
+        "Their login was created, but the email carrying the password did not leave. Use Send reset on the operator console, or ask them to use Forgot password once mail delivery is restored.".to_string()
+    };
     Ok(Json(json!({
         "member": {
             "id": user_id,
@@ -217,11 +237,7 @@ pub async fn invite_teammate(
         },
         "credentials_emailed": credentials_emailed,
         "seats": { "used": used, "limit": limit },
-        "detail": if credentials_emailed {
-            "Their login has been created and their password is on its way to that address.".to_string()
-        } else {
-            "Their login was created, but the email carrying the password did not leave. Use Send reset on the operator console, or ask them to use Forgot password once mail delivery is restored.".to_string()
-        },
+        "detail": detail,
     })))
 }
 
