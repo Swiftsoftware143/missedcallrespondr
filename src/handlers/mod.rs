@@ -33,6 +33,7 @@ pub mod response_rule_eval;
 pub mod response_rule_handler;
 pub mod tag_groups_handler;
 pub mod tags_handler;
+pub mod team_handler;
 pub mod telnyx_handler;
 pub mod tickets_handler;
 pub mod triggers_handler;

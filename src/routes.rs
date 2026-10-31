@@ -227,6 +227,24 @@ pub fn create_router(state: AppState) -> Router {
             post(crate::handlers::branding_handler::upload_logo)
                 .delete(crate::handlers::branding_handler::delete_logo),
         )
+        .route(
+            "/api/v1/team/members",
+            get(crate::handlers::team_handler::list_members),
+        )
+        // The customer's OWN door for a second person (2026-10-31). Until this pair the only door
+        // that wrote a second `users` row was the cross-app `portfolio_sync` one, which also mints a
+        // tenant — so a workspace could never grow, and the `max_users` allowance the usage payload
+        // counts against could never be spent. Authority (owner / company admin), the plan's seat
+        // gate and the role vocabulary all live in the handler, before any row is written. NOT in
+        // `auth::route_policy::PUBLIC_ROUTES`: an anonymous caller answers 401 at the boundary.
+        .route(
+            "/api/v1/team/invite",
+            post(crate::handlers::team_handler::invite_teammate),
+        )
+        .route(
+            "/api/v1/team/members/:id",
+            delete(crate::handlers::team_handler::remove_member),
+        )
         // The caller's own in-inbox branding PREVIEW (cron 2026-10-24, parity with FunnelSwift,
         // IncentiveSwift and ADASwift): mails a sample of the branded transactional mail to the
         // caller's OWN address. The request has no body and no recipient field, so it cannot be

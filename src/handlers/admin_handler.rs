@@ -527,6 +527,7 @@ fn refusal_message(e: &AppError) -> String {
     match e {
         AppError::BadRequest(m)
         | AppError::Unauthorized(m)
+        | AppError::Forbidden(m)
         | AppError::NotFound(m)
         | AppError::Internal(m)
         | AppError::Conflict(m)

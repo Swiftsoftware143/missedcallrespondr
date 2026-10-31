@@ -58,6 +58,9 @@ window.appGuidePages = {
   contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list. Export CSV saves the whole list to a spreadsheet.", actions: ["Search your contacts", "Open a contact's history", "Export the list as a CSV"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
+  // YOUR TEAM (2026-10-31): the screen that gives a colleague their own login. Listed here because
+  // every other console screen carries an entry and the widget's "?" would otherwise vanish on it.
+  team:         { title: "Your team", desc: "Everyone with their own login to this workspace — who they are, what access they have, and how many seats your plan allows. Adding someone emails them their first password; they never share yours.", actions: ["Press Add them to give a colleague their own login", "Press Remove to end someone's access"] },
   billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Pressing a plan opens the payment provider's own secure checkout when self-serve checkout is open on that plan; while it is not open, the same press sends your request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] },
   // EMAIL BRANDING HAD NO ENTRY (cron 2026-10-26): every other screen on this console carries one,
   // so the guide's "?" simply disappeared on this tab — measured live in Chromium by opening all
@@ -2017,6 +2020,92 @@ const Billing = () => {
   </div>`;
 };
 
+// ===== YOUR TEAM (2026-10-31) =====
+// Before this screen a workspace had exactly ONE login: the account owner signup minted. A second
+// person — a receptionist, a partner, an office manager — could not be given access at all, and the
+// only other writer of a `users` row was the cross-app portfolio sync, which also mints a tenant.
+// The screen lists the people in THIS workspace (the server takes the tenant from the session, never
+// from the page), lets the owner / a company admin add one, and lets them revoke an access that
+// should end. Every sentence under the form is the SERVER's answer (whether the credentials mail
+// actually left), never invented here.
+const Team = () => {
+  const st = viewState('team', {
+    loaded: false, busy: false, members: [], seats: { used: 0, limit: null },
+    can_manage: false, error: null, notice: null
+  });
+  const form = viewState('team_form', { name: '', email: '' });
+  const load = async () => {
+    try {
+      const d = await API.get('/team/members');
+      st.members = Array.isArray(d.members) ? d.members : [];
+      st.seats = d.seats || { used: st.members.length, limit: null };
+      st.can_manage = !!d.can_manage;
+    } catch (e) { st.error = 'Could not load your team: ' + e.message; }
+    renderApp();
+  };
+  if (!st.loaded) { st.loaded = true; load(); }
+  const invite = async () => {
+    const email = (form.email || '').trim();
+    const name = (form.name || '').trim();
+    st.error = null; st.notice = null;
+    if (!email) { st.error = 'Enter the email address of the person you are adding.'; renderApp(); return; }
+    st.busy = true; renderApp();
+    try {
+      const d = await API.post('/team/invite', { name: name || null, email: email });
+      st.notice = d.detail || 'Their login has been created.';
+      if (d.credentials_emailed === false && d.detail) st.notice = d.detail;
+      form.name = ''; form.email = '';
+    } catch (e) { st.error = 'Could not add them: ' + e.message; }
+    st.busy = false; load();
+  };
+  const remove = async (m) => {
+    if (!confirm('Remove ' + (m.email || 'this person') + '? Their login stops working immediately.')) return;
+    st.busy = true; st.error = null; st.notice = null; renderApp();
+    try {
+      await API.del('/team/members/' + m.id);
+      st.notice = (m.email || 'Their login') + ' no longer has access.';
+    } catch (e) { st.error = 'Could not remove them: ' + e.message; }
+    st.busy = false; load();
+  };
+  const roleWord = (r) => ({ account_owner: 'Owner', company_admin: 'Admin', business_user: 'Member' }[r] || String(r || 'Member').replace(/_/g, ' '));
+  const seats = () => {
+    const used = st.seats.used == null ? st.members.length : st.seats.used;
+    const people = used === 1 ? '1 person' : used + ' people';
+    if (st.seats.limit == null || st.seats.limit < 0) return people + ' in this workspace';
+    return people + ' of ' + st.seats.limit + ' seats on your plan';
+  };
+  return html`<div>
+    <h2 class="text-xl font-bold mb-1">Your team</h2>
+    <p class="text-sm text-gray-500 mb-4">Everyone with their own login to this workspace. ${seats()}.</p>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Name</th><th>Email</th><th>Access</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+          ${st.members.map(m => html`<tr>
+            <td class="font-medium">${m.name || '-'}${m.is_you ? html`<span class="text-xs text-gray-400"> (you)</span>` : ''}</td>
+            <td class="text-gray-600">${m.email}</td>
+            <td><span class="badge ${m.is_owner ? 'badge-blue' : 'badge-green'}">${roleWord(m.role)}</span></td>
+            <td class="text-gray-500">${utcDate(m.created_at)}</td>
+            <td>${st.can_manage && !m.is_owner && !m.is_you
+              ? html`<button class="btn btn-sm btn-red" disabled=${st.busy === true} onClick=${() => remove(m)}>Remove</button>`
+              : ''}</td>
+          </tr>`)}
+          ${st.members.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No people yet.</td></tr>`}
+        </tbody></table>
+    </div>
+    ${st.can_manage ? html`<div class="card mt-4">
+      <h3 class="text-base font-bold mb-1">Add someone to your workspace</h3>
+      <p class="text-sm text-gray-500 mb-3">They get their own login and an email with the first password — nobody shares yours. They see the same calls, contacts and settings you do.</p>
+      <div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">Their name</label><input class="input" id="team-name" value=${form.name} onInput=${e => { form.name = e.target.value; }} placeholder="Sam Rivera" /></div>
+        <div><label class="text-sm font-medium block mb-1">Their email address</label><input class="input" id="team-email" type="email" value=${form.email} onInput=${e => { form.email = e.target.value; }} placeholder="sam@yourcompany.com" /></div>
+        <div class="flex gap-2 justify-end"><button class="btn" id="team-invite" disabled=${st.busy === true} onClick=${invite}>Add them</button></div>
+      </div>
+    </div>` : html`<div class="card mt-4"><p class="text-sm text-gray-600">Only the workspace owner or a company admin can add or remove someone. Ask them if you need access for a colleague.</p></div>`}
+  </div>`;
+};
+
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
@@ -2041,11 +2130,12 @@ const App = () => {
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
+    { id: 'team', label: 'Your team', icon: '🤝' },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, branding: Branding, billing: Billing, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
