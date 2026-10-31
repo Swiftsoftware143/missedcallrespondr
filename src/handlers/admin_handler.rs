@@ -281,6 +281,25 @@ pub async fn stop_impersonation() -> Result<Json<Value>, AppError> {
     })))
 }
 
+/// Is this workspace OWNER's address fleet machinery rather than a customer?
+///
+/// The two arms are the fleet's own definitions, not a guess at intent:
+///  * `security::probe_addr::attribution_domain` — the harness domains the mail layer suppresses
+///    (`swiftsoftware.dev/.net/.local`, `example.*`, `.invalid`, `.test`) plus the fleet's
+///    disposable inbox (`maxxspace.com`). A workspace minted on one is a probe BY CONSTRUCTION.
+///  * `security::email_addr::is_reserved_address` — the RFC 2606/6761 class that can never receive
+///    mail, so it cannot be a customer's login.
+///
+/// An ordinary address on a routable domain answers `false`, so a real customer row is untouched.
+fn owner_is_fleet_machinery(email: &str) -> bool {
+    let addr = email.trim();
+    if addr.is_empty() {
+        return false;
+    }
+    crate::security::probe_addr::attribution_domain(addr).is_some()
+        || crate::security::email_addr::is_reserved_address(addr)
+}
+
 /// List all tenants (for super admin)
 pub async fn list_all_tenants(
     State(state): State<AppState>,
@@ -311,6 +330,12 @@ pub async fn list_all_tenants(
     // was — a leftover probe workspace read exactly like a customer. The identity lives in `users`:
     // the workspace's own owner-ish role first (`register` mints `account_owner`), else the earliest
     // member. NULL only when the workspace has no user row at all (e.g. a portfolio-sync row).
+    // Did the operator ask for the probe workspaces too (`?include_probe=1`)? Hoisted out of the
+    // bind so the same answer decides BOTH the SQL marker arm and the address arm below.
+    let include_probe = params
+        .get("include_probe")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let rows = sqlx::query(
         r#"SELECT 
             t.id, t.name, t.slug, t.created_at, COALESCE(t.probe_harness, '') AS probe_harness,
@@ -346,9 +371,37 @@ pub async fn list_all_tenants(
            OR t.probe_harness ~* '^CNRY'
         ORDER BY t.created_at DESC"#,
     )
-    .bind(params.get("include_probe").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false))
+    .bind(include_probe)
     .fetch_all(&state.pool)
     .await?;
+
+    // A HARNESS THAT NEVER SENT THE HEADER IS STILL NOT A CUSTOMER (measured live 2026-10-31).
+    // `tenants.probe_harness` is stamped ONLY from the `X-Swift-Harness` request header (or the
+    // signup door's server-derived domain arm, which post-dates these rows), so an address-only
+    // probe row had NO marker: this install's operator list served "Tenancy Canary A/B"
+    // (`probe-canary-a/b@swiftsoftware.dev`) as customers — 6 rows, 2 of them machinery — while
+    // the served console already badged them "a reserved or fleet-probe address - a probe, not a
+    // customer" and its own comment says the server holds probe rows back. The two surfaces
+    // disagreed about the same row.
+    //
+    // The OWNER ADDRESS is the second signal every workspace has: an address on a reserved /
+    // fleet-harness domain (see `owner_is_fleet_machinery`) cannot receive mail and cannot belong
+    // to a customer. Such a row is now held back exactly like a tagged harness row and published
+    // with `reserved_owner: true` when `?include_probe=1` asks for it. Fleet canaries keep the
+    // `^CNRY` exemption in SQL, and a workspace with no user row at all (a portfolio-sync row) is
+    // left alone: there is no address to judge it by.
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|r| {
+            include_probe
+                || !r
+                    .try_get::<Option<String>, _>("owner_email")
+                    .ok()
+                    .flatten()
+                    .map(|e| owner_is_fleet_machinery(&e))
+                    .unwrap_or(false)
+        })
+        .collect();
 
     let tenants: Vec<Value> = rows.iter().map(|r| {
         json!({
@@ -379,6 +432,15 @@ pub async fn list_all_tenants(
             // address, so a harness workspace whose user row is gone (owner_email NULL) read
             // exactly like a broken customer workspace. NULL for every real customer signup.
             "probe_harness": r.try_get::<Option<String>,_>("probe_harness").ok().flatten(),
+            // true => the owner's address is on a reserved / fleet-harness domain, so this
+            // workspace is fleet machinery rather than a customer. Only reachable with
+            // `?include_probe=1`, mirroring FunnelSwift's `reserved_owner`.
+            "reserved_owner": r
+                .try_get::<Option<String>, _>("owner_email")
+                .ok()
+                .flatten()
+                .map(|e| owner_is_fleet_machinery(&e))
+                .unwrap_or(false),
             "credit_balance": r.try_get::<Option<i32>,_>("credit_balance").ok().flatten().unwrap_or(0),
             "included_credits": r.try_get::<Option<String>,_>("included_credits").ok().flatten()
         })
