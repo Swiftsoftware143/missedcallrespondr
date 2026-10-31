@@ -523,6 +523,13 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             17
         );
+        // 134 entries / 134 distinct paths (the customer's OWN team door joined on 2026-10-31 —
+        // `GET /api/v1/team/members`, `POST /api/v1/team/invite` and
+        // `DELETE /api/v1/team/members/:id`, three PROTECTED mounts, so both anonymous lists are
+        // untouched and protected went 113 → 116). NOTE: the count this test asserted was ALREADY
+        // one short before this card (130 asserted, 131 mounted — measured 2026-10-31: the per-row
+        // "Send reset" work added a protected mount without touching this number), so this bump is
+        // 131 → 134, not 130 → 133. Before them,
         // 130 entries / 130 distinct paths (the contacts CSV export
         // `GET /api/v1/contacts/export` joined on 2026-10-31 — a PROTECTED mount beside the
         // contacts roster, so both anonymous lists are untouched and protected went
@@ -553,11 +560,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 130, "mounted .route entries");
+        assert_eq!(lits.len(), 134, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 130, "distinct mounted paths");
+        assert_eq!(uniq.len(), 134, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

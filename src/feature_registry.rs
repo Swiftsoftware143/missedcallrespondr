@@ -12,11 +12,16 @@
 //! `max_tags` (the `plans.max_tags` column — free 10 / pro 50 / pro-monthly 50 / enterprise -1) and
 //! `max_phone_numbers` (`plans.features` — free 1 / pro-monthly 5) are now GATED, each on the one
 //! route that ADDS the counted row (`POST /api/v1/tags`, `POST /api/v1/telnyx/numbers`).
-//! `max_users` was RETIRED from the plan data instead: this app has no surface that adds a user to
-//! an existing tenant — all three `INSERT INTO users` sites create a tenant's FIRST user, before any
-//! plan is attached — so a cap of 1/5 advertised a seat control the product does not have. An
-//! allowance nothing can reach is a setting, not a control; the raw JSON values were removed by
-//! `000022_retire_max_users_plan_value.sql` rather than left advertised.
+//! `max_users` was RETIRED from the plan data on 2026-10-16 because this app had no surface that adds
+//! a user to an existing tenant — all three `INSERT INTO users` sites created a tenant's FIRST user,
+//! before any plan was attached — so a cap of 1/5 advertised a seat control the product did not have.
+//! **REINSTATED 2026-10-31 with the surface that can reach it**: `POST /api/v1/team/invite` is the
+//! customer's own door for a second person in their workspace, and it calls
+//! `enforce_feature_limit("max_users")` before the insert. The key is therefore back in `REGISTRY`
+//! (storage `feature_limits`, i.e. the panel-managed grant, because the retired values were removed
+//! from `plans.features` by `000022_retire_max_users_plan_value.sql`). A plan that declares no
+//! `max_users` grant still allows unlimited teammates — the absence rule for a limit — and the
+//! console prints a seat count only when a number resolves.
 //!
 //! Two vocabularies are deliberate and shared by the gate, the panel and this file:
 //!
@@ -88,6 +93,15 @@ pub const REGISTRY: &[FeatureDef] = &[
         unit: Some("leads"),
         storage: Storage::Column("max_leads"),
         enforced_by: "POST /api/v1/leads (leads_handler::create)",
+        read_by_gate: true,
+    },
+    FeatureDef {
+        key: "max_users",
+        label: "Team members",
+        kind: FeatureKind::Limit,
+        unit: Some("users"),
+        storage: Storage::FeatureLimits,
+        enforced_by: "POST /api/v1/team/invite (handlers::team_handler::invite_teammate)",
         read_by_gate: true,
     },
     FeatureDef {
