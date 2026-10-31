@@ -377,3 +377,104 @@ pub async fn email_log(State(state): State<AppState>) -> Json<Value> {
         .collect();
     Json(json!({ "sends": sends, "withheld_7d": withheld }))
 }
+
+/// `POST /api/v1/admin/email-log/send-reset` — the operator's "this customer never got in" action.
+///
+/// The history above answers *what left the box*; it gave the operator nothing to DO when a customer
+/// says the credentials mail never arrived. Telling that customer to use "forgot password" cannot
+/// work — a customer who receives no mail from this app cannot complete that flow either. This issues
+/// a fresh reset link for the account behind the address the operator clicked and sends the app's own
+/// `password_reset` template through the same sender the public flow uses, so branding, templates and
+/// the reserved-address withhold all behave identically.
+///
+/// Parity with the arms FunnelSwift, ADASwift and IncentiveSwift shipped on 2026-10-31.
+/// Body: `{"email": "<address>"}`. Every arm that is not a server fault answers 200 with a plain
+/// sentence; `sent` is true only when the provider hand-off actually happened.
+#[derive(Debug, Deserialize)]
+pub struct SendResetForLogRequest {
+    pub email: String,
+}
+
+pub async fn send_reset_for_log(
+    State(state): State<AppState>,
+    Json(req): Json<SendResetForLogRequest>,
+) -> Result<Json<Value>, AppError> {
+    let wanted = req.email.trim().to_lowercase();
+    if wanted.is_empty() {
+        return Err(AppError::Unprocessable(
+            "An email address is required.".to_string(),
+        ));
+    }
+
+    // The USER the address belongs to, read by the same key the public forgot-password arm uses.
+    let found = sqlx::query(
+        "SELECT id, tenant_id, email, coalesce(name, '') AS name FROM users WHERE lower(email) = $1",
+    )
+    .bind(&wanted)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(row) = found else {
+        return Ok(Json(json!({
+            "sent": false,
+            "reason": "no_account",
+            "message": "No account uses that address, so there is nobody to send sign-in help to.",
+        })));
+    };
+    let user_id: uuid::Uuid = row.get("id");
+    let tenant_id: uuid::Uuid = row.get("tenant_id");
+    let to: String = row.get("email");
+    let name: String = row.get("name");
+
+    // The SAME lifetime the public flow issues (24 h on this app), so an operator-issued link and a
+    // self-service one are interchangeable, and the earlier link is retired so only one is live.
+    let token = uuid::Uuid::new_v4().to_string();
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
+    sqlx::query("UPDATE password_resets SET used = true WHERE user_id = $1 AND used = false")
+        .bind(user_id)
+        .execute(&state.pool)
+        .await
+        .ok();
+    sqlx::query("INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)")
+        .bind(user_id)
+        .bind(&token)
+        .bind(expires_at)
+        .execute(&state.pool)
+        .await?;
+
+    // Read BEFORE the attempt: `send_email_request` reports a deliberately-withheld message as a
+    // non-send, and the panel must not tell the operator "on its way" for mail that never left.
+    let undeliverable = crate::security::probe_addr::harness_domain(&to).is_some();
+    let vars = json!({
+        "name": if name.trim().is_empty() { "there" } else { name.trim() },
+        "token": token,
+        "app_url": "https://app.missedcallrespondr.com",
+    });
+    let attempt =
+        crate::email::send_template_email(&state.pool, tenant_id, &to, "password_reset", &vars)
+            .await;
+
+    if undeliverable {
+        return Ok(Json(json!({
+            "sent": false,
+            "withheld": true,
+            "reason": "reserved_address",
+            "message": format!(
+                "{to} is a reserved test address that can never receive mail, so nothing was sent. A fresh reset link was still issued for it."
+            ),
+        })));
+    }
+    match attempt {
+        Ok(()) => Ok(Json(json!({
+            "sent": true,
+            "message": format!("A fresh reset link is on its way to {to}."),
+        }))),
+        Err(e) => Ok(Json(json!({
+            "sent": false,
+            "reason": "send_failed",
+            "message": format!(
+                "The provider refused the message: {}",
+                e.chars().take(200).collect::<String>()
+            ),
+        }))),
+    }
+}

@@ -760,6 +760,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/email-log",
             get(crate::handlers::email_settings_handler::email_log),
         )
+        // The ACTION beside that history (cron 2026-10-31): the log tells the operator a customer's
+        // credentials mail was refused, and until this route there was nothing to do about it from
+        // the panel. A customer who receives no mail from us cannot complete "forgot password"
+        // either, so this issues a fresh reset link for the address and sends the app's own
+        // password_reset template through the same sender the public flow uses.
+        .route(
+            "/api/v1/admin/email-log/send-reset",
+            post(crate::handlers::email_settings_handler::send_reset_for_log),
+        )
         // Admin: the tag → free-account switch and entry-plan picker (kanban t_1d08bd9a, design
         // §3.3). On the PROTECTED router under `/api/v1/admin/*`, which `auth_middleware` closes to
         // platform admins only (403 for a tenant token — `middleware::admin_surface_denied`), so the

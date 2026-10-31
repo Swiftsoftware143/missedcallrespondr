@@ -2551,7 +2551,7 @@ const TenantsScreen = () => {
 // actually left, and a "Send test email" press recorded nothing at all. A backend route with no UI is
 // a defect: this is the screen.
 const EmailProviderScreen = () => {
-  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, sends: [], to: '', busy: false, msg: null });
+  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, sends: [], to: '', busy: false, msg: null, reset: null, resetBusy: '' });
   const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   const load = async () => {
     try {
@@ -2580,6 +2580,20 @@ const EmailProviderScreen = () => {
     renderApp();
   };
   if (!st._loaded && isAdmin) { st._loaded = true; load(); }
+  // The operator's remedy for "the credentials mail never arrived" (cron 2026-10-31). Parity with
+  // FunnelSwift, ADASwift and IncentiveSwift: a customer who receives no mail from this app cannot
+  // use "forgot password" either, so the panel has to be able to issue the reset itself. The server
+  // answers with its own sentence in every arm, and that sentence is what the operator sees.
+  const sendReset = async (email) => {
+    if (!email) return;
+    st.resetBusy = email; st.reset = null; renderApp();
+    try {
+      st.reset = { email, ...(await API.post('/admin/email-log/send-reset', { email })) };
+    } catch (e) {
+      st.reset = { email, sent: false, message: (e && e.message) || 'The request failed.' };
+    }
+    st.resetBusy = ''; renderApp();
+  };
   const save = async () => {
     st.busy = true; st.msg = null; renderApp();
     try {
@@ -2658,7 +2672,7 @@ const EmailProviderScreen = () => {
       </div>
       <p class="text-xs text-gray-400 mb-2">The last 50 real sends, newest first. The line above answers "what happened to the most recent one"; this list keeps the ones before it, so a credentials mail the provider refused at signup is still visible after a later send succeeds. Reserved test addresses (the fleet probes) are not listed here — ${st.withheld7d || 0} withheld in the last 7 days, and none of them were attempts. <b>failed</b> means the provider refused it, <b>sent</b> means the provider accepted it.</p>
       ${(st.sends && st.sends.length) ? html`<div class="overflow-x-auto"><table class="w-full text-sm" id="email-send-history-table">
-        <thead><tr class="text-left text-xs text-gray-500"><th class="py-1 pr-3">When</th><th class="py-1 pr-3">To</th><th class="py-1 pr-3">What</th><th class="py-1 pr-3">Result</th><th class="py-1">Detail</th></tr></thead>
+        <thead><tr class="text-left text-xs text-gray-500"><th class="py-1 pr-3">When</th><th class="py-1 pr-3">To</th><th class="py-1 pr-3">What</th><th class="py-1 pr-3">Result</th><th class="py-1 pr-3">Detail</th><th class="py-1">Sign-in help</th></tr></thead>
         <tbody>${st.sends.map(s => {
           const lbl = s.status === 'sent' ? '\u2705 sent' : (s.status === 'withheld' ? '\u26d4 withheld' : '\u274c failed');
           const cls = s.status === 'sent' ? 'text-green-700' : 'text-red-600';
@@ -2668,9 +2682,11 @@ const EmailProviderScreen = () => {
             <td class="py-1 pr-3 text-xs">${s.template || '-'}</td>
             <td class="py-1 pr-3 text-xs ${cls} whitespace-nowrap">${lbl}</td>
             <td class="py-1 text-xs text-gray-500">${(s.detail || '').slice(0, 160)}</td>
+            <td class="py-1"><button class="btn btn-outline btn-sm" data-send-reset=${s.to || ''} disabled=${st.resetBusy === s.to} onClick=${() => sendReset(s.to)}>${st.resetBusy === s.to ? 'Sending…' : 'Send reset'}</button></td>
           </tr>`;
         })}</tbody></table></div>`
       : html`<div class="text-sm text-gray-400" id="email-send-history-empty">No sends recorded yet — press "Send test email" to record one.</div>`}
+      ${st.reset ? html`<div data-send-reset-result=${st.reset.reason || (st.reset.sent ? 'sent' : 'failed')} class=${'text-xs mt-2 ' + (st.reset.sent ? 'text-green-700' : (st.reset.withheld ? 'text-amber-700' : 'text-red-600'))}>${st.reset.message || 'No answer from the server.'}</div>` : null}
     </div>
   </div>`;
 };
