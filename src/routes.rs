@@ -304,6 +304,12 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/contacts/search",
             get(contact_handler::search_contacts),
         )
+        // The CSV twin of the Calls export: the Contacts screen had no way to take the list out
+        // of the app (measured 2026-10-31). Static segment, so it wins over `/contacts/:id`.
+        .route(
+            "/api/v1/contacts/export",
+            get(contact_handler::export_contacts),
+        )
         .route(
             "/api/v1/contacts/:id",
             get(contact_handler::get_contact)

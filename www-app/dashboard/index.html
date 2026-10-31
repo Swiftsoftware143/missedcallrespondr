@@ -55,7 +55,7 @@ window.appGuidePages = {
   templates:    { title: "Templates", desc: "The message wording your automatic replies use. Edit a template here and every rule that uses it follows.", actions: ["Add a template", "Edit the wording"] },
   messages:     { title: "Messages", desc: "Every text sent and received on this account, in one thread list.", actions: ["Read a conversation", "Reply to a customer"] },
   followups:    { title: "Follow-ups", desc: "Messages scheduled to go out later, so a lead is not forgotten after the first reply.", actions: ["See what is queued", "Check what has already sent"] },
-  contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list.", actions: ["Search your contacts", "Open a contact's history"] },
+  contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list. Export CSV saves the whole list to a spreadsheet.", actions: ["Search your contacts", "Open a contact's history", "Export the list as a CSV"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
   billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. Pressing a plan opens the payment provider's own secure checkout when self-serve checkout is open on that plan; while it is not open, the same press sends your request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way.", actions: ["Compare the plans", "Press Upgrade on the plan you want"] },
@@ -1310,6 +1310,28 @@ const Contacts = () => {
     } catch (e) { st.error = 'Could not save field values: ' + e.message; st.busy = null; renderApp(); }
   };
 
+  // The roster had no way OUT of the app: Calls could export a CSV and Contacts could not
+  // (measured 2026-10-31). Same shape as the Calls export — the server answers text/csv with a
+  // dated filename, so the browser saves `contacts-YYYY-MM-DD.csv` rather than showing a blob.
+  const exportCsv = async () => {
+    st.error = null; st.notice = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/contacts/export', { headers: { 'Authorization': 'Bearer ' + API.token } });
+      if (!r.ok) {
+        let m = 'Export failed (' + r.status + ')';
+        try { const j = await r.json(); m = j.error || j.message || m; } catch (e) { /* not JSON */ }
+        throw new Error(m);
+      }
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = 'contacts.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      st.notice = 'Contact list exported as contacts.csv';
+    } catch (e) { st.error = 'Could not export the contact list: ' + e.message; }
+    renderApp();
+  };
+
   const rows = st.list.slice(0, 100);
   return html`<div>
     <div class="flex items-center justify-between mb-4" style="flex-wrap:wrap;gap:8px">
@@ -1319,6 +1341,7 @@ const Contacts = () => {
         <button class="btn btn-sm btn-green" onClick=${() => showContact(null)}>+ New Contact</button>
         <button class="btn btn-sm btn-outline" onClick=${() => { st.showFields = !st.showFields; renderApp(); }}>Custom fields (${st.fields.length})</button>
         <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
+        <button class="btn btn-sm btn-outline" onClick=${exportCsv}>Export CSV</button>
       </div>
     </div>
     ${st.searching && html`<p class="text-xs text-gray-400 mb-2">Searching…</p>`}

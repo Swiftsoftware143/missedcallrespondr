@@ -1,5 +1,7 @@
 use axum::{
     extract::{Extension, Path, Query, State},
+    http::{header, HeaderValue},
+    response::IntoResponse,
     Json,
 };
 use std::collections::HashMap;
@@ -91,6 +93,64 @@ pub async fn list_contacts(
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
+}
+
+/// `GET /api/v1/contacts/export` — the tenant's whole contact list as a CSV download.
+///
+/// The Contacts screen shipped with no export while Calls had one (measured 2026-10-31): a
+/// customer could take their call log out of the app but not the contacts those calls became —
+/// the list a business actually moves into another tool. Same row discipline as
+/// `call_log_handler::export_call_logs` (one header row, every caller-supplied string through a
+/// quoting cell), but the response is `text/csv` with a dated `Content-Disposition`, so a browser
+/// SAVES `contacts-YYYY-MM-DD.csv` instead of rendering a `text/plain` blob inline.
+pub async fn export_contacts(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let items = sqlx::query_as::<_, Contact>(
+        "SELECT * FROM contacts WHERE tenant_id = $1 ORDER BY name ASC",
+    )
+    .bind(claims.aid)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut csv = String::from("Name,Phone,Email,Company,Tags,Created\n");
+    for c in items {
+        let tags = c.tags.as_ref().map(|t| t.join("; ")).unwrap_or_default();
+        csv.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            csv_cell(&c.name),
+            csv_cell(&c.phone),
+            csv_cell(c.email.as_deref().unwrap_or("")),
+            csv_cell(c.company.as_deref().unwrap_or("")),
+            csv_cell(&tags),
+            c.created_at.format("%Y-%m-%d %H:%M"),
+        ));
+    }
+
+    let filename = format!("contacts-{}.csv", chrono::Utc::now().format("%Y-%m-%d"));
+    let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+        .unwrap_or_else(|_| HeaderValue::from_static("attachment; filename=\"contacts.csv\""));
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/csv; charset=utf-8"),
+            ),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        csv,
+    ))
+}
+
+/// A CSV cell carrying customer-supplied text: a name, company or tag can contain a comma, a
+/// quote or a newline, and an unquoted one would shift every later column of that row.
+fn csv_cell(v: &str) -> String {
+    if v.contains(',') || v.contains('"') || v.contains('\n') || v.contains('\r') {
+        format!("\"{}\"", v.replace('"', "\"\""))
+    } else {
+        v.to_string()
+    }
 }
 
 pub async fn create_contact(
