@@ -1,5 +1,7 @@
 use axum::{
     extract::{Extension, State},
+    http::{header, HeaderValue},
+    response::IntoResponse,
     Json,
 };
 
@@ -33,7 +35,7 @@ pub async fn list_call_logs(
 pub async fn export_call_logs(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
-) -> Result<String, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     let items = sqlx::query_as::<_, InboundCall>(
         "SELECT * FROM inbound_calls WHERE tenant_id = $1 ORDER BY call_time DESC",
     )
@@ -54,7 +56,23 @@ pub async fn export_call_logs(
         ));
     }
 
-    Ok(csv)
+    // The download was handed over as `text/plain` with no filename (measured 2026-10-31, while the
+    // newer Contacts export shipped `text/csv` + a dated name — one app should not disagree with
+    // itself about what a CSV is). A browser now saves `call-log-YYYY-MM-DD.csv` and a spreadsheet
+    // opens it directly instead of guessing at a plain-text blob.
+    let filename = format!("call-log-{}.csv", chrono::Utc::now().format("%Y-%m-%d"));
+    let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+        .unwrap_or_else(|_| HeaderValue::from_static("attachment; filename=\"call-log.csv\""));
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/csv; charset=utf-8"),
+            ),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        csv,
+    ))
 }
 
 /// A CSV cell carrying caller-supplied text: a name or a number can contain a comma, a quote or a
