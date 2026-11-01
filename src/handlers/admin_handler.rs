@@ -402,22 +402,18 @@ pub async fn list_all_tenants(
     let rows: Vec<_> = rows
         .into_iter()
         .filter(|r| {
-            if include_probe {
-                return true;
-            }
-            let reserved = r
-                .try_get::<Option<String>, _>("owner_email")
-                .ok()
-                .flatten()
-                .map(|e| owner_is_fleet_machinery(&e))
-                .unwrap_or(false);
-            let ownerless = r
-                .try_get::<Option<i64>, _>("user_count")
-                .ok()
-                .flatten()
-                .unwrap_or(0)
-                <= 0;
-            !reserved && !ownerless
+            include_probe
+                || !is_hidden_workspace(
+                    &r.try_get::<String, _>("probe_harness").unwrap_or_default(),
+                    r.try_get::<Option<String>, _>("owner_email")
+                        .ok()
+                        .flatten()
+                        .as_deref(),
+                    r.try_get::<Option<i64>, _>("user_count")
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0),
+                )
         })
         .collect();
 
@@ -739,6 +735,18 @@ pub async fn bulk_delete_tenants(
 /// `users` now use the SAME predicate as the list: tagged rows excluded unless `?include_probe=1`,
 /// a pre-column NULL row is a customer, `^CNRY` canaries stay visible. The call counters need no
 /// change — a probe workspace produces no calls, and hiding its rows there would misstate volume.
+///
+/// AND NEITHER IS A WORKSPACE NOBODY CAN SIGN INTO (measured live 2026-11-01). `list_all_tenants`
+/// now also holds back a workspace with zero users (nobody can sign in, so it cannot be a
+/// customer), so counting from a second spelling of the rules would re-create the very divergence
+/// the paragraph above was written to end. Measured live 2026-11-01: this function answered
+/// `workspaces: 6` while the list under it served 3 — the two nightly canaries (hidden by owner
+/// ADDRESS, a Rust predicate with no SQL twin) and one zero-user leftover. The figures are
+/// therefore counted from `is_hidden_workspace`, the SAME predicate the list filters with.
+///
+/// `users` counts the people in the VISIBLE workspaces only, for the same reason: the canaries each
+/// carry a user row, and a landing screen that counts a probe workspace's user while refusing to
+/// count the workspace is the same divergence one column over.
 pub async fn platform_stats(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
@@ -747,28 +755,57 @@ pub async fn platform_stats(
         .get("include_probe")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
-    let row: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+    let workspace_rows: Vec<(String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT COALESCE(t.probe_harness, '') AS probe_harness, \
+                (SELECT u.email FROM users u WHERE u.tenant_id = t.id \
+                 ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin') \
+                               THEN 0 ELSE 1 END, \
+                          u.created_at ASC LIMIT 1) AS owner_email, \
+                (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id)::bigint AS user_count \
+         FROM tenants t",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let visible: Vec<&(String, Option<String>, i64)> = workspace_rows
+        .iter()
+        .filter(|(tag, owner, users)| {
+            include_probe || !is_hidden_workspace(tag, owner.as_deref(), *users)
+        })
+        .collect();
+    let workspaces = visible.len() as i64;
+    let users_visible: i64 = visible.iter().map(|(_, _, n)| *n).sum();
+
+    let row: (i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
-           (SELECT COUNT(*) FROM tenants t WHERE $1::bool \
-              OR COALESCE(t.probe_harness, '') = '' OR t.probe_harness ~* '^CNRY')::bigint, \
-           (SELECT COUNT(*) FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE $1::bool \
-              OR COALESCE(t.probe_harness, '') = '' OR t.probe_harness ~* '^CNRY')::bigint, \
            (SELECT COUNT(*) FROM inbound_calls)::bigint, \
            (SELECT COUNT(*) FROM inbound_calls WHERE disposition = 'missed')::bigint, \
            (SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved','closed'))::bigint, \
            (SELECT COUNT(*) FROM tickets WHERE source IN ('plan_request','billing') \
               AND status NOT IN ('resolved','closed'))::bigint",
     )
-    .bind(include_probe)
     .fetch_one(&state.pool)
     .await?;
 
     Ok(Json(json!({
-        "workspaces": row.0,
-        "users": row.1,
-        "calls_received": row.2,
-        "missed_calls": row.3,
-        "open_tickets": row.4,
-        "plan_requests_waiting": row.5,
+        "workspaces": workspaces,
+        "users": users_visible,
+        "calls_received": row.0,
+        "missed_calls": row.1,
+        "open_tickets": row.2,
+        "plan_requests_waiting": row.3,
     })))
+}
+
+/// The ONE predicate that decides whether a workspace is fleet machinery rather than a customer.
+/// `list_all_tenants` holds such rows back from its default answer and `platform_stats` counts
+/// without them, so the landing screen can never disagree with the Tenants screen underneath it.
+/// Three arms, each one measured: a harness tag the signup door stamped, an owner address on a
+/// reserved / fleet-harness domain, and a workspace with NO user at all (nobody can sign in, so no
+/// signup can be attributed to it). `^CNRY` canaries stay visible: they are the proof the nightly
+/// sweep works.
+fn is_hidden_workspace(probe_harness: &str, owner_email: Option<&str>, user_count: i64) -> bool {
+    let tag = probe_harness.trim();
+    let tagged = !tag.is_empty() && !tag.to_ascii_uppercase().starts_with("CNRY");
+    let reserved = owner_email.map(owner_is_fleet_machinery).unwrap_or(false);
+    tagged || reserved || user_count <= 0
 }
