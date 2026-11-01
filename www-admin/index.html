@@ -2351,18 +2351,27 @@ function isProbeAddress(addr) {
 // counted `probe_harness` alone while the badge also fired on a reserved/fleet-probe owner address,
 // so the button's number and the badges on screen could disagree — which is how a sweep
 // under-counts. Both now read this function.
+// Third arm (2026-11-01): a workspace with NO user at all. The server now holds those back from
+// the default listing (`ownerless`, published only under `?include_probe=1`) for the same reason it
+// holds back the address arm: nobody can sign in, so it cannot be a customer. Read here as well so
+// the row the switch reveals carries the badge and the picker's count includes it.
 const isProbeRow = (t) => !!String((t && t.probe_harness) || '').trim()
+  || !!(t && t.reserved_owner)
+  || !!(t && t.ownerless)
   || isProbeAddress(String((t && (t.owner_email || t.email)) || '').trim());
 const ownerCell = (t) => {
   const oe = String((t && (t.owner_email || t.email)) || '').trim();
   const tag = String((t && t.probe_harness) || '').trim();
-  const probe = Boolean(tag) || isProbeAddress(oe);
+  const ownerless = Boolean(t && t.ownerless);
+  const probe = Boolean(tag) || isProbeAddress(oe) || ownerless;
   // The tooltip names the harness the COLUMN recorded (fleet shape, kanban t_c13803ad): the column
   // is authoritative and the address arms are only the fallback for rows minted before it existed.
   const badge = probe
     ? html` <span class="badge badge-yellow" title=${tag
         ? 'minted by the "' + tag + '" test harness — a probe, not a customer'
-        : 'a reserved or fleet-probe address — a probe, not a customer'}>probe</span>`
+        : ownerless
+          ? 'no user can sign into this workspace — a leftover, not a customer'
+          : 'a reserved or fleet-probe address — a probe, not a customer'}>probe</span>`
     : '';
   if (!oe) return html`<span class="text-gray-400">—</span>${badge}`;
   return html`<span class="text-gray-500">${oe}</span>${badge}`;

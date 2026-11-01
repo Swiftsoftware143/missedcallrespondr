@@ -175,6 +175,7 @@
     <li><a href="#integrations">Integrations</a></li>
     <li><a href="#settings">Profile &amp; Account</a></li>
     <li><a href="#email-branding">Email Branding</a></li>
+    <li><a href="#team">Your team</a></li>
     <li><a href="#faq">FAQ</a></li>
     <li><a href="#affiliates">🔗 Referrals &amp; Affiliates</a></li>
     <li><a href="#provisioning">Provisioning &mdash; a FunnelSwift tag can create a free account here</a></li>
@@ -558,6 +559,16 @@
     <li><strong>Delete</strong> — removes the contact and its custom-field values
       (<code>DELETE /api/v1/contacts/:id</code>, confirmation required).</li>
   </ul>
+  <h3>Exporting Contacts</h3>
+  <p>
+    <strong>Export CSV</strong> on the Contacts screen downloads the whole directory as
+    <code>contacts-YYYY-MM-DD.csv</code> — every contact on the account, not just the 100 rows the
+    table renders. Each line carries <code>Name, Phone, Email, Company, Tags, Created</code>; tags are
+    written separated by semicolons, and any value holding a comma or a quote is quoted so the file
+    opens cleanly in a spreadsheet. It is the same data the table lists, CSV is the only format, and
+    the download comes from <code>GET /api/v1/contacts/export</code>, which needs a signed-in session.
+  </p>
+
   <p>
     A duplicate email inside the same account is refused by the server, which shows its own message.
     There is still no contact detail page — clicking a row does nothing, and the row's Fields button
@@ -794,6 +805,33 @@
     domain that cannot receive mail.
   </p>
 
+  <!-- Your team -->
+  <h2 id="team">Your team</h2>
+  <p>
+    A workspace can have more than one login. Open the <strong>🤝 Your team</strong> tab in the console
+    to see everyone who can sign in to this account, what access each of them has, and how many seats
+    your plan allows. The person who created the workspace is labelled <strong>Owner</strong>; anyone
+    added later is a <strong>Member</strong>.
+  </p>
+  <ul>
+    <li><strong>Add someone</strong> — type their name and email address and press <strong>Add them</strong>.
+      Their own login is created and an email with their first password goes to that address. Nobody has
+      to share your password, and everything they do is inside this same workspace.</li>
+    <li><strong>Remove someone</strong> — press <strong>Remove</strong> on their row. Their login stops
+      working immediately; the calls, contacts and settings stay with the workspace.</li>
+    <li>The <strong>Owner</strong> row cannot be removed here, and you cannot remove yourself — a
+      workspace always keeps one person who can get back in.</li>
+  </ul>
+  <p>
+    Only the <strong>Owner</strong> and anyone the platform team has made a <strong>Company admin</strong>
+    can add or remove people; everyone else sees the list and a line saying who to ask. The line under
+    the form is the server's own answer: it tells you when the password email actually left, and when it
+    did not (for instance an address on a reserved test domain that cannot receive mail) it says so
+    instead of claiming a send. If a colleague never receives their password, use
+    <strong>Forgot your password?</strong> on the sign-in page once mail delivery is confirmed, or ask
+    the platform team to send a reset from the operator console.
+  </p>
+
   <!-- Plan and Billing -->
   <h2 id="plan-billing">💳 Plan &amp; Billing</h2>
   <p>
@@ -863,6 +901,13 @@
     <code>call-log.csv</code> holds every call on the account — not just the 100 the table renders —
     with the columns <code>ID, Caller, Called, When, Duration Seconds, Disposition</code>. It is the
     same data the table lists, and CSV is the only format.
+  </p>
+
+  <h3>How do I export my contacts?</h3>
+  <p>
+    Open the <strong>Contacts</strong> screen and click <strong>Export CSV</strong>. The file
+    <code>contacts-YYYY-MM-DD.csv</code> holds every contact on the account — not just the rows the
+    table is showing — with the columns <code>Name, Phone, Email, Company, Tags, Created</code>.
   </p>
 
   <h3>What variable syntax does the app support?</h3>
