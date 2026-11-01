@@ -388,18 +388,36 @@ pub async fn list_all_tenants(
     // fleet-harness domain (see `owner_is_fleet_machinery`) cannot receive mail and cannot belong
     // to a customer. Such a row is now held back exactly like a tagged harness row and published
     // with `reserved_owner: true` when `?include_probe=1` asks for it. Fleet canaries keep the
-    // `^CNRY` exemption in SQL, and a workspace with no user row at all (a portfolio-sync row) is
-    // left alone: there is no address to judge it by.
+    // `^CNRY` exemption in SQL.
+    //
+    // A WORKSPACE NOBODY CAN SIGN INTO IS NOT A CUSTOMER (measured live 2026-11-01). The address
+    // arm above can only judge a row that HAS an owner, so the one workspace on this install with
+    // no user row at all -- "TestSync", user_count 0 -- was served among three real customers in
+    // the operator's Tenants list. ADASwift closed the same hole on 2026-10-31 using the count this
+    // query already returns: a customer workspace always has at least the user its signup minted,
+    // so zero users means no login can ever reach it and no signup can be attributed to it. It is
+    // a leftover, not a customer. Held-back rows are published with `ownerless: true` under
+    // `?include_probe=1`, so nothing becomes invisible or undeletable and the console's
+    // "Select probes" control can still reach them.
     let rows: Vec<_> = rows
         .into_iter()
         .filter(|r| {
-            include_probe
-                || !r
-                    .try_get::<Option<String>, _>("owner_email")
-                    .ok()
-                    .flatten()
-                    .map(|e| owner_is_fleet_machinery(&e))
-                    .unwrap_or(false)
+            if include_probe {
+                return true;
+            }
+            let reserved = r
+                .try_get::<Option<String>, _>("owner_email")
+                .ok()
+                .flatten()
+                .map(|e| owner_is_fleet_machinery(&e))
+                .unwrap_or(false);
+            let ownerless = r
+                .try_get::<Option<i64>, _>("user_count")
+                .ok()
+                .flatten()
+                .unwrap_or(0)
+                <= 0;
+            !reserved && !ownerless
         })
         .collect();
 
@@ -424,6 +442,11 @@ pub async fn list_all_tenants(
             "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
+            // true => this workspace has NO user at all, so nobody can sign in and no signup can
+            // be attributed to it: a leftover, not a customer. Held back from the default list
+            // (see the filter above) and only reachable with `?include_probe=1`, mirroring
+            // ADASwift's `ownerless` field, so the console can badge the row it reveals.
+            "ownerless": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0) <= 0,
             "last_sign_in": r.try_get::<Option<chrono::DateTime<Utc>>,_>("last_sign_in").ok().flatten().map(|d| d.to_string()),
             "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
             // The harness marker the signup door stamps from the `X-Swift-Harness` HEADER
