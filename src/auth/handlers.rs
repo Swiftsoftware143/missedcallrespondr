@@ -288,6 +288,28 @@ pub async fn login(
     // inside the window is not left counting down.
     state.login_throttle.clear(&throttle_key);
 
+    // A SUSPENDED WORKSPACE CANNOT SIGN IN (2026-11-01, cron `default`). `tenants.is_active`
+    // existed and no code path read it, so a workspace the operator marked inactive kept working —
+    // the switch was decorative. The password is already PROVEN here, so this is not an
+    // account-existence oracle: it names the state and says what to do, which is the one thing a
+    // customer hitting a shut door needs. The same state ends live sessions in `auth_middleware`.
+    let workspace_active: Option<bool> =
+        sqlx::query_scalar("SELECT is_active FROM tenants WHERE id = $1")
+            .bind(user.tenant_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if workspace_active == Some(false) {
+        tracing::warn!(
+            user_id = %user.id,
+            tenant_id = %user.tenant_id,
+            "sign-in refused: the workspace is suspended"
+        );
+        return Err(AppError::Forbidden(
+            "This workspace is suspended. Contact support@swiftsoftware.net and we will sort it out."
+                .into(),
+        ));
+    }
+
     // Stamp the sign-in on the ACCOUNT (migration 000046), which is what the Tenants screen reads
     // to answer "has anyone ever used this workspace?". Best-effort on purpose: the credential is
     // already proven here, so a bookkeeping write must not turn a correct password into a 500 —

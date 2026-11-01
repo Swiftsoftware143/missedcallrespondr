@@ -339,6 +339,11 @@ pub async fn list_all_tenants(
     let rows = sqlx::query(
         r#"SELECT 
             t.id, t.name, t.slug, t.created_at, COALESCE(t.probe_harness, '') AS probe_harness,
+            -- Whether this workspace is OPEN (2026-11-01). `auth::handlers::login` and
+            -- `auth::middleware` now refuse a closed one, so the console must be able to show the
+            -- state it is setting -- otherwise the operator suspends a row and the list says
+            -- nothing about it.
+            t.is_active AS tenant_active,
             tp.plan_id, tp.status as sub_status, tp.billing_cycle, tp.expires_at,
             tp.credit_balance,
             p.name as plan_name, p.slug as plan_slug, p.price_monthly::float8 AS price_monthly,
@@ -423,6 +428,11 @@ pub async fn list_all_tenants(
             "name": r.try_get::<String,_>("name").unwrap_or_default(),
             "slug": r.try_get::<String,_>("slug").unwrap_or_default(),
             "created_at": r.try_get::<chrono::NaiveDateTime,_>("created_at").map(|d| d.to_string()).unwrap_or_default(),
+            // TRUE => the operator has shut this workspace: sign-in answers 403 and every live
+            // session is refused (2026-11-01, cron `default`). A missing column reads as OPEN
+            // (unwrap_or(true)) so a query that predates it can never render a customer as
+            // suspended by accident.
+            "suspended": !r.try_get::<Option<bool>,_>("tenant_active").ok().flatten().unwrap_or(true),
             "plan_id": r.try_get::<Option<Uuid>,_>("plan_id").ok().flatten().map(|u| u.to_string()),
             "sub_status": r.try_get::<Option<String>,_>("sub_status").ok().flatten(),
             "billing_cycle": r.try_get::<Option<String>,_>("billing_cycle").ok().flatten(),
@@ -652,6 +662,81 @@ pub async fn delete_tenant(
     Ok(Json(json!({
         "message": "Tenant deleted",
         "tenant_id": tenant_id_str
+    })))
+}
+
+/// POST /api/v1/admin/tenants/:id/suspension — shut a workspace, or open it again (2026-11-01,
+/// cron `default`).
+///
+/// WHY THIS EXISTS: `tenants.is_active` was the only "close this workspace" lever in the schema and
+/// NOTHING read it — not `auth::handlers::login`, not `auth::middleware` — so the flag was
+/// decorative: it could be set and the customer kept working. The readers are now in place; this is
+/// their writer, so the operator gets the middle option between "carry on" and "delete their data".
+///
+/// Suspending also ends every LIVE session of the workspace (`users.sessions_valid_from = NOW()`).
+/// Without that, closing a door only binds the people who had not walked through yet — the session
+/// already inside the product is exactly the one being shut out.
+///
+/// `guard_protected` applies, like every other operator write: a portfolio workspace or the
+/// operator's own can never be suspended, so the console cannot lock the platform out of itself.
+/// Re-opening restores access; nothing is deleted either way.
+pub async fn set_tenant_suspension(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(tenant_id_str): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, AppError> {
+    let tenant_id = Uuid::parse_str(&tenant_id_str)
+        .map_err(|_| AppError::BadRequest("Invalid tenant ID".into()))?;
+    // Required, not defaulted: an endpoint that guesses which way to flip a door is an endpoint
+    // that flips it the wrong way on an empty body.
+    let suspended = body
+        .get("suspended")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| AppError::BadRequest("suspended (true|false) required".into()))?;
+
+    guard_protected(&state, tenant_id, claims.aid).await?;
+
+    let updated = sqlx::query(
+        "UPDATE tenants SET is_active = $1, updated_at = NOW() WHERE id = $2 RETURNING id",
+    )
+    .bind(!suspended)
+    .bind(tenant_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    if updated.is_none() {
+        return Err(AppError::NotFound("Tenant not found".into()));
+    }
+
+    if suspended {
+        // Best-effort by design: the workspace is already closed by the UPDATE above. A failed
+        // revocation is logged loudly rather than turning the close into an error the operator has
+        // to puzzle over — the flag is the record, and re-running the call retries it.
+        if let Err(e) =
+            sqlx::query("UPDATE users SET sessions_valid_from = NOW() WHERE tenant_id = $1")
+                .bind(tenant_id)
+                .execute(&state.pool)
+                .await
+        {
+            tracing::error!(tenant_id = %tenant_id, error = %e, "suspended workspace but could not revoke its sessions");
+        }
+        tracing::warn!(
+            tenant_id = %tenant_id,
+            operator = %claims.sub,
+            "workspace SUSPENDED by an operator"
+        );
+    } else {
+        tracing::info!(
+            tenant_id = %tenant_id,
+            operator = %claims.sub,
+            "workspace re-opened by an operator"
+        );
+    }
+
+    Ok(Json(json!({
+        "tenant_id": tenant_id_str,
+        "suspended": suspended,
+        "is_active": !suspended
     })))
 }
 

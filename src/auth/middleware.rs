@@ -207,6 +207,36 @@ pub async fn auth_middleware(
                     Json(json!({"error": SESSION_REVOKED})),
                 ));
             }
+            // A SUSPENDED WORKSPACE ENDS EVERY SESSION IT HAS (2026-11-01, cron `default`).
+            // `tenants.is_active` was inert: nothing read it, so suspending a workspace left its
+            // customers working. Refuse here as well as at sign-in, or the flag would only bind
+            // people who had not signed in yet — the live sessions are the point. `None` (no tenant
+            // row at all) is not a suspension and changes nothing; a database that cannot answer
+            // refuses, like every other read on this path.
+            match tenant_is_active(&state.pool, claims.aid).await {
+                Ok(Some(false)) => {
+                    tracing::warn!(
+                        "refused a session whose workspace is suspended (tenant {})",
+                        claims.aid
+                    );
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        Json(json!({
+                            "error": "This workspace is suspended. Contact support@swiftsoftware.net and we will sort it out.",
+                            "status": 403,
+                            "suspended": true
+                        })),
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("workspace state lookup failed for {}: {e}", claims.aid);
+                    return Err((
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(json!({"error": "Authentication temporarily unavailable"})),
+                    ));
+                }
+            }
             // SESSION REVOCATION (kanban t_80787a0f): the same read returns the instant this
             // account last changed or reset its password, so a token minted before it stops here —
             // 401, exactly like a deleted account. NULL (never rotated) changes nothing.
@@ -263,6 +293,22 @@ async fn user_role(
     .bind(user_id)
     .fetch_optional(db)
     .await
+}
+
+/// Is the workspace behind this credential still open?
+///
+/// SUSPENDED WORKSPACES (2026-11-01, cron `default`): `tenants.is_active` existed and NOTHING in
+/// this app read it — not the sign-in, not this middleware — so an operator marking a workspace
+/// inactive changed a flag and nothing else: the workspace kept serving and every live token kept
+/// working. This is the read that makes the flag real, keyed on the token's own tenant claim.
+async fn tenant_is_active(
+    db: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>("SELECT is_active FROM tenants WHERE id = $1")
+        .bind(tenant_id)
+        .fetch_optional(db)
+        .await
 }
 
 /// Does a session minted at `jwt_iat` predate the instant its account last changed or reset its

@@ -707,6 +707,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/tenants/:id",
             delete(crate::handlers::admin_handler::delete_tenant),
         )
+        // Suspend / re-open a workspace (2026-11-01, cron `default`). `tenants.is_active` was
+        // writable in the schema and read NOWHERE, so the operator's only lever on an abusive or
+        // non-paying workspace was to delete it — and their data with it. This is the writer for
+        // the flag `auth::handlers::login` and `auth::middleware` now enforce. A distinct path
+        // (not PUT on `:id`) so it can never be confused with the retire above.
+        .route(
+            "/api/v1/admin/tenants/:id/suspension",
+            post(crate::handlers::admin_handler::set_tenant_suspension),
+        )
         .route(
             "/api/v1/admin/stop-impersonation",
             post(crate::handlers::admin_handler::stop_impersonation),

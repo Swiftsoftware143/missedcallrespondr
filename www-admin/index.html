@@ -2491,6 +2491,27 @@ const TenantsScreen = () => {
     await load();
   };
 
+  // ── SUSPEND / RE-OPEN (2026-11-01, cron `default`) ───────────────────────────────────────────
+  // Before this the operator's only lever on a workspace they needed to stop was "Delete selected",
+  // which destroys the customer's data. `tenants.is_active` existed in the schema but nothing in the
+  // app read it, so it was a flag with no effect. The API now enforces it at sign-in AND on every
+  // live session (auth::handlers::login, auth::middleware), so this is the control that closes the
+  // door without burning the house down. Re-opening puts the workspace back exactly as it was.
+  const setSusp = async (t, suspended) => {
+    const label = t.name || t.slug || t.id;
+    const sentence = suspended
+      ? 'Suspend "' + label + '"?\n\nTheir users are signed out immediately and cannot sign in until you re-open it. Nothing is deleted.'
+      : 'Re-open "' + label + '"? Their workspace works again and their users can sign in.';
+    if (!confirm(sentence)) return;
+    st.busy = 'susp:' + t.id; st.msg = null; st.ok = true; renderApp();
+    try {
+      await API.post('/admin/tenants/' + encodeURIComponent(t.id) + '/suspension', { suspended });
+      st.msg = (suspended ? 'Suspended ' : 'Re-opened ') + label;
+    } catch (e) { st.ok = false; st.msg = (suspended ? 'Not suspended: ' : 'Not re-opened: ') + e.message; }
+    st.busy = null;
+    await load();
+  };
+
   // ── the PLAN cell (2026-10-19) ──
   // It used to be a static `plan_name || '—'`: a workspace with no subscription row showed a bare
   // dash, and the operator had no way to put it on a plan from the screen where the problem is
@@ -2537,17 +2558,18 @@ const TenantsScreen = () => {
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
       <thead><tr>
         <th style="width:36px"><input type="checkbox" id="tnAll" data-tenants="select-all" checked=${allPicked ? true : false} onChange=${e => toggleAll(e.target.checked)} /></th>
-        <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Last sign-in</th><th>Created</th>
+        <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Last sign-in</th><th>Created</th><th>Access</th>
       </tr></thead>
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
-        <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}</td>
+        <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this workspace">suspended</span>` : null}</td>
         <td>${ownerCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
         <td>${planCell(t)}</td>
         <td class="text-gray-500 text-xs" data-tenants="last-sign-in" title=${t.last_sign_in ? new Date(t.last_sign_in).toLocaleString() : 'No sign-in recorded since this column began (27 Oct 2026). Sign-ins before then were not tracked, so this is "nothing recorded", not proof that nobody has signed in.'}>${t.last_sign_in ? new Date(t.last_sign_in).toLocaleString() : 'not recorded'}</td>
         <td class="text-gray-500 text-xs">${t.created_at ? String(t.created_at).slice(0, 10) : '-'}</td>
+        <td><button class="btn btn-sm ${t.suspended ? 'btn-green' : 'btn-outline'}" data-tenants="suspend-toggle" data-suspended=${t.suspended ? 'true' : 'false'} disabled=${st.busy === 'susp:' + t.id} onClick=${() => setSusp(t, !t.suspended)} title=${t.suspended ? 'Let this workspace work again (nothing was deleted)' : 'Close this workspace without deleting their data: sign-in is refused and live sessions end'}>${st.busy === 'susp:' + t.id ? '...' : (t.suspended ? 'Re-open' : 'Suspend')}</button></td>
       </tr>`)}</tbody></table></div>`
       : (st.err ? '' : html`<div class="text-xs text-gray-400">loading tenants...</div>`)}
   </div>`;
