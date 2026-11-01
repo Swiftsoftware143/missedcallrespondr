@@ -449,6 +449,63 @@ pub async fn change_password(
     ))
 }
 
+/// `POST /api/v1/auth/logout-all` — end every OTHER signed-in device on this account.
+///
+/// The machinery already existed and nothing could reach it: a password change or reset bumps
+/// `users.sessions_valid_from`, and the boundary read refuses any JWT minted before it
+/// (`session_predates_password_change`, src/auth/middleware.rs). Measured 2026-11-01: no route and
+/// no console control would bump that column on its own, so a customer who thought someone else
+/// was in their account had exactly one option — change the password they already knew — and a
+/// customer whose picture of the intruder was "an old phone I sold" had none at all.
+///
+/// This is the missing verb (ported from FunnelSwift's `auth::logout_all`, the fleet reference).
+/// It bumps the same column and then mints a FRESH token in the same second, because the boundary
+/// read deliberately allows a session minted in the same second as the change
+/// (`iat < valid_from`) — so the device that pressed the button stays signed in while every other
+/// JWT dies at its next request. The new token is in the response because the caller's own old
+/// token is now dead too; a 200 that silently signed the caller out of the tab in front of them
+/// would be a trap.
+///
+/// The account row is re-read rather than reusing the claim, so the re-minted token carries the
+/// CURRENT role and tenant: a claim that has since been narrowed must not be re-blessed here.
+/// Idempotent — pressing it twice only moves the line forward.
+pub async fn logout_all(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = sqlx::query_as::<_, TeamMember>("SELECT * FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+
+    sqlx::query("UPDATE users SET sessions_valid_from = NOW(), updated_at = NOW() WHERE id = $1")
+        .bind(user.id)
+        .execute(&state.pool)
+        .await?;
+
+    let now = chrono::Utc::now().timestamp() as usize;
+    let fresh = Claims {
+        sub: user.id,
+        email: user.email.clone(),
+        aid: user.tenant_id,
+        role: user.role.clone(),
+        // This session proves nothing about the account's password, so it may never set one
+        // without the current value — the same rule every non-signup mint follows.
+        pwd_minted: false,
+        exp: now + 86400 * 7,
+        iat: now,
+    };
+    let token = create_token(&fresh, &state.config.jwt_secret)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "message": "Every other device has been signed out. This one stays signed in.",
+        "token": token,
+    })))
+}
+
 /// `POST /api/v1/auth/initial-password` — `{password}`.
 ///
 /// THE DOOR FOR A CUSTOMER WHOSE FIRST PASSWORD NEVER ARRIVED. `register` mints the first password

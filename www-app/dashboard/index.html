@@ -556,7 +556,10 @@ const Profile = () => {
     cur: '', next: '', confirm: '',
     // The sign-in-address change (kanban t_0d1aa081): the draft address, the server's sentence
     // (an error or a confirmation), and its own busy flag so a send cannot lock the whole card.
-    ecNew: '', ecMsg: null, ecErr: null, ecBusy: false
+    ecNew: '', ecMsg: null, ecErr: null, ecBusy: false,
+    // The "sign out every other device" card (2026-11-01): its own busy flag and its own sentence,
+    // so a revocation cannot be mistaken for a failed profile save.
+    soMsg: null, soErr: null, soBusy: false
   });
   // Seed the drafts ONCE from the account row (never on every render — that is what wiped typed
   // values in the sibling consoles).
@@ -673,6 +676,30 @@ const Profile = () => {
     st.busy = false; renderApp();
   };
 
+  // ── END EVERY OTHER DEVICE (2026-11-01) ───────────────────────────────────────────────────────
+  // The server has always been able to revoke sessions — a password change or reset bumps
+  // `users.sessions_valid_from` and the boundary read refuses anything minted before it — but until
+  // now nothing could reach that machinery on its own, so a customer who thought someone else was
+  // in their account had to change the password they knew, and one whose intruder was "an old phone
+  // I sold" had no move at all. POST /auth/logout-all bumps the same column and returns a FRESH
+  // token in the same second; the boundary allows a session minted in that second, so THIS tab stays
+  // signed in and every other device is out at its next request. The new token is stored before the
+  // next render, or the tab in front of the customer would die with the others.
+  const signOutOthers = async () => {
+    st.soMsg = null; st.soErr = null;
+    if (!window.confirm('Sign out every other device signed into this account? This one stays signed in.')) return;
+    st.soBusy = true; renderApp();
+    try {
+      const d = await API.post('/auth/logout-all');
+      if (!d || !d.token) throw new Error('The server did not return a new session, so nothing was changed.');
+      API.setAuth(d.token, Object.assign({}, API.user || {}));
+      st.soMsg = d.message || 'Every other device has been signed out. This one stays signed in.';
+    } catch (e) {
+      st.soErr = (e && e.message) || 'Could not sign the other devices out. Nothing was changed.';
+    }
+    st.soBusy = false; renderApp();
+  };
+
   const pic = pictureUrl();
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Profile</h2>
@@ -733,6 +760,18 @@ const Profile = () => {
           <input id="pw-current" class="input" type="password" value=${st.cur} onInput=${e => { st.cur = e.target.value; }} /></div>
         <p class="text-xs text-gray-500">Your current password confirms the change — we ask for it underneath the new one.</p>
         <button id="save-password" class="btn btn-sm" disabled=${st.busy} onClick=${changePw}>Save password</button>
+      </div>
+    </div>
+    <!-- END EVERY OTHER DEVICE (2026-11-01). Its own card because it is the answer to a different
+         question than "change my password": the customer already knows the password, and what they
+         want is the other session gone. -->
+    <div class="card" id="signout-others-card">
+      <h3 class="font-semibold mb-3">Sign out of every other device</h3>
+      <div class="space-y-3" style="max-width:520px">
+        <p class="text-sm text-gray-600">If you think someone else is signed in — a phone you sold, a shared laptop, a session you do not recognise — press this. Every other device is signed out at its next action and this one stays signed in, with no need to change your password.</p>
+        ${st.soErr && html`<p class="text-sm text-red-700" id="signout-others-msg" role="status" aria-live="polite">${st.soErr}</p>`}
+        ${!st.soErr && st.soMsg && html`<p class="text-sm" style="color:#15803d" id="signout-others-msg" role="status" aria-live="polite">${st.soMsg}</p>`}
+        <button id="signout-others" class="btn btn-sm btn-outline" disabled=${st.soBusy} onClick=${signOutOthers}>Sign out other devices</button>
       </div>
     </div>
   </div>`;

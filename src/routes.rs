@@ -177,6 +177,12 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/v1/auth/profile", put(auth_handlers::update_profile))
         .route("/api/v1/auth/password", put(auth_handlers::change_password))
+        // END EVERY OTHER DEVICE (2026-11-01). The revocation machinery (`users.sessions_valid_from`,
+        // refused at the boundary read) existed and no route reached it, so the only way a customer
+        // could end a session was to change the password they knew. This route bumps the same column
+        // and answers a fresh token so the device that pressed it stays signed in. NOT in
+        // `auth::route_policy::PUBLIC_ROUTES` — an anonymous caller answers 401 at the boundary.
+        .route("/api/v1/auth/logout-all", post(auth_handlers::logout_all))
         // The door for a customer whose first password never arrived: `register` mints it and mails
         // it, and when that send fails the account is otherwise unreachable (a reset code would fail
         // the same way). Authenticated by the token `register` returned, and accepted ONLY while that
