@@ -29,10 +29,10 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   129 mounted `.route(..)` entries in the one routing file, 129 distinct paths (every path is
+//!   135 mounted `.route(..)` entries in the one routing file, 135 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   112 entries reach `protected_routes`, which carries `auth_middleware`
+//!   118 entries reach `protected_routes`, which carries `auth_middleware`
 //!    17 entries reach the ANONYMOUS `public_routes`:
 //!        14 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
@@ -523,6 +523,10 @@ mod tests {
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
             17
         );
+        // 135 entries / 135 distinct paths (the "sign out every other device" door
+        // `POST /api/v1/auth/logout-all` joined on 2026-11-01 — a PROTECTED mount beside
+        // `PUT /api/v1/auth/password`, so both anonymous lists are untouched and protected went
+        // 117 → 118; before it,
         // 134 entries / 134 distinct paths (the customer's OWN team door joined on 2026-10-31 —
         // `GET /api/v1/team/members`, `POST /api/v1/team/invite` and
         // `DELETE /api/v1/team/members/:id`, three PROTECTED mounts, so both anonymous lists are
@@ -560,11 +564,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        assert_eq!(lits.len(), 134, "mounted .route entries");
+        assert_eq!(lits.len(), 135, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 134, "distinct mounted paths");
+        assert_eq!(uniq.len(), 135, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
