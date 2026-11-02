@@ -143,11 +143,14 @@ fn apply_branding(
     let header = b.header_html(logo.as_deref());
     let html_out = if html.is_empty() {
         format!(
-            "{header}<div style=\"white-space:pre-wrap;font:14px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827\">{}</div>",
+            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head>\n<body style=\"margin:0;padding:0;\">{header}<div style=\"white-space:pre-wrap;font:14px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827\">{}</div></body></html>",
             branding::escape_html(text)
         )
     } else {
-        format!("{header}{html}")
+        // Inside the document, never in front of it — see `branding::place_header` for the live
+        // measurement (2026-11-01): a template fragment used to carry the header BEFORE any
+        // document, so a client that rebuilds the body could drop the tenant's logo.
+        branding::place_header(html, &header)
     };
     let text_out = format!("{}{}", b.text_header(), text);
     (text_out, html_out)

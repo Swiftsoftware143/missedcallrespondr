@@ -168,6 +168,40 @@ impl Branding {
     }
 }
 
+/// Put the branding INSIDE the message document, never in front of it.
+///
+/// Measured live 2026-11-01 (GET `/api/v1/settings/branding/preview-body`, no mail sent): the
+/// rendered HTML part of a branded message was 831 bytes starting `<div style="text-align:center…`
+/// with **no `<!DOCTYPE>`, no `<html>` and no `<body>` anywhere** — the templates are bare
+/// FRAGMENTS and the header was simply concatenated in front of one. So every message this app
+/// mails is a document-less HTML part: a client that rebuilds the body (Outlook's Word renderer,
+/// Gmail's sanitiser) may drop whatever sits outside it — the tenant's own logo and brand colour.
+///
+/// Two placements, decided by the input:
+/// * a whole document already (has `<html`/`<body`) — insert the header right after `<body …>`,
+///   else after `<html …>`, else after `</head>`;
+/// * a fragment — wrap it in a minimal document (`<!DOCTYPE html>`, charset, viewport) with the
+///   header as the first thing inside `<body>`.
+pub fn place_header(html: &str, header: &str) -> String {
+    // `to_ascii_lowercase` never changes a byte COUNT, so an index into `lower` is the same index
+    // into `html` — which is what makes the slicing below safe for non-ASCII message bodies.
+    let lower = html.to_ascii_lowercase();
+    let end_of = |open: usize| html[open..].find('>').map(|j| open + j + 1);
+    for tag in ["<body", "<html"] {
+        if let Some(at) = lower.find(tag).and_then(end_of) {
+            return format!("{}{}{}", &html[..at], header, &html[at..]);
+        }
+    }
+    if let Some(at) = lower.find("</head>").map(|i| i + "</head>".len()) {
+        return format!("{}{}{}", &html[..at], header, &html[at..]);
+    }
+    format!(
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>\n\
+         <body style=\"margin:0;padding:0;background:#f4f4f5;\">{header}{html}</body></html>"
+    )
+}
+
 /// Load this account's branding. `None` on no row, an unreadable row, or nothing configured.
 ///
 /// A read failure is NOT fatal to a send: an email that cannot read its branding still goes out with
