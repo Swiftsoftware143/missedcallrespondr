@@ -564,9 +564,22 @@ const ruleScheduleOf = (f) => f.trigger === 'specific_numbers'
     ? { window: { start: f.start || '09:00', end: f.end || '17:00' } }
     : f.trigger === 'day_of_week' ? { days: (f.days || []).slice() } : null;
 const ResponseRules = () => {
-  const st = viewState('rules', { list: [], showModal: false, editItem: null, search: '' });
+  const st = viewState('rules', { list: [], showModal: false, editItem: null, search: '', sms: null });
   const load = async () => { try { const data = await API.get('/response-rules'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
-  if (!st._loaded) { st._loaded = true; load(); }
+  // Whether a text can actually leave this install (measured 2026-11-04). The Telnyx credential
+  // lives in the operator's provider panel (`GET/PUT /api/v1/admin/telnyx-config`); with no row
+  // there, a texting rule marked Active still runs on a missed call and is logged "NOT sent" —
+  // the transport has nothing to send with. Read LIVE so the notice disappears the moment the key
+  // is saved, and never accuses the panel when the read itself failed.
+  const loadProvider = async () => {
+    try {
+      const c = await API.get('/admin/telnyx-config');
+      const key = (c && c.api_key) ? String(c.api_key) : '';
+      st.sms = { configured: !!key && !c.message };
+    } catch (e) { st.sms = { configured: true }; }
+    renderApp();
+  };
+  if (!st._loaded) { st._loaded = true; load(); loadProvider(); }
 
   const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
@@ -579,7 +592,12 @@ const ResponseRules = () => {
 
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Rule</button></div></div>
-    <p class="text-sm text-gray-500 mb-4">Rules are evaluated on every inbound call, in priority order (lowest number first): the first matching rule acts. A text leaves through Telnyx, so the Telnyx API key and messaging profile must be saved in the Telnyx Config panel first.</p>
+    <p class="text-sm text-gray-500 mb-4">Rules are evaluated on every inbound call, in priority order (lowest number first): the first matching rule acts. A text leaves through Telnyx, so the Telnyx API key and messaging profile must be saved first — they live in the Operator Console, panel <b>5. Telnyx Config &amp; Numbers</b>.</p>
+    ${st.sms && st.sms.configured === false && html`<div class="card mb-4" data-sms-status="unconfigured" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b">
+      <div class="font-semibold">No text can leave this install yet — the SMS provider has no key saved.</div>
+      <div class="text-sm" style="margin-top:4px">A rule marked <b>Active</b> is still evaluated on every missed call, but its text has nowhere to go: with no Telnyx credential the app logs the send as NOT sent and writes nothing. So a texting rule that reads Active is not texting anyone. Save the API key and messaging profile, then it will. Until then a <b>callback</b> rule is the only action that can complete.</div>
+      <button class="btn btn-outline btn-sm" style="margin-top:8px" data-sms-status="open-config" onClick=${() => { S.view = 'ops'; renderApp(); setTimeout(() => { const el = document.getElementById('ops-panel-5-telnyx-config-numbers'); if (el) el.scrollIntoView({ block: 'center' }); }, 60); }}>Open the SMS provider settings</button>
+    </div>`}
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Name</th><th>Trigger</th><th>Action</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(r => html`<tr>
@@ -2308,7 +2326,7 @@ const OpsList = ({ path }) => {
 
 const OpsPanel = ({ panel }) => {
   const [open, setOpen] = useState(false);
-  return html`<div class="ops-panel bg-white border rounded-xl mb-3">
+  return html`<div class="ops-panel bg-white border rounded-xl mb-3" id=${'ops-panel-' + String(panel.title || '').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}>
     <div class="flex items-center justify-between px-4 py-2 cursor-pointer" onClick=${() => setOpen(o => !o)}>
       <span class="font-semibold text-gray-800 text-sm">${panel.title}</span>
       <span class="text-xs text-gray-400">${plural((panel.actions || []).length,'control','controls')} ${open ? '\u2212' : '+'}</span>
