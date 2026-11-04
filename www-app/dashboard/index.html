@@ -594,6 +594,13 @@ const Profile = () => {
   const upload = async (e) => {
     const file = (e.target.files || [])[0];
     if (!file) return;
+    // Refuse an oversized picture HERE, before the upload starts: the server answers 413 with
+    // this same sentence, but only after the whole file has crossed the wire.
+    if (file.size > 2031616) {
+      st.busy = false; st.notice = null;
+      st.error = 'That file is too large to upload. The maximum size is 2 MB - please choose a smaller image and try again.';
+      renderApp(); return;
+    }
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
       const fd = new FormData(); fd.append('file', file, file.name || 'avatar');
@@ -858,6 +865,11 @@ const Branding = () => {
   const upload = async (e) => {
     const file = (e.target.files || [])[0];
     if (!file) return;
+    if (file.size > 2031616) {
+      st.busy = false; st.notice = null;
+      st.error = 'That file is too large to upload. The maximum size is 2 MB - please choose a smaller image and try again.';
+      renderApp(); return;
+    }
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
       const fd = new FormData(); fd.append('file', file, file.name || 'logo');
@@ -1727,6 +1739,153 @@ const Lists = () => {
 };
 
 // ===== TICKETS =====
+// ===== CALENDAR (2026-11-04) =====
+// A backend with no UI is a defect (David's standing rule). GET|POST /api/v1/calendar-events and
+// GET|PUT|DELETE /api/v1/calendar-events/:id were all mounted, `has_calendar` is granted by the
+// ENTERPRISE plan (a `feature_limits` row; feature_registry key `has_calendar`, enforced by
+// calendar_events_handler::create) and NO served page called any of them: the calendar table had
+// 0 rows and a customer paying $199/mo could not open the feature their plan sells. This screen is
+// that surface.
+//
+//   * The LIST route is not gated, so a workspace without the grant still sees its own (empty)
+//     calendar rather than an error it cannot act on. The CREATE route IS gated: a 402 comes back
+//     with the server's own sentence, and this screen shows that sentence plus the way to the plan
+//     page — never a dead form that looks broken.
+//   * Times are entered in the browser's local zone (`datetime-local`) and sent as UTC ISO, which is
+//     what the handler parses; every row is painted back with `utcTime`, the console's one formatter.
+//   * Every write re-reads the list from the server, so the table is the database's own answer and
+//     not a local guess.
+const Calendar = () => {
+  const st = viewState('calendar', {
+    list: [], loaded: false, error: null, notice: null, gated: null,
+    showNew: false, busy: null, editing: null, sortKey: 'start_at',
+    draft: { title: '', type: 'call', start: '', notes: '' }
+  });
+  const load = async () => {
+    st.error = null;
+    try {
+      const d = await API.get('/calendar-events?limit=200');
+      st.list = Array.isArray(d) ? d : [];
+    } catch (e) {
+      st.error = 'Could not load your calendar: ' + e.message;
+      st.list = [];
+    }
+    st.loaded = true; renderApp();
+  };
+  if (!st.loaded) { st.loaded = true; load(); }
+
+  const isGate = (e) => /current plan|upgrade to access/i.test(String(e && e.message || ''));
+  const blank = { title: '', type: 'call', start: '', notes: '' };
+  const localInput = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+  };
+
+  const openNew = () => {
+    st.showNew = true; st.editing = null; st.draft = Object.assign({}, blank);
+    st.error = null; st.notice = null; renderApp();
+  };
+  const openEdit = (ev) => {
+    st.showNew = true; st.editing = ev.id;
+    st.draft = { title: ev.title || '', type: ev.event_type || 'call', start: localInput(ev.start_at), notes: ev.description || '' };
+    st.error = null; st.notice = null; renderApp();
+  };
+
+  const save = async () => {
+    const title = (st.draft.title || '').trim();
+    if (!title) { st.error = 'An event needs a title.'; renderApp(); return; }
+    if (!st.draft.start) { st.error = 'Pick the date and time of the event.'; renderApp(); return; }
+    const when = new Date(st.draft.start);
+    if (isNaN(when.getTime())) { st.error = 'That date and time could not be read — use the picker.'; renderApp(); return; }
+    const body = { title: title, start_at: when.toISOString(), event_type: st.draft.type || 'call' };
+    const notes = (st.draft.notes || '').trim();
+    if (notes) body.description = notes;
+    const wasEditing = st.editing;
+    st.busy = 'save'; st.error = null; st.notice = null; renderApp();
+    try {
+      if (wasEditing) await API.put('/calendar-events/' + wasEditing, body);
+      else await API.post('/calendar-events', body);
+      st.notice = (wasEditing ? 'Updated "' : 'Added "') + title + '" on your calendar.';
+      st.showNew = false; st.editing = null; st.draft = Object.assign({}, blank);
+    } catch (e) {
+      if (isGate(e)) { st.gated = e.message; st.showNew = false; }
+      else st.error = 'Could not save the event: ' + e.message;
+    }
+    st.busy = null; await load();
+  };
+
+  const remove = async (ev) => {
+    if (!confirm('Delete "' + ev.title + '" from your calendar?')) return;
+    st.busy = 'rm:' + ev.id; st.error = null; st.notice = null; renderApp();
+    try {
+      await API.del('/calendar-events/' + ev.id);
+      st.notice = 'Deleted "' + ev.title + '".';
+    } catch (e) { st.error = 'Could not delete the event: ' + e.message; }
+    st.busy = null; await load();
+  };
+
+  const sorted = (st.list || []).slice().sort((a, b) => String(a.start_at || '').localeCompare(String(b.start_at || '')));
+  const now = Date.now();
+  const upcoming = sorted.filter(e => new Date(e.start_at).getTime() >= now - 60 * 60 * 1000);
+  const past = sorted.filter(e => new Date(e.start_at).getTime() < now - 60 * 60 * 1000).reverse();
+
+  const row = (ev, dim) => html`<tr data-event-id=${ev.id} style=${dim ? 'opacity:.6' : ''}>
+    <td class="font-medium">${ev.title}</td>
+    <td>${utcTime(ev.start_at)}</td>
+    <td><span class="badge badge-gray">${ev.event_type || 'call'}</span></td>
+    <td class="text-gray-500" style="max-width:320px">${ev.description || '—'}</td>
+    <td class="whitespace-nowrap">
+      <button type="button" class="btn btn-sm btn-outline" onClick=${() => openEdit(ev)}>Edit</button>
+      <button type="button" class="btn btn-sm btn-red" disabled=${st.busy === 'rm:' + ev.id} onClick=${() => remove(ev)}>${st.busy === 'rm:' + ev.id ? 'Deleting…' : 'Delete'}</button>
+    </td>
+  </tr>`;
+
+  return html`<div>
+    <div class="flex items-center justify-between mb-4" style="flex-wrap:wrap;gap:8px">
+      <h2 class="text-xl font-bold">Calendar</h2>
+      <div class="flex items-center gap-2" style="flex-wrap:wrap">
+        <button type="button" id="cal-new" class="btn btn-sm btn-green" onClick=${openNew} disabled=${!!st.gated}>+ New event</button>
+        <button type="button" class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
+      </div>
+    </div>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" id="cal-notice" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    ${st.gated && html`<div class="card" id="cal-gated" style="border-left:4px solid #b45309">
+      <p class="text-sm text-gray-700">${st.gated}</p>
+      <p class="text-xs text-gray-500 mt-2">The calendar is part of the Enterprise plan. Nothing was changed.</p>
+      <button type="button" class="btn btn-sm mt-3" onClick=${() => { S.view = 'billing'; renderApp(); }}>See the plans</button>
+    </div>`}
+    <div class="card">
+      <p class="text-sm text-gray-500 mb-3">Your own appointments, callbacks and reminders for this workspace. An event lives only in your account — nothing is sent to a caller from here.</p>
+      ${!st.loaded && html`<p class="text-sm text-gray-400">Loading your calendar…</p>`}
+      ${st.loaded && sorted.length === 0 && html`<p class="text-sm text-gray-400 py-4">Nothing on the calendar yet. Press “+ New event” to add a callback, an appointment or a reminder.</p>`}
+      ${upcoming.length > 0 && html`<h3 class="font-semibold mb-2">Upcoming</h3>
+        <table class="table" id="cal-upcoming"><thead><tr><th>Event</th><th>When</th><th>Type</th><th>Notes</th><th></th></tr></thead>
+          <tbody>${upcoming.map(e => row(e, false))}</tbody></table>`}
+      ${past.length > 0 && html`<h3 class="font-semibold mb-2 mt-6">Already passed</h3>
+        <table class="table" id="cal-past"><thead><tr><th>Event</th><th>When</th><th>Type</th><th>Notes</th><th></th></tr></thead>
+          <tbody>${past.map(e => row(e, true))}</tbody></table>`}
+    </div>
+    ${st.showNew && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showNew = false, st.editing = null, renderApp())}><div class="modal-content">
+      <h3 class="text-lg font-bold mb-4">${st.editing ? 'Edit event' : 'New event'}</h3>
+      <div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">What is it?</label><input class="input" id="cal-title" value=${st.draft.title || ''} onInput=${e => { st.draft.title = e.target.value; }} placeholder="Call back about the quote" /></div>
+        <div><label class="text-sm font-medium block mb-1">When</label><input class="input" id="cal-start" type="datetime-local" value=${st.draft.start || ''} onInput=${e => { st.draft.start = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" id="cal-type" value=${st.draft.type || 'call'} onChange=${e => { st.draft.type = e.target.value; }}>
+          ${['call', 'callback', 'appointment', 'reminder', 'other'].map(t => html`<option value=${t}>${t}</option>`)}
+        </select></div>
+        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><input class="input" id="cal-notes" value=${st.draft.notes || ''} onInput=${e => { st.draft.notes = e.target.value; }} placeholder="Anything you want beside the event" /></div>
+        <div class="flex gap-2 justify-end mt-4">
+          <button type="button" class="btn btn-outline" onClick=${() => { st.showNew = false; st.editing = null; st.error = null; renderApp(); }}>Cancel</button>
+          <button type="button" id="cal-save" class="btn" disabled=${st.busy === 'save'} onClick=${save}>${st.busy === 'save' ? 'Saving…' : (st.editing ? 'Save changes' : 'Add to calendar')}</button>
+        </div>
+      </div>
+    </div></div>`}
+  </div>`;
+};
+
 const Tickets = () => {
   const st = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
   // The list AND the counts. GET /api/v1/tickets/stats had no caller anywhere in this console, so
@@ -2413,6 +2572,7 @@ const App = () => {
     { id: 'templates', label: 'Templates', icon: '📋' },
     { id: 'messages', label: 'Messages', icon: '💬' },
     { id: 'followups', label: 'Follow-ups', icon: '⏰' },
+    { id: 'calendar', label: 'Calendar', icon: '📅' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'lists', label: 'Lists', icon: '🗂️' },
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
@@ -2422,7 +2582,7 @@ const App = () => {
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, tickets: Tickets, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
