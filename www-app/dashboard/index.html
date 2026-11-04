@@ -1508,6 +1508,7 @@ const Lists = () => {
     list: [], selected: null, leads: null, leadsErr: null,
     busy: null, error: null, notice: null,
     showNew: false, draft: { name: '', description: '' },
+    renaming: false, renameDraft: '',
     addOpen: false, pick: '', pickErr: null, pickList: null
   });
   const load = async () => {
@@ -1607,6 +1608,35 @@ const Lists = () => {
     }
   };
 
+  // RENAME — PUT /api/v1/lists/:id was mounted and had no caller anywhere in this console, so a
+  // list could be created but never corrected (a typo in its name was permanent). Same for DELETE
+  // below: a list the workspace made for itself could never be removed. Both write only the
+  // caller's own row (the handler binds tenant_id), and list_leads cascades on delete while
+  // leads are untouched — the confirm says so, because "delete" reads like "delete my people".
+  const renameList = async () => {
+    const nm = (st.renameDraft || '').trim();
+    if (!nm) { st.error = 'A list needs a name.'; renderApp(); return; }
+    st.busy = 'rename'; st.error = null; st.notice = null; renderApp();
+    try {
+      const r = await API.put('/lists/' + st.selected.id, { name: nm });
+      st.renaming = false; st.busy = null;
+      st.notice = 'List renamed to "' + ((r && r.name) || nm) + '".';
+    } catch (e) { st.busy = null; st.error = 'Could not rename the list: ' + e.message; }
+    await reload();
+  };
+  const deleteList = async () => {
+    const nm = st.selected.name;
+    if (!confirm('Delete the list "' + nm + '"?\n\nEveryone in it stays in your account and in Contacts — only the list goes.')) return;
+    st.busy = 'del'; st.error = null; st.notice = null; renderApp();
+    try {
+      await API.del('/lists/' + st.selected.id);
+      st.selected = null; st.leads = null; st.addOpen = false; st.leadsErr = null;
+      st.renaming = false; st.busy = null;
+      st.notice = 'List "' + nm + '" deleted. Its people are still in Contacts.';
+    } catch (e) { st.busy = null; st.error = 'Could not delete the list: ' + e.message; }
+    await load();
+  };
+
   const stamp = (v) => {
     if (!v) return '—';
     const d = new Date(v);
@@ -1649,9 +1679,20 @@ const Lists = () => {
         <h3 class="font-semibold">${st.selected.name}${st.leads ? html`<span class="text-sm text-gray-400"> — ${st.leads.length} ${st.leads.length === 1 ? 'person' : 'people'}</span>` : ''}</h3>
         <div class="flex gap-2" style="flex-wrap:wrap">
           <button type="button" id="list-add-lead" class="btn btn-sm" onClick=${openAdd} disabled=${st.busy === 'add'}>Add a lead</button>
+          <button type="button" id="list-rename" class="btn btn-sm btn-outline" onClick=${() => { st.renaming = true; st.renameDraft = st.selected.name || ''; st.error = null; st.notice = null; renderApp(); }}>Rename</button>
+          ${!st.selected.campaign_id && html`<button type="button" id="list-delete" class="btn btn-sm btn-red" disabled=${st.busy === 'del'} onClick=${deleteList}>${st.busy === 'del' ? 'Deleting…' : 'Delete list'}</button>`}
           <button type="button" class="btn btn-sm btn-outline" onClick=${() => { st.selected = null; st.leads = null; st.addOpen = false; st.leadsErr = null; renderApp(); }}>Close</button>
         </div>
       </div>
+      ${st.renaming && html`<div class="mb-4" id="list-rename-box" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <label class="text-sm font-medium block mb-1">List name</label>
+        <div class="flex gap-2" style="flex-wrap:wrap;align-items:center">
+          <input class="input" id="list-rename-input" style="max-width:420px" value=${st.renameDraft || ''} onInput=${e => { st.renameDraft = e.target.value; }} placeholder="After-hours callers" />
+          <button type="button" id="list-rename-save" class="btn btn-sm" disabled=${st.busy === 'rename'} onClick=${renameList}>${st.busy === 'rename' ? 'Saving…' : 'Save name'}</button>
+          <button type="button" class="btn btn-sm btn-outline" onClick=${() => { st.renaming = false; st.error = null; renderApp(); }}>Cancel</button>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">Renaming keeps the list's link and everyone already in it.</p>
+      </div>`}
       ${st.addOpen && html`<div class="mb-4" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px">
         <label class="text-sm font-medium block mb-1">Which lead?</label>
         ${st.pickList === null
