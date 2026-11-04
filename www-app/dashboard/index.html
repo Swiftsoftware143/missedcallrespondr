@@ -1598,7 +1598,13 @@ const Lists = () => {
     } catch (e) { st.error = 'Could not create the list: ' + e.message; }
     st.busy = null;
     await load();
-    if (made && made.id) openList(made);
+    // openList() clears `notice` (a stale sentence from a previous list must not follow you into a
+    // different one), so the creation sentence is set AFTER it opens the new list.
+    if (made && made.id) {
+      await openList(made);
+      st.notice = 'List "' + name + '" created. Press “Add a lead” to put someone in it.';
+      renderApp();
+    }
   };
 
   const stamp = (v) => {
