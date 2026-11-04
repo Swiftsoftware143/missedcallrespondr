@@ -3192,6 +3192,8 @@ const App = () => {
     const [avMsg, setAvMsg] = useState(null);
     const [pMsg, setPMsg] = useState(null);
     const [pwMsg, setPwMsg] = useState(null);
+    const [soMsg, setSoMsg] = useState(null);
+    const [soBusy, setSoBusy] = useState(false);
     const [name, setName] = useState('');
     const [company, setCompany] = useState('');
     // The profile username (the fleet-wide `users.username`): the API has carried it on
@@ -3280,6 +3282,23 @@ const App = () => {
       } catch (e) { setPwMsg({ ok: false, text: (e && e.message) || 'Could not change the password' }); }
       setBusy(false);
     };
+    // End every OTHER signed-in device (2026-11-04). POST /auth/logout-all has been mounted since
+    // 2026-11-01 and the customer dashboard presses it; this console had no way to. The route bumps
+    // users.sessions_valid_from and answers a FRESH token for THIS tab because the caller's own old
+    // token dies with the others — adopting it is what keeps the operator on the screen in front of
+    // them. A 200 without a token means nothing moved, so it is reported as a failure rather than
+    // claiming a sign-out that did not happen.
+    const signOutOthers = async () => {
+      if (!window.confirm('Sign out every other device signed into this account? This screen stays signed in.')) return;
+      setSoBusy(true); setSoMsg(null);
+      try {
+        const d = await API.post('/auth/logout-all', {});
+        if (!d || !d.token) throw new Error('The server did not return a new session, so nothing was changed.');
+        API.setAuth(d.token, Object.assign({}, API.user || {}));
+        setSoMsg({ ok: true, text: d.message || 'Every other device has been signed out. This one stays signed in.' });
+      } catch (e) { setSoMsg({ ok: false, text: (e && e.message) || 'Could not sign the other devices out' }); }
+      setSoBusy(false);
+    };
     // Two-arm flow, exactly like the customer dashboard: this form only ASKS. The server writes one
     // pending row and mails the NEW address; nothing moves until that mailbox opens the link. A
     // reserved test address answers delivered:false and its own sentence is shown - nothing sent,
@@ -3348,6 +3367,16 @@ const App = () => {
             <input class="input" id="mc-acct-cp" type="password" autocomplete="current-password" value=${cp} onInput=${e => setCp(e.target.value)} /></div>
         </div>
         <div class="mt-3"><button class="btn" id="mc-acct-save-pw" disabled=${busy} onClick=${savePassword}>Save</button>${msg(pwMsg)}</div>
+      </div>
+      <!-- Signed-in devices (2026-11-04). The logout-all route was mounted and the customer dashboard
+           had a control for it, but this operator console did not: an operator who believed their
+           password had leaked could change the password but could not end a session sitting on a
+           device they no longer hold. This console has no impersonation mode, so the press always
+           acts on the signed-in operator's own account. -->
+      <div class="card mb-4">
+        <div class="font-semibold mb-3">Signed-in devices</div>
+        <p class="text-sm text-gray-600 mb-3">Signed in somewhere you no longer control — an old phone, a shared laptop? This ends every other session on the account. This screen stays signed in.</p>
+        <div><button class="btn" id="mc-acct-signout-all" disabled=${soBusy} onClick=${signOutOthers}>Sign out every other device</button>${msg(soMsg)}</div>
       </div>
       <!-- Sign-in address (cron 2026-10-20). The email under "Profile" below was a read-only div: the
            change route pair existed and the customer dashboard offered it, but this operator console
