@@ -25,6 +25,11 @@ pub struct ListQuery {
 }
 
 /// GET /api/v1/lists — all lists for the tenant, optionally filtered by campaign.
+///
+/// `lead_count` rides along (card t_e3b93d6c): the Lists screen the tenant console gained on
+/// 2026-11-04 shows how many people each list holds, and asking per list from the browser would
+/// have been one request per row. Computed with a correlated subquery against the (list_id,
+/// lead_id) primary key of `list_leads`.
 pub async fn list(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
@@ -34,7 +39,8 @@ pub async fn list(
     let offset = q.offset.unwrap_or(0).max(0);
     let items = if let Some(cid) = q.campaign_id {
         sqlx::query_as::<_, List>(
-            "SELECT * FROM lists WHERE tenant_id = $1 AND campaign_id = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            "SELECT l.*, (SELECT COUNT(*) FROM list_leads ll WHERE ll.list_id = l.id) AS lead_count \
+             FROM lists l WHERE l.tenant_id = $1 AND l.campaign_id = $2 ORDER BY l.created_at DESC LIMIT $3 OFFSET $4",
         )
         .bind(claims.aid)
         .bind(cid)
@@ -44,7 +50,8 @@ pub async fn list(
         .await?
     } else {
         sqlx::query_as::<_, List>(
-            "SELECT * FROM lists WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            "SELECT l.*, (SELECT COUNT(*) FROM list_leads ll WHERE ll.list_id = l.id) AS lead_count \
+             FROM lists l WHERE l.tenant_id = $1 ORDER BY l.created_at DESC LIMIT $2 OFFSET $3",
         )
         .bind(claims.aid)
         .bind(limit)
@@ -56,6 +63,12 @@ pub async fn list(
 }
 
 /// GET /api/v1/lists/:id/leads — the leads currently in a list.
+///
+/// TENANT SCOPING (2026-11-04, card t_e3b93d6c): membership rows are scoped by the list, which is
+/// already checked against `claims.aid`, but the JOIN onto `leads` carried no tenant predicate — so
+/// a membership row naming ANOTHER tenant's lead would have printed that lead's name, phone and
+/// email here. `add_lead` below can no longer create such a row; this join makes any row written
+/// before that fix (or by a future caller) invisible instead of leaked.
 pub async fn list_leads(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
@@ -74,11 +87,12 @@ pub async fn list_leads(
     let items = sqlx::query_as::<_, ListLead>(
         "SELECT l.id, l.name, l.phone, l.email, l.status, l.tags, ll.added_at
          FROM list_leads ll
-         JOIN leads l ON l.id = ll.lead_id
+         JOIN leads l ON l.id = ll.lead_id AND l.tenant_id = $2
          WHERE ll.list_id = $1
          ORDER BY ll.added_at DESC",
     )
     .bind(id)
+    .bind(claims.aid)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(items))
@@ -99,6 +113,20 @@ pub async fn add_lead(
             .await?;
     if owned.is_none() {
         return Err(AppError::NotFound("List not found".into()));
+    }
+    // The lead must belong to THIS tenant (card t_e3b93d6c). Without this check any authenticated
+    // caller could put another workspace's lead id into their own list and then read that lead's
+    // name, phone and email straight back out of GET /lists/:id/leads. `list_leads` has no
+    // tenant column, so the ONLY place this can be enforced is here — a missing lead answers the
+    // same 404 as a missing list, so the route is not an oracle for other tenants' lead ids.
+    let lead_owned: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM leads WHERE id = $1 AND tenant_id = $2")
+            .bind(req.lead_id)
+            .bind(claims.aid)
+            .fetch_optional(&state.pool)
+            .await?;
+    if lead_owned.is_none() {
+        return Err(AppError::NotFound("Lead not found".into()));
     }
     sqlx::query(
         "INSERT INTO list_leads (list_id, lead_id) VALUES ($1, $2)
@@ -128,11 +156,17 @@ pub async fn remove_lead(
     if owned.is_none() {
         return Err(AppError::NotFound("List not found".into()));
     }
-    sqlx::query("DELETE FROM list_leads WHERE list_id = $1 AND lead_id = $2")
+    // A DELETE that matched no row used to answer `{"removed": true}` (card t_e3b93d6c): the tenant
+    // console's Lists screen trusts this answer, so a stale tab (the lead was already taken off the
+    // list elsewhere) would have been told the removal happened. Scoped writes say what they did.
+    let result = sqlx::query("DELETE FROM list_leads WHERE list_id = $1 AND lead_id = $2")
         .bind(list_id)
         .bind(lead_id)
         .execute(&state.pool)
         .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("That lead is not in this list".into()));
+    }
     Ok(Json(
         json!({ "removed": true, "list_id": list_id, "lead_id": lead_id }),
     ))

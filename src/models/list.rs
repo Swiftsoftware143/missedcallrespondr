@@ -12,6 +12,11 @@ pub struct List {
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// How many leads this list holds (card t_e3b93d6c). Computed by `lists_handler::list` as
+    /// `lead_count`; `#[sqlx(default)]` keeps every other `SELECT * FROM lists` readable, in which
+    /// the column is absent and the count is simply 0 (the create/update answers re-read one row).
+    #[sqlx(default)]
+    pub lead_count: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

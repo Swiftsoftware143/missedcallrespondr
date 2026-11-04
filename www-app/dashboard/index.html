@@ -56,6 +56,10 @@ window.appGuidePages = {
   messages:     { title: "Messages", desc: "Every text sent and received on this account, in one thread list.", actions: ["Read a conversation", "Reply to a customer"] },
   followups:    { title: "Follow-ups", desc: "Messages scheduled to go out later, so a lead is not forgotten after the first reply.", actions: ["See what is queued", "Check what has already sent"] },
   contacts:     { title: "Contacts", desc: "The people who have called or messaged you, collected into one list. Export CSV saves the whole list to a spreadsheet.", actions: ["Search your contacts", "Open a contact's history", "Export the list as a CSV"] },
+  // LISTS (card t_e3b93d6c): the screen that finally calls the lists endpoints. Without this entry
+  // the guide's "?" would silently disappear on the new tab, which is how this console signals
+  // "this screen has no guide" - and the screen is real.
+  lists:        { title: "Lists", desc: "Named groups of your leads. Every campaign keeps its own list and a lead carrying that campaign's tag joins it automatically, so this is where you see everyone a campaign has collected. Removing someone takes them off this list only - they stay in your account and in Contacts.", actions: ["Press View leads to open a list", "Press Remove beside a person to take them off the list", "Press Add a lead to put someone back on it", "Press + New list to make a list of your own"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
   // YOUR TEAM (2026-10-31): the screen that gives a colleague their own login. Listed here because
@@ -1481,6 +1485,200 @@ const Contacts = () => {
   </div>`;
 };
 
+// ===== LISTS (card t_e3b93d6c, 2026-11-04) =====
+// GET|POST /lists, GET /lists/:id/leads, POST /lists/:id/leads and DELETE
+// /lists/:id/leads/:lead_id were all mounted, and NO served page called any of them: a list existed
+// only inside the database, so a customer could not see who a campaign had collected and — the
+// reported complaint — could not take a lead off a list at all. This screen is that surface.
+//
+//   * The index carries `lead_count`, computed server-side (lists_handler::list), so "how many
+//     people are in this list" costs one request, not one per row.
+//   * Remove ends the MEMBERSHIP, never the person: the lead stays in the account and in Contacts.
+//     The confirm text says exactly that, because a Remove button beside a name reads like a delete.
+//   * "Add a lead" exists so Remove is not a one-way door — without it one misclick could never be
+//     undone from the interface.
+//   * A list is created by the SERVER for each campaign (lists_handler::ensure_campaign_list), so a
+//     campaign's list is shown as "Campaign" and the screen never offers to create one by hand for
+//     a campaign. Standalone lists can be made here.
+//   * Everything removing answers is trusted: DELETE says 404 when the person was not in the list
+//     (a stale tab), so the row is re-read from the server after every write instead of being
+//     dropped from the local array.
+const Lists = () => {
+  const st = viewState('lists', {
+    list: [], selected: null, leads: null, leadsErr: null,
+    busy: null, error: null, notice: null,
+    showNew: false, draft: { name: '', description: '' },
+    addOpen: false, pick: '', pickErr: null, pickList: null
+  });
+  const load = async () => {
+    try {
+      const d = await API.get('/lists');
+      st.list = Array.isArray(d) ? d : [];
+    } catch (e) { st.error = 'Could not load your lists: ' + e.message; st.list = []; }
+    renderApp();
+  };
+  if (!st._loaded) { st._loaded = true; load(); }
+
+  const openList = async (l) => {
+    st.selected = l; st.leads = null; st.leadsErr = null;
+    st.addOpen = false; st.pick = ''; st.pickList = null; st.pickErr = null;
+    st.error = null; st.notice = null; renderApp();
+    try {
+      const d = await API.get('/lists/' + l.id + '/leads');
+      st.leads = Array.isArray(d) ? d : [];
+    } catch (e) { st.leadsErr = 'Could not load the people in this list: ' + e.message; st.leads = []; }
+    renderApp();
+  };
+
+  // After every write: re-read BOTH the list's people and the index, so the count on the row above
+  // matches the table below instead of drifting.
+  const reload = async () => {
+    const sel = st.selected;
+    if (sel) {
+      try {
+        const d = await API.get('/lists/' + sel.id + '/leads');
+        st.leads = Array.isArray(d) ? d : [];
+      } catch (e) { st.leadsErr = 'Could not load the people in this list: ' + e.message; }
+    }
+    try {
+      const l = await API.get('/lists');
+      st.list = Array.isArray(l) ? l : [];
+      if (sel) st.selected = st.list.filter(x => x.id === sel.id)[0] || sel;
+    } catch (e) { /* the index keeps its last good copy rather than blanking the screen */ }
+    renderApp();
+  };
+
+  const removeLead = async (lead) => {
+    const who = lead.name || lead.phone || 'this lead';
+    if (!confirm('Remove ' + who + ' from "' + st.selected.name + '"?\n\nThey stay in your account and in Contacts — only their place in this list ends.')) return;
+    st.busy = 'rm:' + lead.id; st.error = null; st.notice = null; renderApp();
+    try {
+      await API.del('/lists/' + st.selected.id + '/leads/' + lead.id);
+      st.notice = who + ' removed from ' + st.selected.name + '. They are still in your account.';
+    } catch (e) { st.error = 'Could not remove ' + who + ' from this list: ' + e.message; }
+    st.busy = null; reload();
+  };
+
+  const openAdd = async () => {
+    st.addOpen = true; st.pick = ''; st.pickErr = null; st.error = null; st.notice = null;
+    st.pickList = null; renderApp();
+    try {
+      // Read the roster fresh every time the picker opens: a lead added a minute ago must be
+      // selectable, and this console has no cache to invalidate.
+      const d = await API.get('/leads');
+      st.pickList = Array.isArray(d) ? d : [];
+    } catch (e) { st.pickErr = 'Could not load your leads: ' + e.message; st.pickList = []; }
+    renderApp();
+  };
+
+  const addLead = async () => {
+    if (!st.pick) { st.pickErr = 'Pick a lead first.'; renderApp(); return; }
+    const picked = (st.pickList || []).filter(l => l.id === st.pick)[0];
+    st.busy = 'add'; st.error = null; st.notice = null; st.pickErr = null; renderApp();
+    try {
+      await API.post('/lists/' + st.selected.id + '/leads', { lead_id: st.pick });
+      st.notice = (picked && picked.name ? picked.name : 'That lead') + ' added to ' + st.selected.name;
+      st.addOpen = false; st.pick = '';
+    } catch (e) { st.error = 'Could not add that lead to the list: ' + e.message; }
+    st.busy = null; reload();
+  };
+
+  const createList = async () => {
+    const name = (st.draft.name || '').trim();
+    if (!name) { st.error = 'A list needs a name.'; renderApp(); return; }
+    st.busy = 'new'; st.error = null; st.notice = null; renderApp();
+    let made = null;
+    try {
+      const body = { name: name };
+      const desc = (st.draft.description || '').trim();
+      if (desc) body.description = desc;
+      made = await API.post('/lists', body);
+      st.notice = 'List "' + name + '" created';
+      st.showNew = false; st.draft = { name: '', description: '' };
+    } catch (e) { st.error = 'Could not create the list: ' + e.message; }
+    st.busy = null;
+    await load();
+    if (made && made.id) openList(made);
+  };
+
+  const stamp = (v) => {
+    if (!v) return '—';
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? '—' : utcTime(v);
+  };
+
+  return html`<div>
+    <div class="flex items-center justify-between mb-4" style="flex-wrap:wrap;gap:8px">
+      <h2 class="text-xl font-bold">Lists</h2>
+      <div class="flex items-center gap-2" style="flex-wrap:wrap">
+        <button type="button" id="lists-new" class="btn btn-sm btn-green" onClick=${() => { st.showNew = true; st.draft = { name: '', description: '' }; st.error = null; st.notice = null; renderApp(); }}>+ New list</button>
+        <button type="button" class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
+      </div>
+    </div>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" id="lists-notice" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    <div class="card">
+      <p class="text-sm text-gray-500 mb-3">A list is a named group of your leads. Every campaign keeps its own list, and a lead carrying that campaign's tag joins it automatically — so this is where you see everyone a campaign has collected, and take someone off it.</p>
+      <table class="table" id="lists-table"><thead><tr><th>List</th><th>People</th><th>Source</th><th></th></tr></thead>
+        <tbody>
+          ${st.list.map(l => html`<tr>
+            <td class="font-medium">${l.name}${l.description ? html`<div class="text-xs text-gray-400">${l.description}</div>` : ''}</td>
+            <td>${l.lead_count == null ? '—' : l.lead_count}</td>
+            <td>${l.campaign_id ? html`<span class="badge badge-blue">Campaign</span>` : html`<span class="badge badge-gray">Your own</span>`}</td>
+            <td><button type="button" class="btn btn-sm btn-outline" onClick=${() => openList(l)}>${st.selected && st.selected.id === l.id ? 'Viewing' : 'View leads'}</button></td>
+          </tr>`)}
+          ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-6">No lists yet. One is created for each of your campaigns the moment a lead carries its tag — or press “+ New list” to make one of your own.</td></tr>`}
+        </tbody></table>
+    </div>
+    ${st.showNew && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showNew = false, renderApp())}><div class="modal-content">
+      <h3 class="text-lg font-bold mb-4">New list</h3>
+      <div class="space-y-3">
+        <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" id="lists-name" value=${st.draft.name || ''} onInput=${e => { st.draft.name = e.target.value; }} placeholder="After-hours callers" /></div>
+        <div><label class="text-sm font-medium block mb-1">Description (optional)</label><input class="input" value=${st.draft.description || ''} onInput=${e => { st.draft.description = e.target.value; }} placeholder="Why these people are grouped together" /></div>
+        <div class="flex gap-2 justify-end mt-4"><button type="button" class="btn btn-outline" onClick=${() => { st.showNew = false; renderApp(); }}>Cancel</button><button type="button" id="lists-create" class="btn" disabled=${st.busy === 'new'} onClick=${createList}>${st.busy === 'new' ? 'Creating…' : 'Create list'}</button></div>
+      </div>
+    </div></div>`}
+    ${st.selected && html`<div class="card" id="list-detail" data-list-id=${st.selected.id} data-list-name=${st.selected.name}>
+      <div class="flex items-center justify-between mb-3" style="flex-wrap:wrap;gap:8px">
+        <h3 class="font-semibold">${st.selected.name}${st.leads ? html`<span class="text-sm text-gray-400"> — ${st.leads.length} ${st.leads.length === 1 ? 'person' : 'people'}</span>` : ''}</h3>
+        <div class="flex gap-2" style="flex-wrap:wrap">
+          <button type="button" id="list-add-lead" class="btn btn-sm" onClick=${openAdd} disabled=${st.busy === 'add'}>Add a lead</button>
+          <button type="button" class="btn btn-sm btn-outline" onClick=${() => { st.selected = null; st.leads = null; st.addOpen = false; st.leadsErr = null; renderApp(); }}>Close</button>
+        </div>
+      </div>
+      ${st.addOpen && html`<div class="mb-4" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <label class="text-sm font-medium block mb-1">Which lead?</label>
+        ${st.pickList === null
+          ? html`<p class="text-sm text-gray-400">Loading your leads…</p>`
+          : html`<div class="flex gap-2" style="flex-wrap:wrap;align-items:center">
+              <select class="input" id="list-pick" style="max-width:420px" value=${st.pick} onChange=${e => { st.pick = e.target.value; renderApp(); }}>
+                <option value="">Pick a lead…</option>
+                ${st.pickList.map(l => html`<option value=${l.id}>${(l.name || '(no name)') + (l.phone ? ' · ' + l.phone : (l.email ? ' · ' + l.email : ''))}</option>`)}
+              </select>
+              <button type="button" id="list-add-confirm" class="btn btn-sm" disabled=${st.busy === 'add'} onClick=${addLead}>${st.busy === 'add' ? 'Adding…' : 'Add to list'}</button>
+              <button type="button" class="btn btn-sm btn-outline" onClick=${() => { st.addOpen = false; st.pickErr = null; renderApp(); }}>Cancel</button>
+            </div>
+            ${st.pickList.length === 0 && !st.pickErr && html`<p class="text-sm text-gray-400 mt-2">You have no leads yet, so there is nobody to add. Leads arrive from your calls and messages.</p>`}`}
+        ${st.pickErr && html`<p class="text-sm text-red-700 mt-2">${st.pickErr}</p>`}
+      </div>`}
+      ${st.leadsErr && html`<p class="text-sm text-red-700">${st.leadsErr}</p>`}
+      ${st.leads === null && !st.leadsErr && html`<p class="text-sm text-gray-400">Loading…</p>`}
+      ${st.leads && html`<table class="table" id="list-leads"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+          ${st.leads.map(l => html`<tr data-lead-id=${l.id}>
+            <td class="font-medium">${l.name || '(no name)'}</td>
+            <td>${l.phone || '—'}</td>
+            <td>${l.email || '—'}</td>
+            <td><span class="badge badge-gray">${l.status || '—'}</span></td>
+            <td class="text-gray-500">${stamp(l.added_at)}</td>
+            <td><button type="button" id=${'rm-' + l.id} class="btn btn-sm btn-red" disabled=${st.busy === 'rm:' + l.id} onClick=${() => removeLead(l)}>${st.busy === 'rm:' + l.id ? 'Removing…' : 'Remove'}</button></td>
+          </tr>`)}
+          ${st.leads.length === 0 && html`<tr><td colspan="6" class="text-center text-gray-400 py-6">Nobody is in this list right now.</td></tr>`}
+        </tbody></table>`}
+    </div>`}
+  </div>`;
+};
+
 // ===== TICKETS =====
 const Tickets = () => {
   const st = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
@@ -2169,6 +2367,7 @@ const App = () => {
     { id: 'messages', label: 'Messages', icon: '💬' },
     { id: 'followups', label: 'Follow-ups', icon: '⏰' },
     { id: 'contacts', label: 'Contacts', icon: '👥' },
+    { id: 'lists', label: 'Lists', icon: '🗂️' },
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'team', label: 'Your team', icon: '🤝' },
@@ -2176,7 +2375,7 @@ const App = () => {
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, tickets: Tickets, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, tickets: Tickets, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
