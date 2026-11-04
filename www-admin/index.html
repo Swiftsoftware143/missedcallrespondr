@@ -3009,7 +3009,7 @@ const App = () => {
           <p class="text-xs text-gray-500">Edit a cap (blank = unset), or toggle an on/off feature. Values save immediately through the gate's own resolver.</p></div>
         <div style="overflow-x:auto">
           <table class="table">
-            <thead><tr><th>Feature</th>${plans.map(p => html`<th>${p.name}${p.is_top ? html` <span class="badge badge-purple">top</span>` : ''}<div class="text-xs font-normal text-gray-400">${p.slug}</div></th>`)}</tr></thead>
+            <thead><tr><th>Feature</th>${plans.map(p => html`<th>${p.name}${p.is_top ? html` <span class="badge badge-purple">top</span>` : ''}${p.is_active === false ? html` <span class="badge badge-yellow">retired</span>` : ''}<div class="text-xs font-normal text-gray-400">${p.slug}</div></th>`)}</tr></thead>
             <tbody>
               ${registry.map(f => {
                 const row = gmap[f.key] || {};
@@ -3023,12 +3023,22 @@ const App = () => {
                   ${plans.map(p => {
                     const v = p.values ? p.values[f.key] : null;
                     const resolved = row[p.slug] != null ? row[p.slug] : '';
-                    return html`<td data-feature=${f.key} data-plan=${p.slug}>
-                      ${f.kind === 'limit'
-                        ? html`<${LimitCell} value=${v} unit=${f.unit} busy=${busy} onSave=${n => setCell(p.slug, f.key, n)} />`
-                        : html`<${FlagCell} on=${v === true} busy=${busy} onSave=${n => setCell(p.slug, f.key, n)} />`}
-                      <div class="text-xs text-gray-400 mt-1">${resolved}</div>
-                    </td>`;
+                    // A RETIRED plan (is_active=false) is still in `/admin/plans`, but no workspace
+                    // can be assigned to it (the pickers below offer active plans only), so an edit
+                    // here used to save cleanly and change nothing for any customer — a silent
+                    // no-effect write. The cell is read-only text that says why, and the header
+                    // carries a `retired` badge, so the two $49 tiers are no longer indistinguishable.
+                    return p.is_active === false
+                      ? html`<td data-feature=${f.key} data-plan=${p.slug} data-plan-retired="1">
+                          <div class="text-xs text-gray-500">Not editable — this plan is retired, so no workspace is on it and a change here would affect nobody.</div>
+                          <div class="text-xs text-gray-400 mt-1">stored: ${resolved === '' ? 'unset' : resolved}</div>
+                        </td>`
+                      : html`<td data-feature=${f.key} data-plan=${p.slug}>
+                          ${f.kind === 'limit'
+                            ? html`<${LimitCell} value=${v} unit=${f.unit} busy=${busy} onSave=${n => setCell(p.slug, f.key, n)} />`
+                            : html`<${FlagCell} on=${v === true} busy=${busy} onSave=${n => setCell(p.slug, f.key, n)} />`}
+                          <div class="text-xs text-gray-400 mt-1">${resolved}</div>
+                        </td>`;
                   })}
                 </tr>`;
               })}
