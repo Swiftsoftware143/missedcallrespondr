@@ -564,15 +564,19 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        // 136 entries / 136 distinct paths (the operator's workspace-suspension arm
+        // 137 entries / 137 distinct paths (the operator's re-issue-credentials arm
+        // `POST /api/v1/admin/tenants/:id/resend-credentials` joined on 2026-11-05 with the
+        // "never received the email" remedy — a PROTECTED `/api/v1/admin/*` mount like the rest of
+        // that block, so both anonymous lists are untouched and protected went 118 → 119; before
+        // it, 136 entries / 136 distinct paths (the operator's workspace-suspension arm
         // `POST /api/v1/admin/tenants/:id/suspension` joined on 2026-11-01 — a PROTECTED
         // `/api/v1/admin/*` mount like the rest of that block, so both anonymous lists are
         // untouched; before it, 135 entries / 135 distinct paths).
-        assert_eq!(lits.len(), 136, "mounted .route entries");
+        assert_eq!(lits.len(), 137, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 136, "distinct mounted paths");
+        assert_eq!(uniq.len(), 137, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
