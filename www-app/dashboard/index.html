@@ -2318,7 +2318,11 @@ const Billing = () => {
       // /tickets afterwards only made the server answer `already_open` for the row it had just
       // written, and this screen then told the customer "You already have an open request" on their
       // FIRST press. Read the server's flag: file only when it did NOT record.
-      const rb = (e && e.body) || {};
+      // `var`, not `const`: the branches that read it (`autoFiled` / `recorded`, below) run AFTER
+      // this catch block closes, so a block-scoped binding would throw a ReferenceError there and
+      // leave the buyer staring at the red refusal line with no confirmation — the exact shape
+      // measured in Chromium on the first run of this fix (2026-11-05).
+      var rb = (e && e.body) || {};
       var recorded = rb.request_recorded === true;
       var alreadyOpen = !!(rb.plan_request && rb.plan_request.already_open === true);
       st.requestFor = (noProvider && !recorded)
@@ -2365,7 +2369,11 @@ const Billing = () => {
         ? 'You already have an open request for the ' + nameOf(p) + ' plan \u2014 our team is on it,'
           + ' and its live status is in the list below.'
         : 'Request recorded \u2014 nothing was charged. Our team will move this workspace to the '
-          + nameOf(p) + ' plan and confirm here; its live status is in the list below.';
+          + nameOf(p) + ' plan and confirm here; its live status is in the list below.'
+          // The server now emails the buyer a receipt on THIS door too (2026-11-05): the refusal
+          // carries `receipt_emailed`, so the promise is made only when a message was really queued
+          // — the same rule the ticket route's `acknowledged` follows below.
+          + (rb.receipt_emailed === true ? ' A copy is in your inbox.' : '');
       st.error = null;
       loadPlanRequests(st);
       renderApp();
