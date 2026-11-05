@@ -343,37 +343,55 @@ pub async fn create(
 /// suppression — so a probe account is recorded `withheld` and no message is attempted.
 /// Best-effort by construction: a mail failure is logged and never fails a filed request.
 async fn notify_customer_of_billing_request(state: &AppState, ticket: &Ticket) -> bool {
+    send_billing_request_receipt(&state.pool, ticket.tenant_id, &ticket.subject).await
+}
+
+/// The plan-request RECEIPT, reachable from the till as well as from the tickets door.
+///
+/// Two doors file the same ask: the Tickets screen (`POST /api/v1/tickets`, source `billing` /
+/// `plan_request`) and the console's Upgrade button (`POST /api/v1/checkout/create`, which records
+/// the row server-side when no provider can charge). Only the FIRST one emailed the customer, so a
+/// buyer who pressed Upgrade got a 503 with a reassuring sentence and an empty inbox — while the
+/// identical ask filed from the neighbouring screen produced a receipt. Measured 2026-11-05 on a
+/// probe workspace: refusal 503, ticket recorded, and exactly one mail row (the signup
+/// `welcome_credentials`) — no receipt.
+///
+/// Takes the pool rather than `AppState` so the checkout route can call it without restructuring
+/// its extractors. Best-effort by construction: the row IS the record, and a mail failure must
+/// never turn a filed ask into an error. A reserved/harness recipient is withheld by the sender.
+pub(crate) async fn send_billing_request_receipt(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    subject: &str,
+) -> bool {
     let owner: Option<(Option<String>, String)> = match sqlx::query_as(
         "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
     )
-    .bind(ticket.tenant_id)
-    .fetch_optional(&state.pool)
+    .bind(tenant_id)
+    .fetch_optional(pool)
     .await
     {
         Ok(row) => row,
         Err(e) => {
-            tracing::error!(
-                "tickets.create: owner lookup failed (tenant_id={}): {e}",
-                ticket.tenant_id
-            );
+            tracing::error!("plan-request receipt: owner lookup failed (tenant_id={}): {e}", tenant_id);
             return false;
         }
     };
     let Some((name, email)) = owner else {
         tracing::warn!(
-            "tickets.create: no user to acknowledge for tenant {}",
-            ticket.tenant_id
+            "plan-request receipt: no user to acknowledge for tenant {}",
+            tenant_id
         );
         return false;
     };
     let vars = serde_json::json!({
         "name": name.unwrap_or_else(|| "there".to_string()),
-        "request_subject": ticket.subject,
+        "request_subject": subject,
         "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
     });
     match crate::email::send_template_email(
-        &state.pool,
-        ticket.tenant_id,
+        pool,
+        tenant_id,
         &email,
         "billing_request_receipt",
         &vars,
@@ -382,10 +400,7 @@ async fn notify_customer_of_billing_request(state: &AppState, ticket: &Ticket) -
     {
         Ok(()) => true,
         Err(e) => {
-            tracing::warn!(
-                "tickets.create: plan-request receipt to {email} failed (ticket {}): {e}",
-                ticket.id
-            );
+            tracing::warn!("plan-request receipt to {email} failed (tenant {tenant_id}): {e}");
             false
         }
     }

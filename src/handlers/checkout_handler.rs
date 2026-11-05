@@ -663,6 +663,7 @@ pub async fn create_checkout_session(
                     tenant_id,
                     requested_plan_id,
                     "no payment provider is connected on this installation",
+                    true,
                 )
                 .await;
                 return Ok(no_provider_refusal(plan_request).into_response());
@@ -722,6 +723,7 @@ pub async fn create_checkout_session(
                 tenant_id,
                 requested_plan_id,
                 &format!("no active {provider_type} provider is configured"),
+                true,
             )
             .await;
             return Ok(no_provider_refusal(plan_request).into_response());
@@ -753,6 +755,7 @@ pub async fn create_checkout_session(
             tenant_id,
             requested_plan_id,
             &format!("the configured {provider_type} provider has no API key"),
+            true,
         )
         .await;
         return Ok(no_provider_refusal(plan_request).into_response());
@@ -2757,6 +2760,7 @@ async fn hand_off_to_payment_link(
         tenant_id,
         plan_id,
         &format!("the buyer was handed to the plan's own hosted payment page ({url})"),
+        false,
     )
     .await;
 
@@ -2838,6 +2842,13 @@ async fn hand_off_to_payment_link(
 /// `request_recorded` tells that console the ask is already filed, so it need not file a twin.
 fn no_provider_refusal(plan_request: Option<Value>) -> (StatusCode, Json<Value>) {
     let recorded = plan_request.is_some();
+    // Did the buyer ALSO get an email? Only the customer-facing sentence changes on this flag; the
+    // row is the record either way, so a mail failure never downgrades `request_recorded`.
+    let receipt_sent = plan_request
+        .as_ref()
+        .and_then(|v| v.get("receipt_emailed"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     // THE BUYER'S BODY AND THE OPERATOR'S SETUP NOTE ARE DIFFERENT AUDIENCES (2026-10-25).
     // The note used to be appended to `message`, which this route hands to the CUSTOMER: the console
     // paints it into the upgrade panel and every other client (a mobile app, a direct API caller)
@@ -2846,10 +2857,14 @@ fn no_provider_refusal(plan_request: Option<Value>) -> (StatusCode, Json<Value>)
     // instead, which is where the operator actually reads it.
     tracing::warn!("checkout: {NO_PROVIDER_OPERATOR_NOTE}");
     let message = if recorded {
-        "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
-         Your request has been recorded for the platform team, who can switch this workspace \
-         onto the plan you picked by hand."
-            .to_string()
+        let base = "No charge was made — nothing was sent to a payment provider, so you cannot be \
+                    billed. Your request has been recorded for the platform team, who can switch \
+                    this workspace onto the plan you picked by hand.";
+        if receipt_sent {
+            format!("{base} A copy of this request is in your inbox.")
+        } else {
+            base.to_string()
+        }
     } else {
         "No charge was made — nothing was sent to a payment provider, so you cannot be billed. \
          Upgrades are not switched on for this installation yet, and your request could not be \
@@ -2863,6 +2878,7 @@ fn no_provider_refusal(plan_request: Option<Value>) -> (StatusCode, Json<Value>)
             "message": message,
             "configured": false,
             "request_recorded": recorded,
+            "receipt_emailed": receipt_sent,
             "plan_request": plan_request,
         })),
     )
@@ -2883,12 +2899,21 @@ const NO_PROVIDER_OPERATOR_NOTE: &str =
 ///
 /// Deduped on ONE open request per (tenant, tier) — the key the customer door in
 /// `tickets_handler.rs` already uses — so a second press, or the console's own follow-up call,
-/// returns the existing row instead of a twin. No mail is queued here: nothing was charged.
+/// returns the existing row instead of a twin.
+///
+/// THE BUYER IS TOLD (2026-11-05). This used to file the row in silence — "no mail is queued here:
+/// nothing was charged" — which is true about the MONEY and wrong about the CUSTOMER: pressing
+/// Upgrade is the buying path while checkout is dark, and the sibling door (`POST /api/v1/tickets`)
+/// has emailed a `billing_request_receipt` for the same ask since 2026-10-20. A second press while
+/// the first is open returns the existing row and sends NOTHING (the dedupe is also the mail
+/// dedupe), so one ask produces one receipt. `send_receipt` lets the hosted-payment-page hand-off
+/// opt out: that buyer is on their way to pay, not waiting to hear from us.
 async fn record_checkout_plan_request(
     db: &sqlx::PgPool,
     tenant_id: Uuid,
     plan_id: Option<Uuid>,
     why: &str,
+    send_receipt: bool,
 ) -> Option<Value> {
     let plan_id = plan_id?;
     let plan: Result<Option<(String, String, f64)>, sqlx::Error> = sqlx::query_as(
@@ -2974,11 +2999,24 @@ async fn record_checkout_plan_request(
         tracing::error!("checkout/create: could not record the plan request: {e:?}");
         return None;
     }
+    // ONE ask, one receipt — the dedupe above is also the mail dedupe, so a second press in the
+    // same state adds neither a ticket nor a message.
+    let receipt_emailed = if send_receipt {
+        super::tickets_handler::send_billing_request_receipt(db, tenant_id, &subject).await
+    } else {
+        false
+    };
+    if send_receipt {
+        tracing::info!(
+            "checkout/create: plan request {id} for tenant {tenant_id} — receipt emailed={receipt_emailed}"
+        );
+    }
     Some(json!({
         "id": id.to_string(),
         "plan_slug": slug,
         "plan_name": name,
         "already_open": false,
+        "receipt_emailed": receipt_emailed,
     }))
 }
 
