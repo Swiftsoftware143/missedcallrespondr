@@ -32,8 +32,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:linear-g
 <div class="c">
 <h1>MissedCall Respondr</h1>
 <p class="sub">Auto-Response Platform</p>
-<input id="e" type="email" placeholder="Email" aria-label="Email">
-<input id="p" type="password" placeholder="Password" aria-label="Password">
+<input id="e" type="email" placeholder="Email" autocomplete="email" aria-label="Email" onkeydown="if(event.key==='Enter'&&!document.getElementById('b').disabled){event.preventDefault();L();}">
+<input id="p" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" onkeydown="if(event.key==='Enter'&&!document.getElementById('b').disabled){event.preventDefault();L();}">
 <button id="b" onclick="L()">Sign In</button>
 <div style="margin-top:10px"><a href="/forgot-password.html" style="color:#6366f1;font-size:13px">Forgot password?</a></div>
 <div style="margin-top:6px"><a href="https://app.missedcallrespondr.com/register/" style="color:#6366f1;font-size:13px">New here? Create a free account</a></div>
