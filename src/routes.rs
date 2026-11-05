@@ -724,6 +724,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/tenants",
             get(crate::handlers::admin_handler::list_all_tenants),
         )
+        // The operator's remedy for "I never got the email and I can't sign in" (2026-11-05).
+        // `users.password_undelivered` marks exactly that state; the list publishes it on the row
+        // (`owner_credentials_undelivered`) and this is the action behind the badge. POST, not PUT:
+        // the call mints a NEW password and mails it, so a retry is a new credential rather than an
+        // idempotent write. Under `/api/v1/admin/`, so the platform-admin middleware also covers it.
+        .route(
+            "/api/v1/admin/tenants/:id/resend-credentials",
+            post(crate::handlers::admin_handler::resend_owner_credentials),
+        )
         .route(
             "/api/v1/admin/tenants/:id/credits",
             post(crate::handlers::admin_handler::add_credits),

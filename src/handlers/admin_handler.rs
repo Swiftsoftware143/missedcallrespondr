@@ -367,7 +367,23 @@ pub async fn list_all_tenants(
              ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
                            THEN 0 ELSE 1 END,
                       u.created_at ASC
-             LIMIT 1) as owner_email
+             LIMIT 1) as owner_email,
+             -- DID THE OWNER EVER RECEIVE THE PASSWORD WE MINTED? (cron 2026-11-05)
+             --
+             -- `users.password_undelivered` is set by the signup door when it mints a first password
+             -- and the credentials mail does not go out. The app has always KNOWN that, per user, and
+             -- no surface published it: the operator could only learn it from an Email Log refusal or
+             -- from the customer complaining they cannot sign in. This column puts the state on the
+             -- row it belongs to, beside the address, which is what lets the Owner cell badge it and
+             -- offer the re-send action (`resend_owner_credentials`).
+             --
+             -- The SAME owner ordering as `owner_email` above, so the badge and the address always
+             -- describe one person. A workspace with no user reads FALSE (nothing to deliver).
+             COALESCE((SELECT u.password_undelivered FROM users u WHERE u.tenant_id = t.id
+              ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
+                            THEN 0 ELSE 1 END,
+                       u.created_at ASC
+              LIMIT 1), false) as owner_credentials_undelivered
         FROM tenants t
         LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id AND tp.status = 'active'
         LEFT JOIN plans p ON p.id = tp.plan_id
@@ -455,6 +471,15 @@ pub async fn list_all_tenants(
             "ownerless": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0) <= 0,
             "last_sign_in": r.try_get::<Option<chrono::DateTime<Utc>>,_>("last_sign_in").ok().flatten().map(|d| d.to_string()),
             "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
+            // TRUE => the signup door minted this workspace's first password and the mail carrying
+            // it never went out, so nobody has ever read that customer's password (2026-11-05).
+            // Published so the Owner cell can badge the row and offer `resend-credentials`; a
+            // missing column reads as FALSE so an older query can never badge a healthy customer.
+            "owner_credentials_undelivered": r
+                .try_get::<Option<bool>, _>("owner_credentials_undelivered")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
             // The harness marker the signup door stamps from the `X-Swift-Harness` HEADER
             // (`auth::signup::create_account`). It was written since 2026-10-15 and read by
             // nothing: the operator list could only GUESS a probe from a reserved-domain owner
@@ -478,6 +503,140 @@ pub async fn list_all_tenants(
     Ok(Json(json!({
         "tenants": tenants,
         "total": tenants.len()
+    })))
+}
+
+/// POST /api/v1/admin/tenants/:id/resend-credentials
+///
+/// THE OPERATOR'S REMEDY FOR "I never got the email and I can't sign in" (cron 2026-11-05).
+///
+/// `users.password_undelivered` has recorded that state since the signup door started minting
+/// first passwords, and `list_all_tenants` now publishes it on the row
+/// (`owner_credentials_undelivered`) so the console can badge it. This is the action behind the
+/// badge: without it the operator could SEE a stuck customer and still had no way to help them.
+/// The only other doors that clear the latch are the CUSTOMER's own — the one-shot
+/// `initial-password` choice, which needs the session signup returned, or a reset code that
+/// travels the same mail path that just failed.
+///
+/// It mints a NEW password with the app's own generator, stores only its hash, clears the latch,
+/// ends the account's existing sessions (a re-issued password means the old one is no longer a
+/// credential, so a token minted from it must not outlive it) and mails it through the SAME
+/// `welcome_credentials` template the signup door uses.
+///
+/// `handover_password` is returned ONLY when nothing left — a reserved/harness address (withheld
+/// at the sender) or a provider refusal — because otherwise the operator would have nothing to
+/// hand the customer. The password itself is never logged.
+pub async fn resend_owner_credentials(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(tenant_id_str): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    // The same admin gate `list_all_tenants` applies. This route also sits under
+    // `/api/v1/admin/`, so the middleware covers it; the handler refuses on its own as well so the
+    // ACTION's authority never depends on a surface rule that may change.
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| AppError::Unauthorized("Missing auth token".into()))?;
+    let claims = crate::auth::models::validate_token(auth_header, &state.config.jwt_secret)
+        .map_err(|_| AppError::Unauthorized("Invalid token".into()))?;
+    if claims.role != "agency_admin" && claims.role != "admin" && claims.role != "super_admin" {
+        return Err(AppError::Forbidden(
+            "Not authorized to reissue credentials".into(),
+        ));
+    }
+
+    use sqlx::Row;
+    let tenant_id = Uuid::parse_str(&tenant_id_str)
+        .map_err(|_| AppError::BadRequest("Invalid tenant ID".into()))?;
+
+    // The SAME owner ordering the list uses, so the badge and this action always describe one
+    // person: the workspace's owner-ish role first, else its earliest member.
+    let row = sqlx::query(
+        r#"SELECT u.id, u.email, COALESCE(NULLIF(u.name, ''), u.email) AS name
+             FROM users u
+            WHERE u.tenant_id = $1
+            ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
+                          THEN 0 ELSE 1 END,
+                     u.created_at ASC
+            LIMIT 1"#,
+    )
+    .bind(tenant_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| {
+        AppError::NotFound("This workspace has no user to send a password to".into())
+    })?;
+
+    let user_id: Uuid = row
+        .try_get("id")
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let email: String = row.try_get("email").unwrap_or_default();
+    let name: String = row.try_get("name").unwrap_or_else(|_| email.clone());
+
+    let password = crate::auth::signup::generate_temp_password();
+    let password_hash = crate::auth::models::hash_password(&password)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, password_undelivered = false, \
+                sessions_valid_from = NOW(), updated_at = NOW() \
+           WHERE id = $2",
+    )
+    .bind(&password_hash)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await?;
+
+    // A reserved/harness address is WITHHELD at the sender (it answers Ok without queueing
+    // anything), so it counts as NOT delivered — otherwise the console would tell the operator to
+    // wait for a mail that was deliberately never sent. Same predicate `auth::register` uses.
+    let withheld = crate::security::probe_addr::harness_domain(&email).is_some();
+    let mut emailed = false;
+    if !withheld {
+        let vars = json!({
+            "name": name,
+            "email": email,
+            "password": password,
+        });
+        match crate::email::send_template_email(
+            &state.pool,
+            tenant_id,
+            &email,
+            "welcome_credentials",
+            &vars,
+        )
+        .await
+        {
+            Ok(()) => emailed = true,
+            Err(e) => {
+                tracing::error!(
+                    tenant = %tenant_id,
+                    user = %user_id,
+                    "operator re-issued a password but the mail failed: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    tracing::info!(
+        tenant = %tenant_id,
+        user = %user_id,
+        emailed,
+        withheld,
+        "operator re-issued a workspace owner's password"
+    );
+
+    Ok(Json(json!({
+        "id": user_id.to_string(),
+        "email": email,
+        "credentials_emailed": emailed,
+        // Published so the console can say WHY it is handing over a password instead of claiming
+        // "check your email" for a message that was deliberately never sent.
+        "withheld": withheld,
+        "handover_password": if emailed { Value::Null } else { json!(password) },
     })))
 }
 
