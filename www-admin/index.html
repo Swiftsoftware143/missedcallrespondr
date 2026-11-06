@@ -3363,7 +3363,13 @@ const App = () => {
       if (!cp) { setPwMsg({ ok: false, text: 'Enter your current password to confirm' }); return; }
       setBusy(true); setPwMsg(null);
       try {
-        await API.put('/auth/password', { current_password: cp, new_password: np });
+        const d = await API.put('/auth/password', { current_password: cp, new_password: np });
+        // The password write moves `users.sessions_valid_from` past the token this tab holds, so
+        // the server now re-mints it in the same second and returns it. Adopting it is what keeps
+        // the operator on this screen; a 200 with no token means the old credential is dead, so
+        // that is reported as a failure rather than a success the next request would contradict.
+        if (!d || !d.token) throw new Error('The password was changed but no session was returned — sign in again.');
+        API.setAuth(d.token, Object.assign({}, API.user || {}));
         setNp(''); setNp2(''); setCp(''); setPwMsg({ ok: true, text: 'Password changed' });
       } catch (e) { setPwMsg({ ok: false, text: (e && e.message) || 'Could not change the password' }); }
       setBusy(false);

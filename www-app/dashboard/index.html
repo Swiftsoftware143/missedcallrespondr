@@ -141,7 +141,18 @@ const API = (() => {
   }).then(async (r) => {
     let d = {};
     try { d = await r.json(); } catch (e) { /* a non-JSON refusal still has a status */ }
-    if (r.ok) return d;
+    if (r.ok) {
+      // A PASSWORD CHANGE RE-MINTS THIS TAB'S SESSION (cron 2026-11-06). The server moves
+      // `sessions_valid_from` past the token in hand — that is the point of a password change —
+      // so the token this tab was holding is dead the moment this answers. It now returns a
+      // replacement minted in the same second; adopting it here is what keeps the customer on the
+      // screen they just used. Without this the very next call (refreshMe, any panel) answered 401
+      // and the console signed them out right after saying "Password updated" (measured on the
+      // origin: same token 401 "This session is no longer valid" four seconds after the change).
+      // Set BOTH the in-memory credential and its store, or a later reload signs them out again.
+      if (d && d.token) { token = d.token; sessionStorage.setItem('mc_token', d.token); }
+      return d;
+    }
     const msg = (d && (d.error || d.message)) || ('Request failed (' + r.status + ')');
     const fieldRefusal = r.status === 401 && /current password/i.test(String(msg));
     if (r.status === 401 && !fieldRefusal) sessionEnded();

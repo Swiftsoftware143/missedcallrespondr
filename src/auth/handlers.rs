@@ -456,19 +456,48 @@ pub async fn change_password(
 
     // SESSION REVOCATION (kanban t_80787a0f): a password change/reset also ends every JWT
     // minted BEFORE it (`users.sessions_valid_from`), refused at the boundary read.
-    sqlx::query(
+    //
+    // ...AND THE CALLER'S OWN SESSION IS RE-MINTED (cron 2026-11-06). Moving the line kills the
+    // token in hand as well, so this used to answer 200 and leave the tab that pressed the button
+    // holding a dead JWT: the Profile screen said "Password updated" while the next call behind it
+    // answered 401 and the console signed the customer out. Measured live on the origin
+    // (reports/mcr-pw-survive): register -> GET /auth/me 200 -> 4 s -> PUT /auth/password 200 ->
+    // GET /auth/me with the SAME token 401 "This session is no longer valid". The same-second case
+    // hid it (`iat == valid_from` is allowed), which is why the fleet's other apps never saw it in a
+    // fast probe. `logout_all` below has always done this properly: mint from the SAME statement's
+    // `sessions_valid_from` (whole-second, so clock skew cannot strand the caller) and return the
+    // token. Doing it here makes the write path consistent with the revoke path.
+    //
+    // The re-minted claims are read from the ROW, never echoed from the old claim, so a role that
+    // was narrowed since cannot be re-blessed here. `pwd_minted: false`: the caller proved the
+    // CURRENT password, so this session is a full one.
+    let valid_from: i64 = sqlx::query_scalar(
         "UPDATE users SET password_hash = $1, password_undelivered = false, \
                 sessions_valid_from = NOW(), updated_at = NOW() \
-           WHERE id = $2",
+           WHERE id = $2 \
+       RETURNING floor(EXTRACT(EPOCH FROM sessions_valid_from))::bigint",
     )
     .bind(&new_hash)
     .bind(user.id)
-    .execute(&state.pool)
+    .fetch_one(&state.pool)
     .await?;
 
-    Ok(Json(
-        serde_json::json!({"message": "Password updated successfully"}),
-    ))
+    let fresh = Claims {
+        sub: user.id,
+        email: user.email.clone(),
+        aid: user.tenant_id,
+        role: user.role.clone(),
+        pwd_minted: false,
+        exp: valid_from as usize + 86400 * 7,
+        iat: valid_from as usize,
+    };
+    let token = create_token(&fresh, &state.config.jwt_secret)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "message": "Password updated successfully",
+        "token": token,
+    })))
 }
 
 /// `POST /api/v1/auth/logout-all` — end every OTHER signed-in device on this account.
