@@ -146,6 +146,12 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // operator answers it from the ticket queue they already work, and the reply is mailed to that
     // address. Nothing about any existing tenant, user or usage is readable here.
     "/api/v1/public/support-request",
+    // --- reading the ANSWER to that message (2026-11-06) ------------------------
+    // The visitor who filed it is not signed in, so the answer cannot sit behind a session. The
+    // reference (an unguessable uuid) plus the address they filed with ARE the credential;
+    // anything that does not match BOTH answers one neutral 404. Narrow by construction: ONE
+    // workspace-less row, returning the subject, the status and the team's own entries.
+    "/api/v1/public/support-answer",
     // --- telephony receiver whose own SIGNATURE is the credential ------------------------------
     // Telnyx posts call-control and message-delivery events here with no session. The receiver is
     // the app's inbound telephony door; it is mounted on the anonymous router because Telnyx cannot

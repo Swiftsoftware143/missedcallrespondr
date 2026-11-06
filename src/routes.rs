@@ -92,6 +92,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/public/support-request",
             post(crate::handlers::tickets_handler::create_public),
         )
+        // READING the answer to that message (2026-11-06). The visitor is not signed in, so the
+        // answer cannot sit behind a session: the reference plus the address they filed with ARE
+        // the credential, and anything else answers one neutral 404.
+        .route(
+            "/api/v1/public/support-answer",
+            post(crate::handlers::tickets_handler::public_answer),
+        )
         .route(
             "/api/v1/internal/portfolio-companies",
             post(portfolio_handler::internal_create_portfolio_company),

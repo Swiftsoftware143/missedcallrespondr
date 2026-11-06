@@ -220,6 +220,13 @@ pub struct PublicTicketBody {
     pub message: Option<String>,
 }
 
+/// What the contact page posts to read the team's ANSWER back (`POST /api/v1/public/support-answer`).
+#[derive(Deserialize)]
+pub struct PublicAnswerBody {
+    pub ticket_id: String,
+    pub email: String,
+}
+
 /// How many messages ONE address may file through the public contact page per hour.
 ///
 /// The arm is anonymous, so without a bound one script could fill the operator's queue. Three is
@@ -355,6 +362,80 @@ pub async fn create_public(
             "message": "Your message is with our team. We will reply to the address you gave."
         })),
     ))
+}
+
+/// `POST /api/v1/public/support-answer` — read the team's answer to a message filed from the
+/// contact page (2026-11-06).
+///
+/// WHY THIS EXISTS. A visitor who filed from `contact.html` is not signed in and has no workspace,
+/// so there is no Tickets screen they could ever load: the answer an operator writes lands in
+/// `ticket_messages` on a row nobody who asked can open. The reply is also mailed, and mail is one
+/// channel — a spam folder, a mistyped address, a customer who never checks it — so the answer
+/// needs a second door. ADASwift, WorkflowSwift, FunnelSwift and IncentiveSwift already ship this
+/// read-back; this app mailed and could not show.
+///
+/// The reference is an unguessable uuid and the address is the one they filed with, so the PAIR is
+/// the credential. Either one alone answers the same neutral 404, which keeps the route from
+/// confirming that a reference exists. Narrow by construction: ONE row, only when it carries no
+/// workspace (a workspace ticket is read by its own signed-in users), returning the subject, the
+/// status and the TEAM's entries — never the description, never a list of tickets, never another
+/// visitor's row.
+pub async fn public_answer(
+    State(state): State<AppState>,
+    Json(req): Json<PublicAnswerBody>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // Neutral by design: an unknown reference, a malformed one and a reference that belongs to a
+    // different address all answer the same sentence, so the route cannot be used to test whether
+    // a reference is real.
+    let missing = || {
+        AppError::NotFound(
+            "We have no message from that address with that reference. Check the reference and the \
+             email address you filed with."
+                .to_string(),
+        )
+    };
+    let id = Uuid::parse_str(req.ticket_id.trim()).map_err(|_| missing())?;
+    // The filing arm stores the address normalised, so the lookup normalises the same way —
+    // `Probe@Example.com ` must find the row filed as `probe@example.com`.
+    let email = crate::security::email_addr::normalize(&req.email).map_err(|_| missing())?;
+
+    let some: Option<(String, String)> = sqlx::query_as(
+        "SELECT subject, status FROM tickets \
+          WHERE id = $1 AND tenant_id IS NULL AND lower(requester_email) = $2",
+    )
+    .bind(id)
+    .bind(&email)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some((subject, status)) = some else {
+        return Err(missing());
+    };
+
+    // The TEAM's entries only. The filing arm labels the visitor's own words `customer`; this app's
+    // own code treats `customer | user | client | business_user` as the customer side (see
+    // `add_message`'s notification test), so excluding exactly those four returns what an operator
+    // wrote and nothing a customer typed.
+    let entries: Vec<(String, String)> = sqlx::query_as(
+        "SELECT body, created_at::text FROM ticket_messages \
+          WHERE ticket_id = $1 \
+            AND COALESCE(sender_type, '') NOT IN ('customer', 'user', 'client', 'business_user') \
+          ORDER BY created_at ASC",
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({
+        "id": id.to_string(),
+        "subject": subject,
+        "status": status,
+        // An empty list means "not answered yet", which the page says in its own words rather than
+        // showing an empty green box.
+        "replies": entries
+            .iter()
+            .map(|(b, t)| serde_json::json!({ "body": b, "sent_at": t }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 pub async fn create(
