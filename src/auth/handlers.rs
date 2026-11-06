@@ -304,8 +304,13 @@ pub async fn login(
             tenant_id = %user.tenant_id,
             "sign-in refused: the workspace is suspended"
         );
+        // The address this used to name publishes NO mail exchanger (measured 2026-11-06 on
+        // dns.google and cloudflare-dns.com: MX = 0 for swiftsoftware.net) and nothing on this host
+        // listens on :25 — so a suspended customer was told to write into a bounce. The served
+        // contact page files the message into the operator's ticket queue and needs no session,
+        // which is the one route a suspended workspace can still use.
         return Err(AppError::Forbidden(
-            "This workspace is suspended. Contact support@swiftsoftware.net and we will sort it out."
+            "This workspace is suspended. Write to us at https://app.missedcallrespondr.com/contact.html and we will sort it out."
                 .into(),
         ));
     }

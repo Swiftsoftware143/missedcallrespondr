@@ -219,10 +219,14 @@ pub async fn auth_middleware(
                         "refused a session whose workspace is suspended (tenant {})",
                         claims.aid
                     );
+                    // Same dead address, same fix as `auth::handlers` (2026-11-06): the support
+                    // mailbox lives on a domain with no mail exchanger, so the one instruction a
+                    // suspended workspace was given could never be followed. The served contact
+                    // page needs no session and files the message into the operator's queue.
                     return Err((
                         StatusCode::FORBIDDEN,
                         Json(json!({
-                            "error": "This workspace is suspended. Contact support@swiftsoftware.net and we will sort it out.",
+                            "error": "This workspace is suspended. Write to us at https://app.missedcallrespondr.com/contact.html and we will sort it out.",
                             "status": 403,
                             "suspended": true
                         })),
