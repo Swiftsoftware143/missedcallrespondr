@@ -319,6 +319,9 @@ pub async fn provision_free_account(
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let account_slug = crate::auth::signup::unique_account_slug(&state.pool, &account_name).await?;
 
+    // Attribution from the address alone: this door has no browser to carry a harness header.
+    let probe_harness = crate::probe_harness::for_machine_door(&email);
+
     let ids = match crate::auth::signup::create_account(
         &state,
         crate::auth::signup::NewAccount {
@@ -330,12 +333,14 @@ pub async fn provision_free_account(
             account_slug: Some(&account_slug),
             plan_slug: &resolved_slug,
             role: "account_owner",
-            // DELIBERATELY `None`: this is an AUTHENTICATED machine door (the fleet-internal
-            // provision-free-account call FunnelSwift makes when a lead is tagged), not the
-            // served signup. Only the anonymous signup records the `X-Swift-Harness` marker
-            // (kanban t_4a744754), so a workspace this door mints stays byte-identical to what
-            // it minted before.
-            probe_harness: None,
+            // Attribution from the address alone (2026-11-06, same arm as WorkflowSwift 7acd3b5
+            // and IncentiveSwift 0a747e7b): this is an AUTHENTICATED machine door (the fleet-internal
+            // provision-free-account call FunnelSwift makes when a lead is tagged), so there is no
+            // browser to carry `X-Swift-Harness`. An address on a fleet-owned or RFC-reserved domain
+            // can only belong to fleet machinery, so it is marked `auto-<domain>` and the operator's
+            // list can tell a probe workspace from a customer's. A real lead's domain matches
+            // neither list and the answer stays `None`, written exactly as before.
+            probe_harness: probe_harness.as_deref(),
         },
     )
     .await

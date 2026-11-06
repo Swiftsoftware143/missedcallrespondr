@@ -103,10 +103,52 @@ pub fn for_signup(headers: &HeaderMap, email: &str) -> Option<String> {
     crate::security::probe_addr::attribution_domain(email).map(|domain| format!("auto-{domain}"))
 }
 
+/// Attribution for a MACHINE door — a route with no browser in front of it (the tag→free-account
+/// receiver, a provider-signed payment webhook). Those callers cannot send `X-Swift-Harness`, so
+/// the marker comes from the ADDRESS alone: an address on a fleet-owned or RFC-reserved domain can
+/// only belong to fleet machinery, whoever rings the door.
+///
+/// WHY (measured on the sibling app 2026-11-06, WorkflowSwift commit 7acd3b5): a probe lead at
+/// `swiftsoftware.dev` provisioned through the tag→free-account receiver minted a workspace with
+/// `probe_harness = NULL`, so it sat in the operator's account list exactly like a customer's —
+/// through the very door the tag pipeline calls for every real lead.
+///
+/// A real customer is untouched: their domain is on neither list, the answer is `None`, and the
+/// row is written exactly as it was before.
+pub fn for_machine_door(email: &str) -> Option<String> {
+    crate::security::probe_addr::attribution_domain(email).map(|domain| format!("auto-{domain}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
+
+    // The MACHINE doors (tag→free-account receiver, provider-signed checkout webhook) have no
+    // browser and so no header arm. Measured here 2026-11-06: both passed `probe_harness: None`,
+    // so a fleet-probe lead or a probe purchase minted a workspace the operator could not tell
+    // from a customer's.
+    #[test]
+    fn a_machine_door_attributes_a_probe_address_and_leaves_a_customer_alone() {
+        assert_eq!(
+            for_machine_door("probe-provtag-1793942306@swiftsoftware.dev").as_deref(),
+            Some("auto-swiftsoftware.dev")
+        );
+        assert_eq!(
+            for_machine_door("lead-42@example.invalid").as_deref(),
+            Some("auto-example.invalid")
+        );
+        assert_eq!(
+            for_machine_door("buyer@mail.swiftsoftware.net").as_deref(),
+            Some("auto-swiftsoftware.net")
+        );
+        assert_eq!(for_machine_door("buyer@gmail.com"), None);
+        assert_eq!(for_machine_door("owner@their-business.com"), None);
+        assert_eq!(for_machine_door("not an address"), None);
+        // a domain that merely CONTAINS the harness name is not the harness class
+        assert_eq!(for_machine_door("x@notswiftsoftware.dev"), None);
+        assert_eq!(for_machine_door("x@swiftsoftware.dev.evil.com"), None);
+    }
 
     #[test]
     fn a_signup_on_a_fleet_harness_domain_is_attributed_without_a_header() {

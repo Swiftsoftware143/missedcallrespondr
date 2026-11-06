@@ -1870,6 +1870,11 @@ async fn deliver_credentials(
         let password_hash = hash_password(&temp_password)?;
         let account_slug =
             crate::auth::signup::unique_account_slug(&state.pool, customer_name).await?;
+        // A provider-signed webhook has no browser and no harness header, so an address on a
+        // fleet-owned/RFC-reserved domain is the only signal there is (2026-11-06, same arm as
+        // WorkflowSwift 7acd3b5 / IncentiveSwift 0a747e7b). A real buyer's domain matches neither
+        // list and the answer stays `None`, written exactly as before.
+        let probe_harness = crate::probe_harness::for_machine_door(email);
         let ids = crate::auth::signup::create_account(
             state,
             crate::auth::signup::NewAccount {
@@ -1883,10 +1888,7 @@ async fn deliver_credentials(
                 account_slug: Some(&account_slug),
                 plan_slug: &plan_slug,
                 role: "account_owner",
-                // DELIBERATELY `None` (kanban t_4a744754): this is the paid-checkout
-                // credential path (a provider-signed payment webhook), not the served,
-                // unauthenticated signup — the only door the marker belongs to.
-                probe_harness: None,
+                probe_harness: probe_harness.as_deref(),
             },
         )
         .await?;
