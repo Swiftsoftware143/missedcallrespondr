@@ -124,21 +124,42 @@ async fn main() -> anyhow::Result<()> {
         handlers::checkout_handler::DEFAULT_STRIPE_SIGNATURE_TOLERANCE_SECS
     );
 
-    // Telnyx delivery verification (kanban t_0e4ae7b7): the receiver verifies Telnyx's Ed25519
-    // signature on every delivery and FAILS CLOSED when this deployment has no account key. In the
-    // boot log for the same reason as the bounds above: an operator whose inbound telephony is
-    // refusing needs to read the posture at startup, not wait for a refused delivery to find out.
+    // Telnyx delivery verification (kanban t_0e4ae7b7, extended by t_38b352f8): the receiver verifies
+    // Telnyx's Ed25519 signature on every delivery and FAILS CLOSED when this deployment has no
+    // account key. The key comes from `TELNYX_PUBLIC_KEY` in the deploy env OR from the operator
+    // console's Telnyx panel (`telnyx_config.public_key`); the env wins when both are set. Logged at
+    // startup, with its SOURCE, because an operator whose inbound telephony is refusing has to be
+    // able to read the posture here rather than wait for a refused delivery to find out.
+    let (telnyx_signing_key, telnyx_signing_key_source) =
+        match handlers::telnyx_handler::resolve_signing_key(cfg.telnyx_public_key.as_deref(), &pool)
+            .await
+        {
+            Ok(found) => found,
+            Err(e) => {
+                tracing::warn!(
+                "Telnyx webhook signature verification: could not read the stored signing key ({e:?}); \
+                 treating the operator panel as having none. TELNYX_PUBLIC_KEY is {}.",
+                if cfg.telnyx_public_key.is_some() { "set" } else { "unset" }
+            );
+                (
+                    cfg.telnyx_public_key.clone(),
+                    handlers::telnyx_handler::SigningKeySource::Env,
+                )
+            }
+        };
     tracing::info!(
-        "Telnyx webhook signature verification: {} (Ed25519 over `<telnyx-timestamp>|<body>` against \
-         TELNYX_PUBLIC_KEY; freshness tolerance {}s from this host's clock, \
+        "Telnyx webhook signature verification: {} (Ed25519 over `<telnyx-timestamp>|<body>`; key \
+         source: {}; freshness tolerance {}s from this host's clock, \
          TELNYX_SIGNATURE_TOLERANCE_SECS clamped 30..86400, default {})",
-        if cfg.telnyx_public_key.is_some() {
-            "ENABLED".to_string()
+        if telnyx_signing_key.is_some() {
+            "ENABLED"
         } else {
             "NOT CONFIGURED - every delivery is refused 503 telnyx_verification_not_configured and \
-             nothing is applied; set the account public key from Telnyx Mission Control"
-                .to_string()
+             nothing is applied; save the Telnyx API key in the operator console (panel 5, Telnyx \
+             Config & Numbers) so the app reads the account key, or paste the account public key \
+             from Telnyx Mission Control, or set TELNYX_PUBLIC_KEY"
         },
+        telnyx_signing_key_source.as_str(),
         cfg.telnyx_signature_tolerance_secs,
         security::telnyx_signature::DEFAULT_SIGNATURE_TOLERANCE_SECS
     );

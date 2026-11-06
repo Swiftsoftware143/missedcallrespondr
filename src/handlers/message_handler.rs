@@ -39,7 +39,7 @@ pub async fn list_messages(
 /// credential (`payment-arm-live-proof-with-stub`). Read per call, so the knob needs no rebuild.
 const DEFAULT_TELNYX_API_BASE: &str = "https://api.telnyx.com";
 
-fn telnyx_api_base() -> String {
+pub(crate) fn telnyx_api_base() -> String {
     std::env::var("TELNYX_API_BASE")
         .ok()
         .map(|s| s.trim().trim_end_matches('/').to_string())

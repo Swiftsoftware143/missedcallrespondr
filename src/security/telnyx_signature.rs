@@ -149,9 +149,11 @@ pub fn verify(
         return Err(TelnyxRejection::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "telnyx_verification_not_configured",
-            "TELNYX_PUBLIC_KEY is not set on this deployment, so no Telnyx delivery can be verified \
-             and every one is refused. Set the account's Ed25519 public key from Telnyx Mission \
-             Control.",
+            "No Telnyx account signing key is set on this deployment — neither TELNYX_PUBLIC_KEY in \
+             the deploy environment nor the account public key saved in the operator console's Telnyx \
+             panel — so no Telnyx delivery can be verified and every one is refused. Save the Telnyx \
+             API key in that panel (the app then reads the account key from Telnyx) or paste the \
+             account's Ed25519 public key from Telnyx Mission Control.",
         ));
     };
 

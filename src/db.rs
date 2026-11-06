@@ -395,6 +395,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000046_users_last_login_at",
             include_str!("../migrations/000046_users_last_login_at.sql"),
         ),
+        // The Telnyx account Ed25519 signing key, settable from the operator console instead of only
+        // the deploy env (kanban t_38b352f8). Additive: `NOT NULL DEFAULT ''`.
+        (
+            "000047_telnyx_public_key",
+            include_str!("../migrations/000047_telnyx_public_key.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

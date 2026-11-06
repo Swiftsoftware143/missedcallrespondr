@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -41,6 +42,10 @@ pub struct TelnyxConfig {
     pub profile_id: Option<String>,
     pub messaging_profile_id: Option<String>,
     pub webhook_secret: Option<String>,
+    /// The Telnyx ACCOUNT Ed25519 public key this deployment verifies inbound deliveries against
+    /// (base64, 32 bytes), settable from the operator console (kanban t_38b352f8). Empty string
+    /// means "not configured" — `TELNYX_PUBLIC_KEY` in the deploy env still wins when it is set.
+    pub public_key: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -54,9 +59,24 @@ pub struct TelnyxConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct TelnyxConfigUpdate {
+    /// Optional from kanban t_38b352f8: the operator console now has a second credential on this
+    /// form (the account signing key), and an operator may paste only that one. A blank value — or
+    /// the masked value the console painted back — leaves the stored API key untouched.
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub profile_id: Option<String>,
+    #[serde(default)]
     pub messaging_profile_id: Option<String>,
+    /// The Telnyx ACCOUNT Ed25519 public key (base64, 32 bytes) from Mission Control. When absent
+    /// or blank the stored key is kept, except that a deployment with no stored key and an API key
+    /// saved here will have it read from Telnyx (`GET /v2/public_key`) on a best-effort basis.
+    #[serde(default)]
+    pub public_key: Option<String>,
+    /// Explicit clear, so "leave the key alone" and "there is no key" are different requests
+    /// (kanban t_38b352f8). Without it the console could SET a signing key but never remove one.
+    #[serde(default)]
+    pub clear_public_key: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +175,137 @@ pub(crate) async fn get_telnyx_config(
         .fetch_optional(pool)
         .await?;
     Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// The inbound signing key — where the receiver gets it (kanban t_38b352f8)
+// ---------------------------------------------------------------------------
+
+/// Length of a raw Ed25519 public key, in bytes. The only length Telnyx issues.
+const ED25519_PUBLIC_KEY_LEN: usize = 32;
+
+/// Which credential the inbound receiver verifies a delivery against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SigningKeySource {
+    /// `TELNYX_PUBLIC_KEY` in the deploy environment. WINS whenever it is set.
+    Env,
+    /// `telnyx_config.public_key`, saved from the operator console's Telnyx panel.
+    Config,
+    /// Neither: the receiver refuses every delivery `503 telnyx_verification_not_configured`.
+    None,
+}
+
+impl SigningKeySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SigningKeySource::Env => "env",
+            SigningKeySource::Config => "config",
+            SigningKeySource::None => "none",
+        }
+    }
+}
+
+/// The key the inbound receiver must verify against, and where it came from.
+///
+/// ENV FIRST, then the operator row. A deployment that sets `TELNYX_PUBLIC_KEY` therefore behaves
+/// exactly as before and — because the stored value is only read when the env carries none — pays
+/// no database read on the delivery path at all. Both empty is the pre-existing posture: `None`,
+/// which the receiver answers `503 telnyx_verification_not_configured`.
+///
+/// A database error is propagated rather than swallowed: refusing a delivery because the stored key
+/// could not be read is failing CLOSED, and Telnyx retries a non-2xx delivery.
+pub(crate) async fn resolve_signing_key(
+    env_key: Option<&str>,
+    pool: &sqlx::PgPool,
+) -> Result<(Option<String>, SigningKeySource), AppError> {
+    if let Some(key) = env_key.map(str::trim).filter(|k| !k.is_empty()) {
+        return Ok((Some(key.to_string()), SigningKeySource::Env));
+    }
+    let stored: Option<String> = sqlx::query_scalar("SELECT public_key FROM telnyx_config LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+    let stored = stored
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
+    match stored {
+        Some(key) => Ok((Some(key), SigningKeySource::Config)),
+        None => Ok((None, SigningKeySource::None)),
+    }
+}
+
+/// Validate an operator-supplied account signing key, returning the value to store.
+///
+/// Refused HERE rather than at the first delivery: a value that cannot be a 32-byte Ed25519 key
+/// would leave the receiver answering `503 telnyx_public_key_invalid` on every call, which looks
+/// like a Telnyx fault and is not. The sentence names the field, what was decoded, and where the
+/// value comes from.
+fn validate_public_key(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("public_key is empty".to_string());
+    }
+    let mut decoded_len: Option<usize> = None;
+    for engine in [
+        base64::engine::general_purpose::STANDARD,
+        base64::engine::general_purpose::STANDARD_NO_PAD,
+        base64::engine::general_purpose::URL_SAFE,
+    ] {
+        if let Ok(bytes) = engine.decode(trimmed) {
+            if bytes.len() == ED25519_PUBLIC_KEY_LEN {
+                return Ok(trimmed.to_string());
+            }
+            decoded_len = Some(bytes.len());
+        }
+    }
+    Err(match decoded_len {
+        Some(n) => format!(
+            "public_key is not a Telnyx account signing key: it decodes to {n} bytes and must decode to \
+             {ED25519_PUBLIC_KEY_LEN}. Copy the ACCOUNT public key from Telnyx Mission Control (base64, \
+             32 bytes)."
+        ),
+        None => "public_key is not valid base64. Copy the ACCOUNT public key from Telnyx Mission \
+                 Control (base64, 32 bytes)."
+            .to_string(),
+    })
+}
+
+/// Best-effort convenience arm: read the account's signing key with the account's OWN API key.
+///
+/// The supported path is the paste field above — Telnyx shows the account public key in Mission
+/// Control and an operator can copy it. This arm exists so that saving the API key (which the
+/// deployment needs anyway to buy numbers and send texts) can ALSO bring inbound verification up,
+/// with no file edit and no restart. It is deliberately best-effort: every failure is reported to
+/// the caller and changes nothing else, because a wrong guess here must never leave an operator
+/// believing inbound is configured when it is not.
+///
+/// Telnyx answers `data.public_key` (a `data` array or a top-level `public_key` on some versions),
+/// so all three shapes are read and the value is validated before it is stored.
+async fn derive_public_key(api_base: &str, api_key: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("could not build the HTTP client: {e}"))?;
+    let answer = client
+        .get(format!("{api_base}/v2/public_key"))
+        .header("Authorization", format!("Bearer {api_key}"))
+        .send()
+        .await
+        .map_err(|e| format!("could not reach Telnyx to read the account public key: {e}"))?;
+    let status = answer.status().as_u16();
+    let body: Value = answer.json().await.unwrap_or(Value::Null);
+    let candidate = body
+        .pointer("/data/public_key")
+        .or_else(|| body.pointer("/data/0/public_key"))
+        .or_else(|| body.pointer("/public_key"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if candidate.is_empty() {
+        return Err(format!(
+            "Telnyx answered HTTP {status} without a public key this app recognises; paste the account \
+             public key from Telnyx Mission Control into the signing key field instead"
+        ));
+    }
+    validate_public_key(candidate)
 }
 
 /// Apply one Telnyx MESSAGE event to the row the send path stored (kanban t_2ed95642).
@@ -354,19 +505,27 @@ pub async fn webhook(
 ) -> ApiResult<Response> {
     let now = telnyx_signature::now_unix();
     let tolerance = state.config.telnyx_signature_tolerance_secs;
-    let delivery = match telnyx_signature::verify(
-        state.config.telnyx_public_key.as_deref(),
-        &headers,
-        &body,
-        now,
-        tolerance,
-    ) {
-        Ok(delivery) => delivery,
-        Err(rejection) => {
-            log_telnyx_refusal(&rejection);
-            return Ok(rejection.into_response());
-        }
-    };
+    // The account key: `TELNYX_PUBLIC_KEY` from the deploy env when set (byte-identical to the
+    // pre-t_38b352f8 behaviour, and no database read), else the operator panel's row. Both empty
+    // keeps the fail-closed 503 the receiver has always answered.
+    let (signing_key, key_source) =
+        resolve_signing_key(state.config.telnyx_public_key.as_deref(), &state.pool).await?;
+    if key_source == SigningKeySource::Config {
+        // Only reached when the deploy env carried no key: say which credential is in force, once
+        // per delivery, so an operator reading a refusal never has to guess where the key came from.
+        tracing::debug!(
+            "Telnyx delivery verification key in force: operator console (config); the deploy env \
+             carries no TELNYX_PUBLIC_KEY"
+        );
+    }
+    let delivery =
+        match telnyx_signature::verify(signing_key.as_deref(), &headers, &body, now, tolerance) {
+            Ok(delivery) => delivery,
+            Err(rejection) => {
+                log_telnyx_refusal(&rejection);
+                return Ok(rejection.into_response());
+            }
+        };
     if telnyx_signature::replay_guard().is_replayed(&delivery.signature, now, tolerance) {
         let rejection = telnyx_signature::replayed_rejection();
         log_telnyx_refusal(&rejection);
@@ -879,6 +1038,27 @@ pub async fn delete_number(
 // ---------------------------------------------------------------------------
 pub async fn get_admin_config(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     let config = get_telnyx_config(&state.pool).await?;
+    // The SAME resolution the delivery path performs, so the panel can never disagree with the
+    // refusal an operator is reading off a refused call.
+    let (resolved, source) =
+        resolve_signing_key(state.config.telnyx_public_key.as_deref(), &state.pool).await?;
+    let ready = resolved.is_some();
+    let note = if ready {
+        format!(
+            "Inbound calls and texts are verified against the Telnyx account signing key (source: {}).",
+            match source {
+                SigningKeySource::Env => "the deployment environment",
+                SigningKeySource::Config => "the operator panel",
+                SigningKeySource::None => "none",
+            }
+        )
+    } else {
+        "No Telnyx account signing key is set, so EVERY inbound call and text is refused \
+         (503 telnyx_verification_not_configured). Save the Telnyx API key below and the app reads \
+         the account key from Telnyx, or paste the account public key from Telnyx Mission Control \
+         into the signing key field."
+            .to_string()
+    };
 
     match config {
         Some(c) => Ok(Json(json!({
@@ -887,9 +1067,18 @@ pub async fn get_admin_config(State(state): State<AppState>) -> ApiResult<Json<V
             "profile_id": c.profile_id,
             "messaging_profile_id": c.messaging_profile_id,
             "has_webhook_secret": c.webhook_secret.is_some(),
+            "has_public_key": ready,
+            "public_key_source": source.as_str(),
+            "public_key_set_in_panel": !c.public_key.trim().is_empty(),
+            "inbound_verification_ready": ready,
+            "inbound_verification_note": note,
         }))),
         None => Ok(Json(json!({
-            "message": "Telnyx not configured"
+            "message": "Telnyx not configured",
+            "has_public_key": ready,
+            "public_key_source": source.as_str(),
+            "inbound_verification_ready": ready,
+            "inbound_verification_note": note,
         }))),
     }
 }
@@ -901,8 +1090,6 @@ pub async fn put_admin_config(
     State(state): State<AppState>,
     Json(req): Json<TelnyxConfigUpdate>,
 ) -> ApiResult<Json<Value>> {
-    let api_key = req.api_key;
-
     // Same class as the purchase route (kanban t_c30d5d52): `profile_id` and `messaging_profile_id`
     // are client-supplied strings bound to `telnyx_config` columns that are VARCHAR(255), and an
     // over-long one reached the UPDATE/INSERT unvalidated — measured live on 2c96e12e, a 300-char
@@ -915,46 +1102,118 @@ pub async fn put_admin_config(
         check_len("messaging_profile_id", mpid, TELNYX_PROFILE_ID_MAX_CHARS)?;
     }
 
-    // Allow saving empty config — user will set keys later from Super Admin panel
-    // if api_key.is_empty() {
-    //     return Err(AppError::BadRequest("api_key is required".into()));
-    // }
+    let existing = get_telnyx_config(&state.pool).await?;
+    let stored_api_key = existing
+        .as_ref()
+        .map(|c| c.api_key.clone())
+        .unwrap_or_default();
+    let stored_public_key = existing
+        .as_ref()
+        .map(|c| c.public_key.clone())
+        .unwrap_or_default();
 
-    let existing = sqlx::query_scalar::<_, Uuid>("SELECT id FROM telnyx_config LIMIT 1")
-        .fetch_optional(&state.pool)
-        .await?;
+    // Allow saving empty config — an operator will set keys later from the operator console.
+    //
+    // A blank API key, or the MASKED value the console painted back, means "leave the stored key
+    // alone". Without that rule this form became a way to DESTROY the sending credential the moment
+    // its second field (the signing key, kanban t_38b352f8) was used: the generic panel renders the
+    // masked key it read, and whatever the box holds would have been posted back as the key.
+    let submitted_api_key = req.api_key.trim().to_string();
+    let api_key = if submitted_api_key.is_empty()
+        || submitted_api_key == crate::handlers::provider_keys_handler::mask_key(&stored_api_key)
+    {
+        stored_api_key.clone()
+    } else {
+        submitted_api_key
+    };
+    let api_key_changed = api_key != stored_api_key;
 
-    match existing {
+    // The account signing key. Three explicit arms, so SET, KEEP and CLEAR are different requests:
+    // a paste wins; `clear_public_key` empties it; otherwise a deployment that has no stored key but
+    // does have an API key tries to read the account key from Telnyx (best effort, kanban
+    // t_38b352f8) and REPORTS the outcome rather than pretending it worked.
+    let mut public_key = stored_public_key.clone();
+    let mut signing_key_derived = false;
+    let mut signing_key_error: Option<String> = None;
+    if req.clear_public_key.unwrap_or(false) {
+        public_key.clear();
+    } else if let Some(supplied) = req
+        .public_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        public_key = validate_public_key(supplied).map_err(AppError::BadRequest)?;
+    } else if public_key.trim().is_empty() && !api_key.trim().is_empty() {
+        match derive_public_key(
+            &crate::handlers::message_handler::telnyx_api_base(),
+            &api_key,
+        )
+        .await
+        {
+            Ok(derived) => {
+                public_key = derived;
+                signing_key_derived = true;
+            }
+            Err(reason) => signing_key_error = Some(reason),
+        }
+    }
+
+    match existing.as_ref().map(|c| c.id) {
         Some(id) => {
             sqlx::query(
-                "UPDATE telnyx_config SET api_key = $1, profile_id = COALESCE($2, profile_id), messaging_profile_id = COALESCE($3, messaging_profile_id), updated_at = NOW() WHERE id = $4"
+                "UPDATE telnyx_config SET api_key = $1, profile_id = COALESCE($2, profile_id), messaging_profile_id = COALESCE($3, messaging_profile_id), public_key = $4, updated_at = NOW() WHERE id = $5"
             )
             .bind(&api_key)
             .bind(&req.profile_id)
             .bind(&req.messaging_profile_id)
+            .bind(&public_key)
             .bind(id)
             .execute(&state.pool)
             .await?;
         }
         None => {
-            let id = Uuid::new_v4();
             sqlx::query(
-                "INSERT INTO telnyx_config (id, api_key, profile_id, messaging_profile_id, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())"
+                "INSERT INTO telnyx_config (id, api_key, profile_id, messaging_profile_id, public_key, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())"
             )
-            .bind(id)
+            .bind(Uuid::new_v4())
             .bind(&api_key)
             .bind(&req.profile_id)
             .bind(&req.messaging_profile_id)
+            .bind(&public_key)
             .execute(&state.pool)
             .await?;
         }
     }
 
+    // Answer from the row that is now stored, not from the request: the panel then paints what the
+    // delivery path will actually use.
+    let saved = get_telnyx_config(&state.pool).await?;
+    let (profile_id, messaging_profile_id, saved_api_key) = match saved.as_ref() {
+        Some(c) => (
+            c.profile_id.clone(),
+            c.messaging_profile_id.clone(),
+            c.api_key.clone(),
+        ),
+        None => (
+            req.profile_id.clone(),
+            req.messaging_profile_id.clone(),
+            api_key.clone(),
+        ),
+    };
+    let (resolved, source) =
+        resolve_signing_key(state.config.telnyx_public_key.as_deref(), &state.pool).await?;
+
     Ok(Json(json!({
         "message": "Telnyx configuration updated",
-        "api_key": crate::handlers::provider_keys_handler::mask_key(&api_key),
-        "profile_id": req.profile_id,
-        "messaging_profile_id": req.messaging_profile_id,
+        "api_key": crate::handlers::provider_keys_handler::mask_key(&saved_api_key),
+        "api_key_changed": api_key_changed,
+        "profile_id": profile_id,
+        "messaging_profile_id": messaging_profile_id,
+        "has_public_key": resolved.is_some(),
+        "public_key_source": source.as_str(),
+        "signing_key_derived": signing_key_derived,
+        "signing_key_error": signing_key_error,
     })))
 }
 
@@ -1006,5 +1265,109 @@ mod tests {
         let msg = refusal("number", &format!("+{}", "5".repeat(32)), NUMBER_MAX_CHARS)
             .expect("33 chars must be refused");
         assert_eq!(msg, "number is too long: 33 characters, the maximum is 32");
+    }
+
+    // -- The account signing key (kanban t_38b352f8) ------------------------------------------------
+
+    /// The exact shape Telnyx issues: base64 of a 32-byte Ed25519 public key. Accepted with the
+    /// surrounding whitespace a copy-paste from Mission Control carries, and stored trimmed.
+    #[test]
+    fn a_32_byte_base64_key_is_accepted_and_trimmed() {
+        let key = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+        assert_eq!(validate_public_key(&key).as_deref(), Ok(key.as_str()));
+        assert_eq!(
+            validate_public_key(&format!("  {key}\n")).as_deref(),
+            Ok(key.as_str())
+        );
+        // Padding-free base64 is the same key, and Telnyx's portal has shown both.
+        let unpadded = key.trim_end_matches('=').to_string();
+        assert_eq!(
+            validate_public_key(&unpadded).as_deref(),
+            Ok(unpadded.as_str())
+        );
+    }
+
+    /// A value that cannot be a 32-byte key is refused AT THE WRITE, naming the field, the decoded
+    /// length and where the real value comes from — never stored to fail 503 on every delivery.
+    #[test]
+    fn a_key_of_the_wrong_length_names_the_field_the_length_and_the_source() {
+        let short = base64::engine::general_purpose::STANDARD.encode([9u8; 31]);
+        let msg = validate_public_key(&short).expect_err("31 bytes must be refused");
+        assert!(msg.contains("public_key"), "{msg}");
+        assert!(msg.contains("31 bytes") && msg.contains("32"), "{msg}");
+        assert!(msg.contains("Telnyx Mission Control"), "{msg}");
+
+        let long = base64::engine::general_purpose::STANDARD.encode([9u8; 33]);
+        let msg = validate_public_key(&long).expect_err("33 bytes must be refused");
+        assert!(msg.contains("33 bytes"), "{msg}");
+    }
+
+    /// An empty value is its own sentence: the caller used the CLEAR arm or sent nothing, and
+    /// neither may be confused with a malformed paste.
+    #[test]
+    fn an_empty_key_and_a_non_base64_key_are_refused_with_distinct_sentences() {
+        assert_eq!(
+            validate_public_key("   "),
+            Err("public_key is empty".to_string())
+        );
+        let msg = validate_public_key("not base64 at all !!!").expect_err("must be refused");
+        assert!(msg.contains("not valid base64"), "{msg}");
+        assert!(msg.contains("Telnyx Mission Control"), "{msg}");
+    }
+
+    /// A one-shot HTTP stub: answers the next request with `status` + `body`, then closes. Binds an
+    /// ephemeral loopback port, so nothing on this host is involved and nothing leaves the box.
+    fn stub_http(status: &'static str, body: &'static str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            if let Ok((mut socket, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf);
+                let answer = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                     Connection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(answer.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// The convenience arm reads the account key out of Telnyx's answer — all three shapes the
+    /// endpoint has been documented to use — and stores only a VALIDATED 32-byte key.
+    #[tokio::test]
+    async fn the_derivation_arm_reads_the_key_out_of_every_answer_shape() {
+        let key = base64::engine::general_purpose::STANDARD.encode([3u8; 32]);
+        for shape in [
+            format!("{{\"data\":{{\"public_key\":\"{key}\"}}}}"),
+            format!("{{\"data\":[{{\"public_key\":\"{key}\"}}]}}"),
+            format!("{{\"public_key\":\"{key}\"}}"),
+        ] {
+            let body: &'static str = Box::leak(shape.into_boxed_str());
+            let base = stub_http("200 OK", body);
+            assert_eq!(derive_public_key(&base, "KEY").await, Ok(key.clone()));
+        }
+    }
+
+    /// A refusal, an unreadable answer or a key that fails validation is REPORTED, never stored:
+    /// the operator is told to paste the key instead of believing inbound is configured.
+    #[tokio::test]
+    async fn the_derivation_arm_reports_an_answer_it_cannot_use() {
+        let base = stub_http("401 Unauthorized", "{\"errors\":[{\"detail\":\"nope\"}]}");
+        let err = derive_public_key(&base, "KEY")
+            .await
+            .expect_err("a 401 must be reported");
+        assert!(err.contains("401"), "{err}");
+        assert!(err.contains("Mission Control"), "{err}");
+
+        // A shape this app does not recognise is reported rather than guessed at.
+        let base = stub_http("200 OK", "{\"data\":{\"something_else\":true}}");
+        let err = derive_public_key(&base, "KEY")
+            .await
+            .expect_err("an unknown shape must be reported");
+        assert!(err.contains("200"), "{err}");
     }
 }
