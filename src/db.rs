@@ -401,6 +401,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000047_telnyx_public_key",
             include_str!("../migrations/000047_telnyx_public_key.sql"),
         ),
+        // A visitor who cannot sign in files a message into the operator's own ticket queue
+        // (2026-11-06). Every support@ address this app printed lived on a domain with no mail
+        // exchanger, so the message bounced and a locked-out customer had no way back in. The boot
+        // runner re-executes every file each start and keeps no ledger, so the file is idempotent:
+        // DROP NOT NULL, ADD COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS, and a data row guarded
+        // by NOT EXISTS.
+        (
+            "000048_public_support_intake",
+            include_str!("../migrations/000048_public_support_intake.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

@@ -80,6 +80,18 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/public/plans",
             get(crate::handlers::plans_handler::list_active_plans),
         )
+        // A visitor who cannot sign in writes to the team (2026-11-06). Every "email support@…"
+        // sentence this app printed named an address on a domain that publishes NO mail exchanger
+        // (measured: MX = 0 for this app's domain and every sibling's, nothing on :25), so a
+        // locked-out customer's message bounced and they stayed locked out. This arm takes no
+        // credential and writes ONE ticket with a NULL workspace plus the address the visitor typed;
+        // the operator answers it from the queue they already work. Named in
+        // `crate::auth::route_policy::PUBLIC_ROUTES` — the page that posts here is served to someone
+        // who has no session by definition.
+        .route(
+            "/api/v1/public/support-request",
+            post(crate::handlers::tickets_handler::create_public),
+        )
         .route(
             "/api/v1/internal/portfolio-companies",
             post(portfolio_handler::internal_create_portfolio_company),

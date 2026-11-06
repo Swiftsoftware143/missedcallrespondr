@@ -1,5 +1,6 @@
 use axum::{
     extract::{Extension, Path, Query, State},
+    http::StatusCode,
     Json,
 };
 use serde::Deserialize;
@@ -56,7 +57,8 @@ fn caller_is_operator(claims: &Claims) -> bool {
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct OperatorTicket {
     pub id: Uuid,
-    pub tenant_id: Uuid,
+    /// `None` when the message came from the public contact page — the visitor has no workspace.
+    pub tenant_id: Option<Uuid>,
     pub subject: String,
     pub status: String,
     pub priority: String,
@@ -67,6 +69,10 @@ pub struct OperatorTicket {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub tenant_name: String,
     pub account_email: String,
+    /// The address a visitor typed on the contact page (2026-11-06). Empty for a ticket filed from
+    /// inside a workspace, whose owner is already named by `account_email` — so the queue row always
+    /// says WHO to answer.
+    pub requester_email: String,
     /// The tier the request asks for (cron 2026-10-20), and its catalogue name — so the operator row
     /// says "Pro", not a slug, and a request for an ordinary ticket stays empty.
     pub plan_slug: Option<String>,
@@ -114,8 +120,9 @@ pub async fn list(
         let rows = sqlx::query_as::<_, OperatorTicket>(
             r#"SELECT t.id, t.tenant_id, t.subject, t.status, t.priority, t.assigned_to,
                       t.contact_id, t.source, t.created_at, t.updated_at,
-                      COALESCE(tn.name, '') AS tenant_name,
+                      COALESCE(tn.name, CASE WHEN t.tenant_id IS NULL THEN 'Website visitor' ELSE '' END) AS tenant_name,
                       COALESCE(u.email, '') AS account_email,
+                      COALESCE(t.requester_email, '') AS requester_email,
                       t.plan_slug,
                       COALESCE(p.name, t.plan_slug) AS plan_name,
                       t.plan_applied_at
@@ -196,6 +203,158 @@ pub async fn stats(
     Ok(Json(serde_json::json!({
         "open": row.0, "in_progress": row.1, "resolved": row.2, "closed": row.3, "total": row.4
     })))
+}
+
+/// What the public contact page posts (`POST /api/v1/public/support-request`).
+#[derive(Deserialize)]
+pub struct PublicTicketBody {
+    pub email: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub subject: String,
+    /// The visitor's words. The served page sends `body`; `message` is accepted as an alias so a
+    /// hand-written client is not refused for naming the same field differently.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// How many messages ONE address may file through the public contact page per hour.
+///
+/// The arm is anonymous, so without a bound one script could fill the operator's queue. Three is
+/// enough for a person writing about a lost password, then a correction.
+const PUBLIC_HOURLY_LIMIT: i64 = 3;
+
+/// Trim and cap a free-text field by CHARACTERS (not bytes): the cap is the client's to exceed and
+/// must never split a multi-byte character.
+fn cap_chars(raw: &str, max: usize) -> String {
+    raw.trim()
+        .chars()
+        .take(max)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// The public contact page's filing arm (2026-11-06).
+///
+/// MEASURED (dns.google and cloudflare-dns.com agree): MX = 0 for this app's domain and every
+/// sibling's, and nothing on this host listens on port 25, so every "write to support@…" sentence
+/// this app printed sent a customer's message into a bounce — and a locked-out customer, the person
+/// who needs help most, had no way to reach anyone.
+///
+/// This arm files the message into the operator's EXISTING ticket queue: one ticket with no workspace
+/// (`tenant_id` NULL, migration 000048), the address the visitor typed in `requester_email`, and the
+/// message as the thread's opening entry. The operator answers it from the queue they already work,
+/// and `add_message` mails that answer to this address (template `support_reply`).
+///
+/// Guards, all refusing BEFORE a row is written: a syntactically real address, a non-empty bounded
+/// message, at most three messages from one address per hour (429), and idempotence on an already
+/// open ticket with the same address and subject.
+pub async fn create_public(
+    State(state): State<AppState>,
+    Json(req): Json<PublicTicketBody>,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    let email = crate::security::email_addr::normalize(&req.email).map_err(|e| {
+        AppError::Unprocessable(format!("{e} — we need an address we can reply to"))
+    })?;
+    let name = cap_chars(req.name.as_deref().unwrap_or(""), 120);
+    let message = cap_chars(
+        req.body.as_deref().or(req.message.as_deref()).unwrap_or(""),
+        4000,
+    );
+    if message.is_empty() {
+        return Err(AppError::Unprocessable(
+            "Write your message so the team knows what you need.".into(),
+        ));
+    }
+    let subject = cap_chars(&req.subject, 200);
+    if subject.is_empty() {
+        return Err(AppError::Unprocessable(
+            "Give your message a short subject so the team knows what it is about.".into(),
+        ));
+    }
+    let description = if name.is_empty() {
+        message
+    } else {
+        format!("{name} wrote:\n\n{message}")
+    };
+
+    let recent: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tickets WHERE lower(requester_email) = $1 \
+           AND created_at > now() - interval '1 hour'",
+    )
+    .bind(&email)
+    .fetch_one(&state.pool)
+    .await?;
+    if recent >= PUBLIC_HOURLY_LIMIT {
+        return Ok((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "status": 429,
+                "error": "You have sent us several messages in the last hour. Please wait a little, or reply to the email we already have from you.",
+                "retry_after_seconds": 3600
+            })),
+        ));
+    }
+
+    // A second identical message is not a second request: the form stays pressable after a send, so a
+    // visitor who pressed twice must not mint a twin the operator has to work twice.
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM tickets WHERE tenant_id IS NULL AND lower(requester_email) = $1 \
+           AND lower(subject) = lower($2) AND status IN ('open','in_progress') \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&email)
+    .bind(&subject)
+    .fetch_optional(&state.pool)
+    .await?;
+    if let Some(id) = existing {
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "id": id,
+                "status": "existing",
+                "message": "We already have your message with that subject — the team will reply to the address you gave."
+            })),
+        ));
+    }
+
+    let id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+    sqlx::query(
+        "INSERT INTO tickets (id, tenant_id, subject, status, priority, assigned_to, contact_id, source, created_at, updated_at, requester_email) \
+         VALUES ($1, NULL, $2, 'open', 'medium', NULL, NULL, 'contact_form', $3, $3, $4)",
+    )
+    .bind(id)
+    .bind(&subject)
+    .bind(now)
+    .bind(&email)
+    .execute(&state.pool)
+    .await?;
+    // The visitor's words are the thread's opening entry, labelled as theirs so the queue never reads
+    // as if the team had said it.
+    sqlx::query(
+        "INSERT INTO ticket_messages (id, ticket_id, sender_type, sender_id, body, created_at) VALUES ($1,$2,$3,$4,$5,$6)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(id)
+    .bind("customer")
+    .bind(None::<Uuid>)
+    .bind(&description)
+    .bind(now)
+    .execute(&state.pool)
+    .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": id,
+            "status": "open",
+            "message": "Your message is with our team. We will reply to the address you gave."
+        })),
+    ))
 }
 
 pub async fn create(
@@ -343,7 +502,14 @@ pub async fn create(
 /// suppression — so a probe account is recorded `withheld` and no message is attempted.
 /// Best-effort by construction: a mail failure is logged and never fails a filed request.
 async fn notify_customer_of_billing_request(state: &AppState, ticket: &Ticket) -> bool {
-    send_billing_request_receipt(&state.pool, ticket.tenant_id, &ticket.subject).await
+    // A public contact-page row has no workspace, so there is no workspace owner to mail a receipt
+    // to — and no plan was asked for either (the public arm never sets `plan_slug`). Nothing to send.
+    match ticket.tenant_id {
+        Some(tenant_id) => {
+            send_billing_request_receipt(&state.pool, tenant_id, &ticket.subject).await
+        }
+        None => false,
+    }
 }
 
 /// The plan-request RECEIPT, reachable from the till as well as from the tickets door.
@@ -462,7 +628,7 @@ pub async fn update(
         && matches!(next_status.as_str(), "resolved" | "closed")
         && existing.plan_applied_at.is_none()
     {
-        if let Some(slug) = existing.plan_slug.as_deref() {
+        if let (Some(slug), Some(tenant_id)) = (existing.plan_slug.as_deref(), existing.tenant_id) {
             let plan: Option<(Uuid, String)> =
                 sqlx::query_as("SELECT id, name FROM plans WHERE slug = $1 AND is_active = true")
                     .bind(slug)
@@ -471,10 +637,7 @@ pub async fn update(
             match plan {
                 Some((plan_id, plan_name)) => {
                     crate::handlers::plans_handler::seat_plan_for_tenant(
-                        &state,
-                        existing.tenant_id,
-                        plan_id,
-                        None,
+                        &state, tenant_id, plan_id, None,
                     )
                     .await?;
                     sqlx::query("UPDATE tickets SET plan_applied_at = NOW() WHERE id = $1")
@@ -485,7 +648,7 @@ pub async fn update(
                     applied_plan_name = Some(plan_name);
                     tracing::info!(
                         ticket = %id,
-                        tenant = %existing.tenant_id,
+                        tenant = %tenant_id,
                         plan = %slug,
                         "Plan request resolved — the workspace was seated on the requested plan"
                     );
@@ -583,40 +746,72 @@ pub async fn add_message(
 /// recorded `withheld` in `email_send_log` and no message is attempted. Best-effort by construction:
 /// a mail failure is logged and never turns a saved reply into an error the operator sees.
 async fn notify_customer_of_reply(state: &AppState, ticket: &Ticket, body: &str) {
-    let owner: Option<(Option<String>, String)> = match sqlx::query_as(
-        "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
-    )
-    .bind(ticket.tenant_id)
-    .fetch_optional(&state.pool)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => {
-            tracing::error!(
-                "tickets.add_message: owner lookup failed (tenant_id={}): {e}",
-                ticket.tenant_id
-            );
-            return;
+    // WHO hears about the answer, and under which wording (2026-11-06).
+    //
+    // A ticket filed from inside a workspace is answered to that workspace's owner — the lookup that
+    // existed before this. A ticket filed from the PUBLIC contact page has no workspace at all: its
+    // address is the one the visitor typed, and the notice must not tell them to open a dashboard
+    // they cannot reach, so it uses `support_reply` instead of `ticket_reply`. Without this arm the
+    // operator's answer was written to `ticket_messages` and the visitor heard nothing — the exact
+    // dead end the contact page was built to close.
+    let (name, email, template_type) = match ticket.tenant_id {
+        Some(tenant_id) => {
+            let owner: Option<(Option<String>, String)> = match sqlx::query_as(
+                "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
+            )
+            .bind(tenant_id)
+            .fetch_optional(&state.pool)
+            .await
+            {
+                Ok(row) => row,
+                Err(e) => {
+                    tracing::error!(
+                        "tickets.add_message: owner lookup failed (tenant_id={tenant_id}): {e}"
+                    );
+                    return;
+                }
+            };
+            match owner {
+                Some((name, email)) => (
+                    name.unwrap_or_else(|| "there".to_string()),
+                    email,
+                    "ticket_reply",
+                ),
+                None => {
+                    tracing::warn!("tickets.add_message: no user to notify for tenant {tenant_id}");
+                    return;
+                }
+            }
         }
-    };
-    let Some((name, email)) = owner else {
-        tracing::warn!(
-            "tickets.add_message: no user to notify for tenant {}",
-            ticket.tenant_id
-        );
-        return;
+        None => match ticket
+            .requester_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+        {
+            Some(email) => ("there".to_string(), email.to_string(), "support_reply"),
+            None => {
+                tracing::warn!(
+                    "tickets.add_message: public ticket {} carries no requester address to answer",
+                    ticket.id
+                );
+                return;
+            }
+        },
     };
     let vars = serde_json::json!({
-        "name": name.unwrap_or_else(|| "there".to_string()),
+        "name": name,
         "ticket_subject": ticket.subject,
         "reply_body": body,
         "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
     });
+    // A public row has no tenant id; a NIL id resolves no stored branding, so the mail carries this
+    // app's own wordmark and name (kanban t_6a8af451) and the provider is resolved install-wide.
     if let Err(e) = crate::email::send_template_email(
         &state.pool,
-        ticket.tenant_id,
+        ticket.tenant_id.unwrap_or_default(),
         &email,
-        "ticket_reply",
+        template_type,
         &vars,
     )
     .await

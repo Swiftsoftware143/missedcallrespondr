@@ -136,6 +136,16 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // Enterprise at $199/month). The other five apps read their own live plan records; this is the
     // same read, mounted where a marketing page can reach it.
     "/api/v1/public/plans",
+    // A visitor who CANNOT SIGN IN writes to the team (2026-11-06). Every "email support@…"
+    // sentence this app printed named an address on a domain that publishes no mail exchanger
+    // (measured on dns.google and cloudflare-dns.com: MX = 0 for this app's domain and every
+    // sibling's, and nothing on this host listens on :25), so a locked-out customer's message
+    // bounced — the served contact page now files it instead. The handler takes no credential and
+    // reads no workspace: it writes ONE ticket with a NULL tenant, the address the visitor typed,
+    // and a bounded message, refusing a fourth message from one address within the hour. The
+    // operator answers it from the ticket queue they already work, and the reply is mailed to that
+    // address. Nothing about any existing tenant, user or usage is readable here.
+    "/api/v1/public/support-request",
     // --- telephony receiver whose own SIGNATURE is the credential ------------------------------
     // Telnyx posts call-control and message-delivery events here with no session. The receiver is
     // the app's inbound telephony door; it is mounted on the anonymous router because Telnyx cannot
