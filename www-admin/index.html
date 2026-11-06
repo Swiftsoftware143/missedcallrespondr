@@ -1470,10 +1470,13 @@ const CalendarView = () => {
 
 // ---- LISTS ----
 const Lists = () => {
-  const st = viewState('lists', { list: [], showModal: false, editItem: null, expanded: null, expandedLeads: [], campaigns: [] });
+  const st = viewState('lists', { list: [], showModal: false, editItem: null, expanded: null, expandedLeads: [], campaigns: [], leads: [], pick: null });
   const load = async () => {
     try { const data = await API.get('/lists'); st.list = Array.isArray(data) ? data : []; } catch(e) { console.error(e); }
     try { const c = await API.get('/campaigns'); st.campaigns = Array.isArray(c) ? c : []; } catch(e) { console.error(e); }
+    // The member picker needs the tenant's leads: POST /lists/:id/leads takes a lead_id, and until
+    // this screen could list them the two membership routes had no caller anywhere in the console.
+    try { const ld = await API.get('/leads'); st.leads = Array.isArray(ld) ? ld : []; } catch(e) { console.error(e); }
     renderApp(); };
   if (!st._loaded) { st._loaded = true; load(); }
   const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
@@ -1484,19 +1487,47 @@ const Lists = () => {
     if (st.expanded === l.id) { st.expanded = null; st.expandedLeads = []; renderApp(); return; }
     st.expanded = l.id; st.expandedLeads = []; renderApp();
     try { const ld = await API.get('/lists/' + l.id + '/leads'); st.expandedLeads = Array.isArray(ld) ? ld : []; renderApp(); } catch(e){ console.error(e); } };
+  const refreshMembers = async (listId) => {
+    try { const ld = await API.get('/lists/' + listId + '/leads'); st.expandedLeads = Array.isArray(ld) ? ld : []; } catch(e){ console.error(e); }
+    renderApp(); };
+  // kanban t_e3b93d6c left POST /lists/:id/leads and DELETE /lists/:id/leads/:lead_id with no caller
+  // in any served console, so a standalone list could be named and renamed but never given a member —
+  // and a campaign or rule aimed at it had nothing to hit. Both buttons report the API's own sentence.
+  const addMember = async (l) => {
+    const leadId = st.pick;
+    if (!leadId) { alert('Pick a lead from the list first.'); return; }
+    try { await API.post('/lists/' + l.id + '/leads', { lead_id: leadId }); st.pick = null; await refreshMembers(l.id); }
+    catch(e){ alert(e.message); } };
+  const removeMember = async (l, leadId) => {
+    try { await API.del('/lists/' + l.id + '/leads/' + leadId); await refreshMembers(l.id); }
+    catch(e){ alert(e.message); } };
   const campaignName = (id) => { const f = st.campaigns.find(c => String(c.id) === String(id)); return f ? f.name : null; };
+  // Computed once per render at COMPONENT scope, because the member picker and the member rows both
+  // need them. An IIFE-local `cur` was invisible to the Remove button inside the table below, and
+  // Chromium answered `ReferenceError: cur is not defined` — the button rendered and did nothing.
+  const expList = st.list.find(l => String(l.id) === String(st.expanded)) || {};
+  const inListIds = new Set(st.expandedLeads.map(x => String(x.id)));
+  const freeLeads = st.leads.filter(x => !inListIds.has(String(x.id)));
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Lists</h2><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add List</button></div>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Name</th><th>Campaign</th><th>Leads</th><th>Actions</th></tr></thead>
         <tbody>${st.list.map(l => html`<tr>
           <td class="font-medium">${l.name || '-'}</td>
-          <td class="text-gray-500">${l.campaign_id ? (campaignName(l.campaign_id) || 'Linked') : '<span class="text-gray-400 text-sm">standalone</span>'}</td>
+          <td class="text-gray-500">${l.campaign_id ? (campaignName(l.campaign_id) || 'Linked') : html`<span class="text-gray-400 text-sm">standalone</span>`}</td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => toggleExpand(l)}>${st.expanded === l.id ? 'Hide' : 'View leads'}</button></td>
           <td><button class="btn btn-sm btn-outline" onClick=${() => { show(l); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(l.id)}>Delete</button></td>
         </tr>`)}
-        ${st.expanded && html`<tr><td colspan="4" class="bg-gray-50"><div class="p-3"><div class="font-semibold text-sm mb-2">Leads in ${(st.list.find(l=>String(l.id)===String(st.expanded))||{}).name||'list'}</div>
-          ${st.expandedLeads.length === 0 ? html`<p class="text-gray-400 text-sm">No leads in this list yet.</p>` : html`<table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Tags</th></tr></thead><tbody>${st.expandedLeads.map(ld => html`<tr><td class="font-medium">${ld.name||'-'}</td><td class="text-gray-500">${ld.phone||'-'}</td><td class="text-gray-500">${ld.email||'-'}</td><td><span class="badge badge-blue">${ld.status||'new'}</span></td><td class="text-gray-500 text-sm">${(ld.tags||[]).join(', ')||'-'}</td></tr>`)}</tbody></table>`}
+        ${st.expanded && html`<tr><td colspan="4" class="bg-gray-50"><div class="p-3"><div class="font-semibold text-sm mb-2">Leads in ${expList.name || 'list'} (${st.expandedLeads.length})</div>
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <select class="input" style="max-width:340px" onChange=${e => { st.pick = e.target.value; }}>
+              <option value="">— pick a lead to add —</option>
+              ${freeLeads.map(x => html`<option value=${x.id}>${x.name || x.phone || x.email || x.id}</option>`)}
+            </select>
+            <button class="btn btn-sm btn-green" onClick=${() => addMember(expList)}>Add to list</button>
+            ${freeLeads.length === 0 && html`<span class="text-gray-400 text-sm">${st.leads.length === 0 ? 'You have no leads yet — add one on the Leads screen first.' : 'Every lead you have is already in this list.'}</span>`}
+          </div>
+          ${st.expandedLeads.length === 0 ? html`<p class="text-gray-400 text-sm">No leads in this list yet.</p>` : html`<table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Tags</th><th></th></tr></thead><tbody>${st.expandedLeads.map(ld => html`<tr><td class="font-medium">${ld.name||'-'}</td><td class="text-gray-500">${ld.phone||'-'}</td><td class="text-gray-500">${ld.email||'-'}</td><td><span class="badge badge-blue">${ld.status||'new'}</span></td><td class="text-gray-500 text-sm">${(ld.tags||[]).join(', ')||'-'}</td><td><button class="btn btn-sm btn-red" onClick=${() => removeMember(expList, ld.id)}>Remove</button></td></tr>`)}</tbody></table>`}
         </div></td></tr>`}
         ${st.list.length === 0 && html`<tr><td colspan="4" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No lists yet.'} Create a campaign to auto-generate its list, or add a standalone list here.</td></tr>`}
       </tbody></table>
@@ -1854,12 +1885,7 @@ const OPS_PANELS = [
 "fields": [
 "api_key",
 "profile_id",
-"messaging_profile_id",
-"public_key",
-"clear_public_key"
-],
-"booleans": [
-"clear_public_key"
+"messaging_profile_id"
 ]
 },
 {
@@ -2535,6 +2561,46 @@ const TenantsScreen = () => {
     await load();
   };
 
+  // ── "NO PASSWORD DELIVERED" BADGE + RE-SEND (2026-11-05) ─────────────────────────────────────
+  // `users.password_undelivered` marks the exact state: the signup door minted this workspace
+  // owner's first password and the mail carrying it never went out, so nobody has ever read it and
+  // the customer cannot sign in. The list publishes it as `owner_credentials_undelivered` and this
+  // is the ONE action that recovers the account without retiring it (and its data with it). The
+  // response hands back the password itself whenever the mail was withheld or refused, so the
+  // operator always has something to give the customer instead of "check your email".
+  const resendCreds = async (t) => {
+    const label = t.name || t.slug || t.id;
+    const who = String((t && (t.owner_email || t.email)) || '').trim();
+    if (!confirm('Send ' + label + ' a new password?\n\n'
+      + (who ? 'The new password replaces the old one immediately and is emailed to ' + who + '. ' : '')
+      + 'Anyone signed in to that workspace is signed out.')) return;
+    st.busy = 'creds:' + t.id; st.msg = null; st.ok = true; renderApp();
+    try {
+      const r = await API.post('/admin/tenants/' + encodeURIComponent(t.id) + '/resend-credentials', {});
+      if (r && r.handover_password) {
+        // Withheld or refused: the console IS the delivery channel, so show it and say why.
+        st.ok = true;
+        st.msg = 'New password for ' + label + ': ' + r.handover_password
+          + ' — no email was sent (' + (r.withheld ? 'that address is a reserved test address'
+            : 'the mail provider refused it') + '), so give it to the customer directly.';
+      } else {
+        st.ok = true;
+        st.msg = 'A new password was emailed to ' + (r && r.email ? r.email : label) + '.';
+      }
+    } catch (e) { st.ok = false; st.msg = 'Not re-sent: ' + e.message; }
+    st.busy = null;
+    await load();
+  };
+  const credsCell = (t) => {
+    if (!(t && t.owner_credentials_undelivered)) return '';
+    const busy = st.busy === 'creds:' + t.id;
+    return html`<span class="badge badge-red ml-1" data-tenants="creds-undelivered"
+        title="The signup door minted this owner's first password and the mail carrying it never went out — nobody has ever read it, so they cannot sign in.">no password delivered</span>
+      <button class="btn btn-sm btn-outline ml-1" data-tenants="resend-creds" disabled=${busy}
+        title="Mint a new password for this workspace's owner, email it, and end their existing sessions."
+        onClick=${() => resendCreds(t)}>${busy ? '...' : 'send new password'}</button>`;
+  };
+
   // ── the PLAN cell (2026-10-19) ──
   // It used to be a static `plan_name || '—'`: a workspace with no subscription row showed a bare
   // dash, and the operator had no way to put it on a plan from the screen where the problem is
@@ -2586,7 +2652,7 @@ const TenantsScreen = () => {
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
         <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this workspace">suspended</span>` : null}</td>
-        <td>${ownerCell(t)}</td>
+        <td>${ownerCell(t)}${credsCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
         <td>${planCell(t)}</td>
