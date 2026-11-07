@@ -123,9 +123,9 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       </a>
     </div>
     <div class="mt-10 flex justify-center gap-8">
-     <div class="text-center"><div class="text-2xl font-bold text-white">85%</div><div class="text-xs text-gray-500">of missed calls<br>never call back</div></div>
-     <div class="text-center"><div class="text-2xl font-bold text-white">3 min</div><div class="text-xs text-gray-500">avg setup<br>to go live</div></div>
-     <div class="text-center"><div class="text-2xl font-bold text-white">24/7</div><div class="text-xs text-gray-500">automated<br>response</div></div>
+     <div class="text-center"><div class="text-2xl font-bold text-white">85%</div><div class="text-xs text-gray-400">of missed calls<br>never call back</div></div>
+     <div class="text-center"><div class="text-2xl font-bold text-white">3 min</div><div class="text-xs text-gray-400">avg setup<br>to go live</div></div>
+     <div class="text-center"><div class="text-2xl font-bold text-white">24/7</div><div class="text-xs text-gray-400">automated<br>response</div></div>
     </div>
   </div>
 </section>
@@ -209,7 +209,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
   <div class="max-w-5xl mx-auto text-center">
     <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Simple <span class="gradient-text">Pricing</span></h2>
     <p class="text-gray-400 mb-4 max-w-xl mx-auto">Start free. Upgrade as your call volume grows. No contracts, cancel anytime.</p>
-    <p class="text-gray-500 text-sm mb-12 max-w-2xl mx-auto">Every plan below is the one this install actually sells — the cards are read from the same plan records the app enforces, so a price or an allowance changed in the operator console shows up here on the next load.</p>
+    <p class="text-gray-400 text-sm mb-12 max-w-2xl mx-auto">Every plan below is the one this install actually sells — the cards are read from the same plan records the app enforces, so a price or an allowance changed in the operator console shows up here on the next load.</p>
     <!-- Rendered from GET /api/v1/public/plans. The three cards that follow are the no-JavaScript /
          failed-fetch fallback, carrying the plans this install was last set up with. A live fetch
          replaces them in place. -->
@@ -219,7 +219,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <h3 class="text-xl font-semibold text-white mb-2">Free</h3>
         <p class="text-gray-400 text-sm mb-6">For solo businesses just getting started.</p>
         <div class="text-4xl font-extrabold text-white mb-1">Free</div>
-        <p class="text-gray-500 text-sm mb-8">50 included credits</p>
+        <p class="text-gray-400 text-sm mb-8">50 included credits</p>
         <ul class="space-y-3 mb-8">
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> SMS auto-responder</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Call log with CSV export</li>
@@ -232,7 +232,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <h3 class="text-xl font-semibold text-white mb-2">Pro Monthly</h3>
         <p class="text-gray-400 text-sm mb-6">Monthly subscription with 5,000 credits + 1,500 bonus credits every month.</p>
         <div class="text-4xl font-extrabold text-white mb-1">$49<span class="text-lg text-gray-400 font-normal">/mo</span></div>
-        <p class="text-gray-500 text-sm mb-8">5,000 included credits every month</p>
+        <p class="text-gray-400 text-sm mb-8">5,000 included credits every month</p>
         <ul class="space-y-3 mb-8">
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Everything in Free</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Automated text-back on every missed call</li>
@@ -245,7 +245,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <h3 class="text-xl font-semibold text-white mb-2">Enterprise</h3>
         <p class="text-gray-400 text-sm mb-6">For high-volume call centers.</p>
         <div class="text-4xl font-extrabold text-white mb-1">$199<span class="text-lg text-gray-400 font-normal">/mo</span></div>
-        <p class="text-gray-500 text-sm mb-8">Unlimited calls &amp; numbers</p>
+        <p class="text-gray-400 text-sm mb-8">Unlimited calls &amp; numbers</p>
         <ul class="space-y-3 mb-8">
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Everything in Pro Monthly</li>
           <li class="flex items-start gap-2 text-sm text-gray-300"><span class="text-green-400 mt-0.5">✓</span> Unlimited phone numbers</li>
@@ -298,7 +298,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
     }
     wrap.appendChild(price);
     if (Number(p.price_yearly || 0) > 0) {
-      wrap.appendChild(el('p', 'text-gray-500 text-sm mb-2', 'or ' + money(p.price_yearly) + ' billed yearly'));
+      wrap.appendChild(el('p', 'text-gray-400 text-sm mb-2', 'or ' + money(p.price_yearly) + ' billed yearly'));
     }
 
     var f = p.features;
@@ -314,7 +314,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       allowance = 'Unlimited calls & numbers';
       for (var i = 0; i < f.length; i++) bullets.push(words(f[i]).charAt(0).toUpperCase() + words(f[i]).slice(1));
     }
-    if (allowance) wrap.appendChild(el('p', 'text-gray-500 text-sm mb-8', allowance));
+    if (allowance) wrap.appendChild(el('p', 'text-gray-400 text-sm mb-8', allowance));
 
     var ul = el('ul', 'space-y-3 mb-8');
     for (var j = 0; j < bullets.length; j++) {
@@ -375,17 +375,18 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       <span class="text-gray-400 text-sm">MissedCall Respondr © 2026</span>
     </div>
     <div class="flex gap-6">
-      <a href="https://app.missedcallrespondr.com/login" class="text-gray-500 hover:text-gray-300 text-sm">Login</a>
-      <a href="https://admin.missedcallrespondr.com/" class="text-gray-500 hover:text-gray-300 text-sm">Admin</a>
-      <a href="https://app.missedcallrespondr.com/guide" class="text-gray-500 hover:text-gray-300 text-sm">Guide</a>
+      <a href="https://app.missedcallrespondr.com/login" class="text-gray-400 hover:text-gray-300 text-sm">Login</a>
+      <a href="https://admin.missedcallrespondr.com/" class="text-gray-400 hover:text-gray-300 text-sm">Admin</a>
+      <a href="https://app.missedcallrespondr.com/guide" class="text-gray-400 hover:text-gray-300 text-sm">Guide</a>
+      <a href="https://app.missedcallrespondr.com/contact.html" class="text-gray-400 hover:text-gray-300 text-sm">Contact</a>
     </div>
   </div>
 <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:12px">
-      <a href="/terms.html" style="color:#6b7280;font-size:0.85rem;text-decoration:none">Terms</a>
+      <a href="/terms.html" style="color:#9ca3af;font-size:0.85rem;text-decoration:none">Terms</a>
       <span style="color:#4b5563">·</span>
-      <a href="/privacy.html" style="color:#6b7280;font-size:0.85rem;text-decoration:none">Privacy</a>
+      <a href="/privacy.html" style="color:#9ca3af;font-size:0.85rem;text-decoration:none">Privacy</a>
       <span style="color:#4b5563">·</span>
-      <a href="/refunds.html" style="color:#6b7280;font-size:0.85rem;text-decoration:none">Refunds</a>
+      <a href="/refunds.html" style="color:#9ca3af;font-size:0.85rem;text-decoration:none">Refunds</a>
     </div>
 </footer>
 
