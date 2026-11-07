@@ -116,7 +116,7 @@ const API = (() => {
   };
 })();
 
-const S = { view: 'dashboard', loading: false, error: null, views: {}, loadError: null, followUpDue: 0, followUpLoaded: false };
+const S = { view: 'dashboard', loading: false, error: null, views: {}, loadError: null, followUpDue: 0, followUpLoaded: false, ticketOpen: 0, ticketLoaded: false };
 const _get = API.get, _post = API.post, _put = API.put, _del = API.del;
 // A FAILED READ MUST NEVER READ AS AN EMPTY SCREEN (2026-10-29). Every list view loads through
 // API.get, and fifteen of them caught the failure with `console.error(e)` only — so an API 500 (or a
@@ -203,6 +203,23 @@ async function loadFollowUpDue(force) {
       && !!f.scheduled_at && new Date(utcIso(f.scheduled_at)).getTime() <= now).length;
     if (due !== S.followUpDue) { S.followUpDue = due; renderApp(); }
   } catch (e) { /* unreadable or not permitted: no badge, never a false zero */ }
+}
+
+// ---- THE OTHER QUEUE: A TICKET NOBODY HAS RESOLVED ----------------------------
+// 2026-11-07, same pass as the follow-up badge. `GET /api/v1/tickets/stats` already answers
+// open/in_progress/resolved/closed and scope-correct (operator = the fleet's queue, customer = their
+// own), yet the console never called it: a support ticket or a plan request sat in the Tickets list
+// with nothing saying so until someone happened to look. "Waiting on us" is open + in_progress.
+async function loadTicketOpen(force) {
+  if (!API.token) return;
+  if (S.ticketLoaded && !force) return;
+  S.ticketLoaded = true;
+  try {
+    const st = await API.get('/tickets/stats');
+    const n = Number(st && (Number(st.open || 0) + Number(st.in_progress || 0)));
+    const next = Number.isFinite(n) ? n : 0;
+    if (next !== S.ticketOpen) { S.ticketOpen = next; renderApp(); }
+  } catch (e) { /* no badge rather than a false zero */ }
 }
 
 // ---- LOGIN ----
@@ -1166,10 +1183,10 @@ const Tickets = () => {
       if (r && r.plan_applied) st.notice = 'Resolved \u2014 ' + (st.editItem.tenant_name || 'the workspace') + ' is now on ' + (r.plan_name || wanted) + '.';
       else if (wanted && String(data.status || '').match(/^(resolved|closed)$/i)) st.notice = 'Resolved \u2014 the plan on this request was not switched automatically; set it on the workspace.';
       else st.notice = null;
-      st.showModal = false; load();
+      st.showModal = false; load(); loadTicketOpen(true);
     } catch(e){ alert(e.message); }
   };
-  const remove = async (id) => { if(!confirm('Delete this ticket?')) return; await API.del('/tickets/' + id); load(); };
+  const remove = async (id) => { if(!confirm('Delete this ticket?')) return; await API.del('/tickets/' + id); load(); loadTicketOpen(true); };
   // ── Conversation (2026-10-19) ──────────────────────────────────────────────────────────────────
   // MEASURED before this: the screen could file, re-status and delete a ticket, but it had no reply
   // box and `ticket_messages` was written only by create() — so an operator could not ANSWER the
@@ -1191,7 +1208,7 @@ const Tickets = () => {
     try {
       await API.post('/tickets/' + st.threadId + '/messages', { sender_type: 'agent', body: body });
       st.thread = await API.get('/tickets/' + st.threadId);
-      st.reply = ''; st.busy = false; load();
+      st.reply = ''; st.busy = false; load(); loadTicketOpen(true);
     } catch (e) { st.busy = false; renderApp(); alert('The reply was not saved: ' + e.message); }
   };
   const isPlanRequest = (t) => !!t && (t.source === 'billing' || t.source === 'plan_request');
@@ -2859,6 +2876,8 @@ const App = () => {
   loadMe();
   // The due-follow-up count behind the nav badge; self-guarded, so a re-render never re-reads it.
   loadFollowUpDue();
+  // The unanswered-ticket count, same rule.
+  loadTicketOpen();
   const me = S.me || (API.user || {});
   const meName = me.name || me.email || 'Account';
   const meInitial = (String(meName) + '?').charAt(0).toUpperCase();
@@ -3702,6 +3721,9 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
           <span>${n.icon}</span><span class="nav-text">${n.label}</span>
           ${n.id === 'follow-ups' && (S.followUpDue || 0) > 0
             ? html`<span class="badge badge-yellow" data-follow-up-due=${S.followUpDue} style="margin-left:auto" title=${plural(S.followUpDue, 'follow-up is', 'follow-ups are') + ' due now'}>${S.followUpDue}</span>`
+            : null}
+          ${n.id === 'tickets' && (S.ticketOpen || 0) > 0
+            ? html`<span class="badge badge-yellow" data-ticket-open=${S.ticketOpen} style="margin-left:auto" title=${plural(S.ticketOpen, 'request is', 'requests are') + ' waiting on us'}>${S.ticketOpen}</span>`
             : null}
         </button>`)}
       </div>
