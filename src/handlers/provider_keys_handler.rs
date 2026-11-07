@@ -191,12 +191,37 @@ pub async fn upsert_provider_key(
 
     let scope = req.scope.unwrap_or_else(|| String::from("tenant"));
 
+    // THE MASKED ROUND-TRIP (measured live 2026-11-07 on FunnelSwift; see
+    // `provider_key_crypto::is_mask_like`). The Integration Center shows every saved key as
+    // `abc...xyz`, and this route used to write whatever string it was handed straight over the
+    // stored ciphertext — so re-saving the displayed preview replaced a working credential with it
+    // and the pane then looked unchanged. A preview keeps the stored ciphertext untouched; a preview
+    // with nothing stored is refused, because storing it would create a key that can never
+    // authenticate.
+    let stored_key: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(api_key,'') FROM provider_keys WHERE tenant_id = $1 AND provider = $2",
+    )
+    .bind(tenant_id)
+    .bind(&req.provider)
+    .fetch_optional(&state.pool)
+    .await?;
+    let stored_key = stored_key.unwrap_or_default();
+    let key_kept = crate::security::provider_key_crypto::is_mask_like(&req.api_key);
+    if key_kept && stored_key.trim().is_empty() {
+        return Err(AppError::BadRequest(String::from(
+            "That is the masked preview of a saved key, not the key itself — paste the full credential.",
+        )));
+    }
+
     // Encrypt BEFORE the value reaches the database: `api_key` never holds the plaintext. A
     // missing / too-short master key fails the request instead of storing the credential in the
-    // clear (see crate::security::provider_key_crypto).
-    let encrypted_key =
-        crate::security::provider_key_crypto::encrypt_for_storage(&state.pool, &req.api_key)
-            .await?;
+    // clear (see crate::security::provider_key_crypto). A kept credential re-uses the stored
+    // CIPHERTEXT, so no plaintext has to exist to serve a no-op save.
+    let encrypted_key = if key_kept {
+        stored_key.trim().to_string()
+    } else {
+        crate::security::provider_key_crypto::encrypt_for_storage(&state.pool, &req.api_key).await?
+    };
 
     let result = sqlx::query_as::<_, ProviderKey>(
         "INSERT INTO provider_keys (tenant_id, provider, api_key, base_url, metadata, scope)
@@ -218,11 +243,26 @@ pub async fn upsert_provider_key(
     .fetch_one(&state.pool)
     .await?;
 
+    // The reply masks the credential that is ACTUALLY in the row: for a kept key that is the stored
+    // plaintext (decrypted only to build the mask), never the preview the caller sent.
+    let response_mask = if key_kept {
+        match crate::security::provider_key_crypto::decrypt_from_storage(
+            &state.pool,
+            encrypted_key.trim(),
+        )
+        .await
+        {
+            Ok(p) => mask_key(&p),
+            Err(_) => String::from("****"),
+        }
+    } else {
+        mask_key(&req.api_key)
+    };
+
     Ok(Json(json!({
         "id": result.id,
         "provider": result.provider,
-        // Mask of the value the caller just posted (the column holds ciphertext).
-        "api_key": mask_key(&req.api_key),
+        "api_key": response_mask,
         "scope": result.scope,
         "is_active": result.is_active
     })))
