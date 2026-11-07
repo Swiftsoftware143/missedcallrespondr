@@ -116,7 +116,7 @@ const API = (() => {
   };
 })();
 
-const S = { view: 'dashboard', loading: false, error: null, views: {}, loadError: null };
+const S = { view: 'dashboard', loading: false, error: null, views: {}, loadError: null, followUpDue: 0, followUpLoaded: false };
 const _get = API.get, _post = API.post, _put = API.put, _del = API.del;
 // A FAILED READ MUST NEVER READ AS AN EMPTY SCREEN (2026-10-29). Every list view loads through
 // API.get, and fifteen of them caught the failure with `console.error(e)` only — so an API 500 (or a
@@ -182,6 +182,28 @@ const utcStamp = (v) => { if (!v) return '-'; const d = new Date(utcIso(v)); ret
 // plural(value, one, many) helper was added for. Every count this console renders beside a noun
 // goes through here.
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// ---- THE QUEUE YOU CANNOT SEE FROM WHERE YOU ARE ------------------------------
+// 2026-11-07. The Follow-Ups screen counts overdue rows INSIDE the panel, and the dashboard carries
+// a "Follow-ups pending" tile — but an operator working Tickets, Leads or Clients saw neither, so a
+// return call the app promised sat past its due time with nothing anywhere saying so. Same defect the
+// ADASwift support badge and the IncentiveSwift activation badge were built for: a queue that exists
+// only for whoever happens to open the screen is not a queue. One read paints the count beside the nav
+// entry, and every save/complete/delete re-reads it, so the badge cannot outlive the rows it counts.
+// A failed read leaves the badge ABSENT (never a false zero) and a non-admin's 403 is swallowed.
+async function loadFollowUpDue(force) {
+  if (!API.token) return;
+  if (S.followUpLoaded && !force) return;
+  S.followUpLoaded = true;
+  try {
+    const rows = await API.get('/follow-ups');
+    const list = Array.isArray(rows) ? rows : [];
+    const now = Date.now();
+    const due = list.filter(f => f && f.status === 'pending'
+      && !!f.scheduled_at && new Date(utcIso(f.scheduled_at)).getTime() <= now).length;
+    if (due !== S.followUpDue) { S.followUpDue = due; renderApp(); }
+  } catch (e) { /* unreadable or not permitted: no badge, never a false zero */ }
+}
 
 // ---- LOGIN ----
 const LoginView = () => {
@@ -1275,7 +1297,7 @@ const FollowUps = () => {
     try {
       if (st.editItem) await API.put('/follow-ups/' + st.editItem.id, data);
       else await API.post('/follow-ups', data);
-      st.showModal = false; load();
+      st.showModal = false; load(); loadFollowUpDue(true);
     } catch (e) { alert(e.message); }
   };
   // `completed_at` is a naive-UTC column, so it is stamped without a zone suffix — the same rule the
@@ -1286,12 +1308,12 @@ const FollowUps = () => {
     st.busy = true;
     try {
       await API.put('/follow-ups/' + item.id, { status: 'completed', completed_at: nowUtc() });
-      st.busy = false; load();
+      st.busy = false; load(); loadFollowUpDue(true);
     } catch (e) { st.busy = false; renderApp(); alert('Could not mark it done: ' + e.message); }
   };
   const remove = async (id) => {
     if (!confirm('Delete this follow-up?')) return;
-    try { await API.del('/follow-ups/' + id); load(); } catch (e) { alert(e.message); }
+    try { await API.del('/follow-ups/' + id); load(); loadFollowUpDue(true); } catch (e) { alert(e.message); }
   };
   const isPending = (f) => f.status === 'pending';
   const isOverdue = (f) => isPending(f) && !!f.scheduled_at && new Date(utcIso(f.scheduled_at)).getTime() < Date.now();
@@ -2835,6 +2857,8 @@ const App = () => {
   // read failed is a false statement about what they bought. `plan` is a plan OBJECT on some
   // endpoints, so it is read by `.name`, never interpolated.
   loadMe();
+  // The due-follow-up count behind the nav badge; self-guarded, so a re-render never re-reads it.
+  loadFollowUpDue();
   const me = S.me || (API.user || {});
   const meName = me.name || me.email || 'Account';
   const meInitial = (String(meName) + '?').charAt(0).toUpperCase();
@@ -3676,6 +3700,9 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       <div class="flex-1 space-y-1">
         ${nav.filter(n => !n.adminOnly || (API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0)).map(n => html`<button type="button" class="nav-item ${S.view === n.id ? 'active' : ''}" data-tab=${n.id} onClick=${() => { S.view = n.id; renderApp(); }} aria-label=${n.label}>
           <span>${n.icon}</span><span class="nav-text">${n.label}</span>
+          ${n.id === 'follow-ups' && (S.followUpDue || 0) > 0
+            ? html`<span class="badge badge-yellow" data-follow-up-due=${S.followUpDue} style="margin-left:auto" title=${plural(S.followUpDue, 'follow-up is', 'follow-ups are') + ' due now'}>${S.followUpDue}</span>`
+            : null}
         </button>`)}
       </div>
       <!-- Admin guide (kanban t_5af0ddda): fleet standard - the console links its own guide on its
