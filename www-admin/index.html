@@ -2926,6 +2926,7 @@ const App = () => {
     // actually left — the route had no screen (2026-10-14) and the ops catalogue only showed raw JSON.
     { id: 'email-provider', label: 'Email Provider', icon: '📧', adminOnly: true },
     { id: 'payment-providers', label: 'Payment Providers', icon: '💳', adminOnly: true },
+    { id: 'team', label: 'Your Team', icon: '👥' },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
 
@@ -3698,7 +3699,95 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
   </div>`;
 };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, account: Account, 'payment-providers': PaymentProviders };
+  // ---- YOUR TEAM (2026-11-07) ----
+  // The workspace's people, and the door that adds one. The backend has been complete since
+  // 2026-10-31: GET /api/v1/team/members answers the people plus the seat allowance,
+  // POST /api/v1/team/invite mints a `business_user` login and mails its first password, and
+  // DELETE /api/v1/team/members/:id revokes one. But this console never called any of them, so a
+  // customer who wanted a receptionist on the phone queue had to ask the platform operator to create
+  // the login by hand. A backend route with no UI is a defect — this is that screen.
+  //
+  // Everything true on the screen comes from the answer, never from the panel: `seats.limit` null is
+  // the app's own "the plan declares no seat allowance" (no cap), `can_manage` is the server's role
+  // check (owner / company admin), and `detail` on an invite is the server's sentence about whether
+  // the password email actually left — a reserved test address is reported as NOT sent.
+  const Team = () => {
+    const st = viewState('team', { _loaded: false, members: [], seats: null, can_manage: false, name: '', email: '', busy: false, msg: null });
+    const load = async () => {
+      try {
+        const d = await API.get('/team/members');
+        st.members = Array.isArray(d.members) ? d.members : [];
+        st.seats = d.seats || null;
+        st.can_manage = !!d.can_manage;
+      } catch (e) { st.msg = { ok: false, text: e.message }; }
+      renderApp();
+    };
+    if (!st._loaded) { st._loaded = true; load(); }
+    const invite = async () => {
+      const email = (st.email || '').trim();
+      if (!email) { st.msg = { ok: false, text: 'Enter the email address of the person you want to add.' }; renderApp(); return; }
+      st.busy = true; st.msg = null; renderApp();
+      try {
+        const r = await API.post('/team/invite', { email: email, name: (st.name || '').trim() });
+        st.name = ''; st.email = ''; st.busy = false;
+        // `credentials_emailed` is the ONLY claim about the mail. False means the login exists but the
+        // password did not reach them (reserved address, or delivery refused) — `detail` says which.
+        st.msg = { ok: !!r.credentials_emailed, text: r.detail || 'Teammate added.' };
+        await load();
+      } catch (e) { st.busy = false; st.msg = { ok: false, text: e.message }; renderApp(); }
+    };
+    const remove = async (m) => {
+      if (!confirm('Remove ' + (m.email || m.name) + ' from this workspace? They will not be able to sign in again.')) return;
+      st.busy = true; st.msg = null; renderApp();
+      try {
+        await API.del('/team/members/' + m.id);
+        st.busy = false;
+        st.msg = { ok: true, text: (m.email || m.name) + ' no longer has access.' };
+      } catch (e) { st.busy = false; st.msg = { ok: false, text: e.message }; }
+      await load();
+    };
+    const roleLabel = (r) => r === 'account_owner' ? 'Owner' : (r === 'company_admin' ? 'Company admin' : (r === 'business_user' ? 'Teammate' : (r || 'Member')));
+    const seats = st.seats || {};
+    const count = st.members.length;
+    const seatsLine = (seats.limit === null || seats.limit === undefined)
+      ? (count + (count === 1 ? ' person has access' : ' people have access') + ' \u00b7 your plan sets no seat limit')
+      : (seats.used + ' of ' + seats.limit + ' seat' + (seats.limit === 1 ? '' : 's') + ' used');
+    return html`<div>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold">Your Team</h2>
+        <span class="badge badge-blue" id="team-seats">${seatsLine}</span>
+      </div>
+      ${st.msg ? html`<div class="card" id="team-msg" style=${'border-left:4px solid ' + (st.msg.ok ? '#059669' : '#dc2626') + ';color:' + (st.msg.ok ? '#065f46' : '#991b1b') + ';font-size:14px'}>${st.msg.text}</div>` : null}
+      <div class="card">
+        <div style="font-size:13px;color:#64748b;margin-bottom:12px">Everyone who can sign in to this workspace. The owner is the login the workspace was created with and cannot be removed here.</div>
+        <table class="table" id="team-table">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Added</th><th></th></tr></thead>
+          <tbody>
+            ${st.members.map(m => html`<tr>
+              <td>${m.name || '\u2014'}${m.is_you ? html` <span class="badge badge-green">you</span>` : null}</td>
+              <td>${m.email || '\u2014'}</td>
+              <td>${roleLabel(m.role)}</td>
+              <td>${m.created_at ? String(m.created_at).slice(0, 10) : '\u2014'}</td>
+              <td style="text-align:right">${st.can_manage && !m.is_owner && !m.is_you
+                ? html`<button class="btn btn-sm btn-red" disabled=${st.busy} onClick=${() => remove(m)}>Remove</button>`
+                : null}</td>
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>
+      ${st.can_manage ? html`<div class="card" id="team-invite-card">
+        <div style="font-weight:600;margin-bottom:4px">Add a teammate</div>
+        <div style="font-size:13px;color:#64748b;margin-bottom:12px">They get their own login and password by email \u2014 no shared password. Their role is Teammate: they answer calls and work the queue, but they cannot add or remove people.</div>
+        <div class="flex gap-2" style="align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:1;min-width:180px"><label style="font-size:12px;color:#64748b">Their name (optional)</label><input class="input" id="team-name" value=${st.name || ''} onInput=${(e) => { st.name = e.target.value; }} placeholder="Dana Ruiz" /></div>
+          <div style="flex:1;min-width:220px"><label style="font-size:12px;color:#64748b">Their email</label><input class="input" id="team-email" value=${st.email || ''} onInput=${(e) => { st.email = e.target.value; }} placeholder="dana@yourcompany.com" /></div>
+          <button class="btn" id="team-invite" disabled=${st.busy} onClick=${invite}>${st.busy ? 'Adding...' : 'Add teammate'}</button>
+        </div>
+      </div>` : html`<div class="card" style="font-size:14px;color:#64748b">Only the workspace owner or a company admin can add or remove people.</div>`}
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
