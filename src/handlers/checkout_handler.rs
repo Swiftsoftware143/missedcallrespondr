@@ -8,6 +8,9 @@
 //!   with one READ-ONLY call; a supplied key is never stored, never logged, never echoed)
 //!   — kanban t_7bdfcc4a
 //! - POST   /api/v1/checkout/create            (create a Stripe/PayPal checkout session)
+//! - GET    /api/v1/checkout/status            (what this installation can actually sell: a
+//!   provider armed with a usable key, or an active plan carrying its own hosted payment page)
+//!   — kanban t_93214280
 //! - GET    /api/v1/checkout/sessions          (list checkout sessions for this tenant)
 //! - POST   /api/v1/webhooks/stripe            (Stripe webhook receiver — no auth)
 //! - POST /api/v1/webhooks/paypal            (PayPal webhook receiver — no bearer auth, but the
@@ -507,6 +510,91 @@ async fn paypal_verify_config(state: &AppState) -> Result<Option<PaypalVerifyCon
         webhook_id,
         source,
     }))
+}
+
+/// GET /api/v1/checkout/status
+///
+/// WHAT THIS INSTALLATION CAN ACTUALLY SELL, answered from the same resolution the sale uses
+/// (kanban t_93214280). Until this route existed the customer's Plan & Billing screen carried an
+/// "Upgrade to <plan>" button on every paid tier and learned that the install cannot take a payment
+/// only AFTER the press, from a refusal: `payment_providers` holds ZERO rows here, so
+/// [`create_checkout_session`] could only ever refuse. The screen now asks the till as the view
+/// opens and offers the ask-our-team path (the same `plan_request` ticket the refusal arms file)
+/// instead of a purchase that cannot be completed.
+///
+/// Two arms can complete a sale, and NEITHER is assumed:
+///
+/// - a provider ARMED with a usable key. Its type is resolved exactly as the sale resolves it for
+///   the tier a buyer presses: the first ACTIVE PAID plan's own `payment_provider`, else the
+///   install's single active provider. The row itself is read through [`get_active_provider`] —
+///   this app's one provider read — so the screen and the till cannot disagree about which
+///   credential a purchase would use.
+/// - a plan carrying its OWN hosted payment page. COUNTED through [`is_hosted_payment_url`], the
+///   till's own predicate, so this can never promise a hand-off the sale would refuse.
+///   MissedCall's catalogue is the `plans` table (this app has no `plan_tiers`), and only ACTIVE
+///   rows count.
+///
+/// Fails CLOSED and quietly: an unreadable credential must not 500 the screen it informs, so that
+/// arm answers `can_purchase: false` under its own reason.
+pub async fn checkout_status(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+) -> ApiResult<Json<Value>> {
+    // The provider a plan checkout would use. The column carries the sentinel `none` on a tier that
+    // names no provider, which the sale resolves to the install's single active provider — and
+    // refuses to guess between several (see the ladder in [`create_checkout_session`]).
+    let plan_provider = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT payment_provider FROM plans \
+         WHERE is_active = true AND (price_monthly > 0 OR price_yearly > 0) \
+         ORDER BY sort_order ASC, slug LIMIT 1",
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .flatten();
+    let choice: Option<String> = match plan_provider.as_deref().and_then(recorded_provider) {
+        Some(named) => Some(named),
+        None => match active_provider_types(&state.pool).await?.as_slice() {
+            [only] => Some(only.clone()),
+            // None, or several with nothing to choose between them: the sale REFUSES rather than
+            // guessing which account the money should reach, so this must not claim a provider.
+            _ => None,
+        },
+    };
+    let provider_type = choice.clone().unwrap_or_else(|| "stripe".to_string());
+
+    let (configured, reason) = match choice {
+        None => (false, Some("payment_provider_not_configured")),
+        Some(provider_type) => match get_active_provider(&state.pool, &provider_type).await {
+            Ok(Some(p)) if !p["api_key"].as_str().unwrap_or("").trim().is_empty() => (true, None),
+            Ok(Some(_)) => (false, Some("payment_provider_key_missing")),
+            Ok(None) => (false, Some("payment_provider_not_configured")),
+            Err(e) => {
+                tracing::error!("checkout/status: provider credential could not be read: {e:?}");
+                (false, Some("payment_provider_key_unreadable"))
+            }
+        },
+    };
+
+    // Tiers the operator has already given a hosted payment page. COUNTED, never assumed: the
+    // column is operator-typed.
+    let links: Vec<String> = sqlx::query_scalar(
+        "SELECT COALESCE(BTRIM(purchase_url), '') FROM plans WHERE is_active = true",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let sellable_links = links
+        .iter()
+        .filter(|u| is_hosted_payment_url(u.as_str()))
+        .count();
+
+    Ok(Json(json!({
+        "configured": configured,
+        "reason": reason,
+        "provider_type": provider_type,
+        "sellable_links": sellable_links,
+        // A sale can complete on either arm `create_checkout_session` implements.
+        "can_purchase": configured || sellable_links > 0,
+    })))
 }
 
 /// POST /api/v1/checkout/create

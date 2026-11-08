@@ -29,12 +29,12 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   135 mounted `.route(..)` entries in the one routing file, 135 distinct paths (every path is
+//!   140 mounted `.route(..)` entries in the one routing file, 140 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   118 entries reach `protected_routes`, which carries `auth_middleware`
-//!    17 entries reach the ANONYMOUS `public_routes`:
-//!        14 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   121 entries reach `protected_routes`, which carries `auth_middleware`
+//!    19 entries reach the ANONYMOUS `public_routes`:
+//!        16 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -400,6 +400,7 @@ mod tests {
             "/api/v1/admin/portfolio-sync",
             "/api/v1/payment-providers",
             "/api/v1/checkout/create",
+            "/api/v1/checkout/status",
             "/api/v1/checkout/sessions",
         ] {
             assert!(!is_public_route(path), "{} must not be anonymous", path);
@@ -584,7 +585,12 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        // 137 entries / 137 distinct paths (the operator's re-issue-credentials arm
+        // 140 entries / 140 distinct paths (the buyer-facing till read
+        // `GET /api/v1/checkout/status` joined on 2026-11-08, card t_93214280 — a PROTECTED mount
+        // beside `POST /api/v1/checkout/create`, so both anonymous lists are untouched and
+        // protected went 120 → 121; before it, 139 entries / 139 distinct paths, re-measured
+        // 2026-11-07 when two deliberate public mounts landed without moving this pin. Before
+        // that, 137 entries / 137 distinct paths (the operator's re-issue-credentials arm
         // `POST /api/v1/admin/tenants/:id/resend-credentials` joined on 2026-11-05 with the
         // "never received the email" remedy — a PROTECTED `/api/v1/admin/*` mount like the rest of
         // that block, so both anonymous lists are untouched and protected went 118 → 119; before
@@ -592,11 +598,11 @@ mod tests {
         // `POST /api/v1/admin/tenants/:id/suspension` joined on 2026-11-01 — a PROTECTED
         // `/api/v1/admin/*` mount like the rest of that block, so both anonymous lists are
         // untouched; before it, 135 entries / 135 distinct paths).
-        assert_eq!(lits.len(), 139, "mounted .route entries");
+        assert_eq!(lits.len(), 140, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 139, "distinct mounted paths");
+        assert_eq!(uniq.len(), 140, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

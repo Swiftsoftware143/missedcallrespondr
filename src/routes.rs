@@ -871,6 +871,16 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/checkout/create",
             post(checkout_handler::create_checkout_session),
         )
+        // WHAT THE TILL CAN DO ON THIS INSTALL (kanban t_93214280): the buyer's Plan & Billing
+        // screen now asks before it offers a purchase, so a tier with a hosted payment page — or a
+        // live provider — is offered as a real purchase instead of only as a request, and a tier
+        // that cannot be paid for says so instead of inviting a press that must refuse. Same auth
+        // class as `create`: it is NOT in `crate::auth::route_policy::PUBLIC_ROUTES`, so an
+        // anonymous caller is refused at the boundary.
+        .route(
+            "/api/v1/checkout/status",
+            get(checkout_handler::checkout_status),
+        )
         .route(
             "/api/v1/checkout/sessions",
             get(checkout_handler::list_checkout_sessions),

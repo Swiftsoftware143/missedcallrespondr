@@ -2201,7 +2201,7 @@ const withdraw = async (st, t) => {
 };
 
 const Billing = () => {
-  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, withdrawing: null });
+  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, withdrawing: null, till: null, tillTried: false });
   if (!st.loaded && !st.busy) {
     st.busy = true;
     loadPlanRequests(st);
@@ -2213,6 +2213,19 @@ const Billing = () => {
       st.error = 'Could not load the plans: ' + e.message;
       st.loaded = true; st.busy = false; renderApp();
     });
+  }
+  // ASK THE TILL BEFORE INVITING A PURCHASE (2026-11-08, card t_93214280). Every paid tier used to
+  // carry an "Upgrade to <plan>" button and the customer learned that this installation cannot take
+  // a payment only AFTER pressing it, from a refusal. GET /checkout/status answers what the till can
+  // actually do — a provider armed with a usable key, or an active plan carrying its own hosted
+  // payment page — so the buttons below can ask the team to make the switch instead of offering a
+  // purchase that must refuse. A failed or absent read leaves the previous behaviour in place: the
+  // refusal path below is honest and files the ask, so a slow status call must never hide a working
+  // purchase.
+  if (!st.tillTried) {
+    st.tillTried = true;
+    API.get('/checkout/status').then(d => { st.till = d || null; renderApp(); })
+      .catch(() => { st.till = null; renderApp(); });
   }
   const me = API.user || {};
   const current = me.plan_name ? String(me.plan_name).trim().toLowerCase() : '';
@@ -2229,6 +2242,11 @@ const Billing = () => {
     return assigned && !!current && (a === current || b === current);
   };
   const monthly = p => Number(p.price_monthly || 0);
+  // FALSE only when the till itself said nothing can be sold on this install: no provider armed
+  // with a usable key AND no active plan carrying a usable hosted payment page (2026-11-08). An
+  // absent answer (route failed, older server) is NOT "closed", so the purchase button and its
+  // honest refusal path stay in place.
+  const tillClosed = !!(st.till && st.till.can_purchase === false);
   // The price slot must carry a PRICE, not a second copy of the plan's own name. It read
   // `monthly(p) <= 0 ? 'Free' : …`, and this screen already prints the plan name in the `h3`
   // directly above it (`nameOf(p)`), so the free tier rendered as "Free / Free" — the tile's
@@ -2287,6 +2305,20 @@ const Billing = () => {
       return v == null ? sentence(k) : sentence(k) + ': ' + (typeof v === 'number' ? fmtNum(v) : String(v));
     });
     return [...new Set(lines)];
+  };
+  // When the till says nothing can be sold here, a paid tier asks our team instead of opening a
+  // payment page that must refuse (2026-11-08). The request panel and requestPlan() below already
+  // file the ticket on this app's own /tickets route with source plan_request, so this only opens
+  // that panel for THIS tier: one press becomes the same ask a refused purchase files, and no card
+  // details are entered either way.
+  const askFor = p => {
+    st.notice = null; st.error = null;
+    st.requestFor = { key: keyOf(p), slug: (p.slug || ''), name: nameOf(p), price: monthly(p) };
+    renderApp();
+    setTimeout(() => {
+      const el = document.getElementById('billing-request');
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
   };
   const buy = async p => {
     st.busy = true; st.buying = keyOf(p); st.notice = null; st.error = null; st.requestFor = null; renderApp();
@@ -2440,6 +2472,9 @@ const Billing = () => {
       <button class="btn mt-2" id="billing-request-btn" disabled=${st.busy} onClick=${() => requestPlan()}>Request the ${st.requestFor.name} plan</button>
     </div>`}
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700" id="billing-notice">${st.notice}</p></div>`}
+    ${tillClosed && html`<div class="card" style="border-left:4px solid #f59e0b" id="billing-till-closed">
+      <p class="text-sm text-gray-700"><strong>Card payment is not switched on for this installation yet.</strong> Nothing can be charged here, so the paid plans below ask our team to switch your workspace instead of opening a payment page.</p>
+    </div>`}
     ${st.requestsLoaded && st.requests.length ? html`<div class="card" id="plan-requests">
       <h3 class="font-semibold mb-1">Your plan requests</h3>
       <p class="text-sm text-gray-600 mb-2">Our team completes these by hand. The state below is the live one.</p>
@@ -2475,7 +2510,9 @@ const Billing = () => {
             ? html`<span class="badge badge-green">Your plan</span>`
             : (monthly(p) <= 0
               ? html`<span class="badge badge-gray">Included</span>`
-              : html`<button class="btn" id=${'billing-buy-' + keyOf(p)} disabled=${st.busy} onClick=${() => buy(p)}>${st.buying === keyOf(p) ? 'Opening checkout\u2026' : 'Upgrade to ' + nameOf(p)}</button>`)}
+              : (tillClosed
+                ? html`<button class="btn" id=${'billing-ask-' + keyOf(p)} disabled=${st.busy} onClick=${() => askFor(p)}>${'Request ' + nameOf(p)}</button>`
+                : html`<button class="btn" id=${'billing-buy-' + keyOf(p)} disabled=${st.busy} onClick=${() => buy(p)}>${st.buying === keyOf(p) ? 'Opening checkout\u2026' : 'Upgrade to ' + nameOf(p)}</button>`))}
         </div>
       </div>`)}
     </div>
