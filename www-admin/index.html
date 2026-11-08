@@ -2926,6 +2926,10 @@ const App = () => {
     // actually left — the route had no screen (2026-10-14) and the ops catalogue only showed raw JSON.
     { id: 'email-provider', label: 'Email Provider', icon: '📧', adminOnly: true },
     { id: 'payment-providers', label: 'Payment Providers', icon: '💳', adminOnly: true },
+    // The customer's own plan ladder (2026-11-08): GET /api/v1/plans + POST /api/v1/checkout/create
+    // existed with no console screen, so the sidebar printed the tier's name and offered no way to
+    // see or change it. Sits beside My Account because that is where a workspace admin looks for it.
+    { id: 'my-plan', label: 'Plan & Pricing', icon: '💳' },
     { id: 'team', label: 'Your Team', icon: '👥' },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
@@ -3787,7 +3791,121 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders };
+  // ── PLAN & PRICING (2026-11-08) ────────────────────────────────────────────────────────────────
+  // The tenant plan catalogue (`GET /api/v1/plans`, ACTIVE tiers only) and the checkout door
+  // (`POST /api/v1/checkout/create`) both shipped, and NO console screen read them: the sidebar
+  // printed the plan's NAME and the workspace admin had no way to see the ladder, compare tiers or
+  // move up from the console where the work is done. The customer portal's Plan & Billing screen
+  // had the controls; this console had none. This screen lists the active catalogue, marks the plan
+  // the workspace is ON, and presses the same checkout door the portal uses: a connected provider
+  // answers with a checkout URL (followed exactly as the portal does), and an installation with no
+  // provider connected answers 503 `request_recorded: true` because the server files the ask in the
+  // operator's plan-request queue with the slug that was pressed. Read the body directly (not
+  // `API.post`, which throws on a non-2xx) so a recorded request is shown as SUCCESS, not an error.
+  const MyPlan = () => {
+    const [plans, setPlans] = useState([]);
+    const [me, setMe] = useState(null);
+    const [err, setErr] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [msg, setMsg] = useState(null);
+    const [askErr, setAskErr] = useState(null);
+
+    useEffect(() => {
+      Promise.all([API.get('/plans'), API.get('/auth/me')])
+        .then(([c, m]) => {
+          setPlans((c && c.plans) || (Array.isArray(c) ? c : []));
+          setMe(m || null); setErr(null);
+        })
+        .catch(e => setErr(e));
+    }, []);
+
+    const meName = (me && (me.plan_effective_name || me.plan_name)) || (API.user && API.user.plan_name) || '';
+    const meSlug = (me && me.plan_slug) || (API.user && API.user.plan_slug) || '';
+    const isCurrent = (p) => (meSlug && p.slug === meSlug) || (!meSlug && meName && p.name === meName);
+    const fmt = (v) => '$' + Number(v || 0).toFixed(2).replace(/\.00$/, '');
+    const featureText = (p) => {
+      const f = p && p.features;
+      if (!f) return '\u2014';
+      // The catalogue carries `features` in BOTH shapes on live rows: an object of named limits
+      // ({included_credits: 50}) on Free/Pro and an ARRAY of feature keys on Enterprise. Object.keys
+      // over an array prints its indices ("0: unlimited_leads"), which is what the first live render
+      // showed, so the array shape is rendered by VALUE.
+      if (Array.isArray(f)) {
+        return f.map(x => (typeof x === 'string' ? x.replace(/_/g, ' ') : String(x))).join(' \u00b7 ');
+      }
+      if (typeof f !== 'object') return '\u2014';
+      return Object.keys(f).map(k => k.replace(/_/g, ' ') + ': ' + f[k]).join(' \u00b7 ');
+    };
+
+    const askFor = async (p) => {
+      if (busy) return;
+      setBusy(true); setMsg(null); setAskErr(null);
+      try {
+        const r = await fetch(window.location.origin + '/api/v1/checkout/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(API.token ? { 'Authorization': 'Bearer ' + API.token } : {}) },
+          body: JSON.stringify({
+            purchasable_type: 'plan',
+            purchasable_id: p.id,
+            amount: Number(p.price_monthly) || 0,
+            currency: 'USD',
+            description: (p.slug || 'plan') + ' plan (monthly)',
+            success_url: window.location.origin + '/admin/?checkout=success',
+            cancel_url: window.location.origin + '/admin/?checkout=cancelled'
+          })
+        });
+        const d = await r.json().catch(() => ({}));
+        const url = d && (d.url || d.checkout_url || d.session_url);
+        if (r.ok && url) { window.location.href = url; return; }
+        if (d && d.request_recorded) {
+          setMsg('Request filed for ' + p.name + '. Nothing has been charged \u2014 the team switches '
+            + 'your workspace over and arranges billing with you directly.');
+        } else if (r.ok) {
+          setMsg((d && d.message) || 'The checkout session was created.');
+        } else {
+          setAskErr((d && (d.message || d.error)) || 'The upgrade could not be started right now.');
+        }
+      } catch (e) {
+        setAskErr('The upgrade could not be started: ' + e.message);
+      }
+      setBusy(false);
+    };
+
+    return html`<div>
+      <div class="mb-4"><h2 class="text-xl font-bold">Plan & Pricing</h2>
+        <p class="text-sm text-gray-500">The plan this workspace is on, and what the other plans cost.</p></div>
+      ${err && html`<div class="card" style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca">The plan catalogue could not be loaded: ${err.message}</div>`}
+      <div class="card">
+        <table class="table" id="my-plan-table">
+          <thead><tr><th>Plan</th><th>Monthly</th><th>Yearly</th><th>What's included</th><th></th></tr></thead>
+          <tbody>
+            ${plans.map(p => html`<tr data-plan-row=${p.slug || ''}>
+              <td class="font-medium">${p.name}${p.description ? html`<div style="font-size:12px;color:#64748b">${p.description}</div>` : null}</td>
+              <td class="text-gray-500">${fmt(p.price_monthly)}</td>
+              <td class="text-gray-500">${Number(p.price_yearly) > 0 ? fmt(p.price_yearly) : '\u2014'}</td>
+              <td class="text-gray-500" style="font-size:12px">${featureText(p)}</td>
+              <td style="text-align:right">${isCurrent(p)
+                ? html`<span class="badge badge-green">Current</span>`
+                : (Number(p.price_monthly) > 0
+                    ? html`<button class="btn btn-sm" data-plan-choose=${p.slug || ''} disabled=${busy} onClick=${() => askFor(p)}>Choose ${p.name}</button>`
+                    : '')}</td>
+            </tr>`)}
+            ${plans.length === 0 && !err && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">Loading plans\u2026</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="card text-sm text-gray-600">
+        ${msg && html`<div class="text-green-700 bg-green-50 p-2 rounded-lg mb-2" data-plan-asked-msg="1">${msg}</div>`}
+        ${askErr && html`<div class="text-red-600 bg-red-50 p-2 rounded-lg mb-2" data-plan-ask-err="1">${askErr}</div>`}
+        Ready for a bigger plan? Press <strong>Choose</strong> on a plan above: a connected payment
+        provider takes you to a secure checkout, and when none is connected yet the press files your
+        request on the way in, so the team can switch this workspace over and arrange billing with you
+        directly. You can also <span class="text-blue-600 cursor-pointer font-medium" onClick=${() => { S.view = 'tickets'; renderApp(); }}>open a support ticket</span>.
+      </div>
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
