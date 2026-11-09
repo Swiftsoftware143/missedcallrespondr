@@ -466,6 +466,14 @@ const Dashboard = () => {
   if (!st._loaded) { st._loaded = true;
     API.get('/dashboard/stats').then(s => { Object.assign(st, s); renderApp(); }).catch(() => {});
     if (isOps) API.get('/admin/stats').then(s => { st.platform = s; renderApp(); }).catch(() => {});
+    // Is anyone actually TOLD when a customer asks to buy or asks for help? The plan-request and
+    // support alerts are mailed to `operator_alert_email`, and the panel's own Email Provider field
+    // documents that a blank value means no alerts are sent. That fact used to live only on that
+    // screen, so an operator reading this queue had no way to know the queue was the ONLY notice —
+    // a customer is promised "our team completes the switch" and no mail exists to tell the team.
+    // `undefined` until the read lands, so an unknown state never renders a warning; '' is the
+    // answered-and-blank case, which is the one worth saying out loud.
+    if (isOps) API.get('/admin/email-config').then(c => { st.alertTo = ((c && c.config && c.config.operator_alert_email) || ''); renderApp(); }).catch(() => {});
   }
   if (isOps) {
     const p = st.platform;
@@ -485,6 +493,10 @@ const Dashboard = () => {
           <div>
             <div class="font-semibold">${p ? (openTickets + ' request' + (openTickets === 1 ? '' : 's') + ' waiting on you') : 'Loading the queue...'}</div>
             <p class="text-sm text-gray-500 mt-1">Plan requests are customers who pressed Upgrade while self-serve checkout is closed. Each one is a sale waiting on a hand switch.</p>
+            ${st.alertTo === '' ? html`<p class="text-sm mt-2" style="color:#92400e" data-alert-warning="none">
+              No alert address is set, so these requests and the support requests are recorded here but nobody is emailed about them.
+              Add one under “Where plan-request alerts go” on the Email Provider screen so a request reaches you without you opening this panel.
+            </p>` : ''}
           </div>
           <button class="btn" data-open-plan-requests onClick=${goPlanRequests}>Open the plan requests</button>
         </div>
