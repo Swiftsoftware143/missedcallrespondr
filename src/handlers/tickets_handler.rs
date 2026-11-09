@@ -587,7 +587,23 @@ async fn notify_customer_of_billing_request(state: &AppState, ticket: &Ticket) -
     // to — and no plan was asked for either (the public arm never sets `plan_slug`). Nothing to send.
     match ticket.tenant_id {
         Some(tenant_id) => {
-            send_billing_request_receipt(&state.pool, tenant_id, &ticket.subject).await
+            let receipt =
+                send_billing_request_receipt(&state.pool, tenant_id, &ticket.subject).await;
+            // The operator hears about the SAME ask (2026-11-09): this door is the Plan & Billing
+            // screen's request while checkout is closed, so it is the buying path. Best effort —
+            // the ticket is already written and a mail failure must not fail the request.
+            if let Err(e) = crate::email::send_plan_request_operator_alert(
+                &state.pool,
+                tenant_id,
+                &ticket.subject,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "tickets door: plan-request operator alert not sent for tenant {tenant_id}: {e}"
+                );
+            }
+            receipt
         }
         None => false,
     }
@@ -1001,5 +1017,15 @@ pub async fn record_signup_plan_request(
     .bind(now)
     .execute(db)
     .await?;
+    // Tell the OPERATOR, not only the customer (2026-11-09). The row above is the buying path on an
+    // installation with no payment provider; an ask nobody is told about is a sale nobody makes.
+    // Best effort: the ticket is already written, so a mail refusal must not fail the signup.
+    if let Err(e) =
+        crate::email::send_plan_request_operator_alert(db, tenant_id, &format!("{name} plan")).await
+    {
+        tracing::warn!(
+            "plan request at signup for tenant {tenant_id}: operator alert not sent: {e}"
+        );
+    }
     Ok(Some(name))
 }

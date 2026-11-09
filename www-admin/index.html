@@ -2733,7 +2733,7 @@ const TenantsScreen = () => {
 // actually left, and a "Send test email" press recorded nothing at all. A backend route with no UI is
 // a defect: this is the screen.
 const EmailProviderScreen = () => {
-  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, sends: [], to: '', busy: false, msg: null, reset: null, resetBusy: '' });
+  const st = viewState('email_provider', { _loaded: false, prov: [], provider: 'mailgun', api_url: '', api_key: '', domain: '', from_address: '', from_name: '', operator_alert_email: '', configured: false, source: 'none', stored: false, sealed: false, credential_present: false, last: null, sends: [], to: '', busy: false, msg: null, reset: null, resetBusy: '' });
   const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   const load = async () => {
     try {
@@ -2743,6 +2743,7 @@ const EmailProviderScreen = () => {
       st.provider = c.provider || st.provider;
       st.api_url = c.api_url || ''; st.api_key = c.api_key || ''; st.domain = c.domain || '';
       st.from_address = c.from_address || c.from_email || ''; st.from_name = c.from_name || '';
+      st.operator_alert_email = c.operator_alert_email || '';
       st.configured = !!(r && r.configured); st.source = (r && r.source) || 'none';
       st.stored = !!(r && r.stored); st.last = (r && r.last_send) || null;
       // At-rest posture of the stored credential (the rule the CoreSwift panel set, kanban t_d1fcda7e):
@@ -2779,7 +2780,7 @@ const EmailProviderScreen = () => {
   const save = async () => {
     st.busy = true; st.msg = null; renderApp();
     try {
-      await API.put('/admin/email-config', { provider: st.provider, api_url: st.api_url, api_key: st.api_key, domain: st.domain, from_address: st.from_address, from_name: st.from_name });
+      await API.put('/admin/email-config', { provider: st.provider, api_url: st.api_url, api_key: st.api_key, domain: st.domain, from_address: st.from_address, from_name: st.from_name, operator_alert_email: st.operator_alert_email });
       await load(); st.msg = { ok: true, text: 'Email provider saved.' };
     } catch (e) { st.msg = { ok: false, text: 'Save failed: ' + ((e && e.message) || 'unknown error') }; }
     st.busy = false; renderApp();
@@ -2825,6 +2826,9 @@ const EmailProviderScreen = () => {
           <input class="input" value=${st.from_name} placeholder="MissedCall Respondr" onInput=${e => { st.from_name = e.target.value; }} /></div>
         <div><label class="text-sm font-medium text-gray-600 block mb-1">From address</label>
           <input class="input" value=${st.from_address} placeholder="no-reply@mail.missedcallrespondr.com" onInput=${e => { st.from_address = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Where plan-request alerts go</label>
+          <input class="input" data-email-provider="operator-alert" value=${st.operator_alert_email} placeholder="you@yourcompany.com (blank = no alerts)" onInput=${e => { st.operator_alert_email = e.target.value; }} />
+          <div class="text-xs text-gray-400 mt-1">When a customer asks to buy a plan and no payment provider can charge them, this address gets one email naming the workspace, the plan and who asked. Blank means no alerts are sent.</div></div>
       </div>
       <div class="flex gap-2 mt-4"><button class="btn" data-email-provider="save" disabled=${st.busy} onClick=${save}>Save email provider</button></div>
       <div class="mt-4 pt-3" style="border-top:1px solid #e5e7eb">

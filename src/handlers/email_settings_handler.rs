@@ -154,6 +154,25 @@ pub async fn update_email_config(
     }
     let mut body = Value::Object(merged);
 
+    // The operator-alert destination lives in this same row (2026-11-09) but is NOT a credential and
+    // carries no `<field>_set` marker. The merge above already KEEPS a stored address when the client
+    // omits the field, so any other panel or script that saves provider credentials cannot wipe where
+    // plan-request alerts go; an explicit empty string still clears it. Kept LOOSER than any mailer:
+    // refuse only what could never be a destination, so a valid address is never refused here.
+    if let Some(addr) = body.get("operator_alert_email").and_then(|v| v.as_str()) {
+        let addr = addr.trim();
+        if !addr.is_empty()
+            && (addr.contains(char::is_whitespace)
+                || !addr.contains('@')
+                || addr.starts_with('@')
+                || addr.ends_with('@'))
+        {
+            return Err(AppError::BadRequest(
+                "operator_alert_email: that is not an email address".to_string(),
+            ));
+        }
+    }
+
     if let Some(p) = body.get("provider").and_then(|v| v.as_str()) {
         let p = p.trim().to_ascii_lowercase();
         if !p.is_empty()

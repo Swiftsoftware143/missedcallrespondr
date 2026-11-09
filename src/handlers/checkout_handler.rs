@@ -3139,6 +3139,18 @@ async fn record_checkout_plan_request(
         tracing::info!(
             "checkout/create: plan request {id} for tenant {tenant_id} — receipt emailed={receipt_emailed}"
         );
+        // The customer was told; the OPERATOR must be too (2026-11-09). Only on the arm where the
+        // request IS the buying path (`send_receipt` false means the buyer was handed to the plan's
+        // own hosted payment page, so a completed payment settles it by webhook and an alert would
+        // be noise). Best effort: the row is already written.
+        if let Err(e) =
+            crate::email::send_plan_request_operator_alert(db, tenant_id, &format!("{name} plan"))
+                .await
+        {
+            tracing::warn!(
+                "checkout/create: plan request {id} for tenant {tenant_id}: operator alert not sent: {e}"
+            );
+        }
     }
     Some(json!({
         "id": id.to_string(),

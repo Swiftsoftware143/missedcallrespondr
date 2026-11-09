@@ -383,6 +383,26 @@ fn receipt(status: u16, body: &str) -> String {
     }
 }
 
+/// Where the OPERATOR is told that a customer asked to buy a plan (2026-11-09).
+///
+/// Stored beside the system-mail configuration in the `admin_settings.email` row under
+/// `operator_alert_email`, so the panel that already edits the sender also edits the destination —
+/// one row, one save. UNSET or blank means nothing is sent: this code never invents a mailbox, and
+/// the address belongs to the operator, not to any workspace.
+pub async fn operator_alert_email(pool: &PgPool) -> Option<String> {
+    let row: Option<Value> = sqlx::query_scalar("SELECT value FROM admin_settings WHERE key = $1")
+        .bind(ADMIN_KEY)
+        .fetch_optional(pool)
+        .await
+        .unwrap_or(None);
+    row.as_ref()
+        .and_then(|v| v.get("operator_alert_email"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// Deliver a message through the configured provider. `Ok(receipt)` carries the provider's own
 /// answer (for Mailgun: `{"id":"<…>","message":"Queued. Thank you."}`), which is the only evidence
 /// that the message actually left the box.

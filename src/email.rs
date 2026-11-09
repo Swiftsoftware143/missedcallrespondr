@@ -656,6 +656,74 @@ fn url_host(api_url: &str) -> &str {
         .unwrap_or(api_url)
 }
 
+/// Tell the OPERATOR that a customer asked to buy a plan (2026-11-09).
+///
+/// The other half of an event this app already handled alone: a plan request writes the ticket the
+/// operator's queue reads and mails the CUSTOMER a receipt, but nothing told the person who can move
+/// that row. This installation has no payment provider connected, so the request IS the buying path
+/// — an ask nobody is told about is a sale nobody makes.
+///
+/// The destination is the operator's own address (`operator_alert_email`, stored beside the system
+/// mail config and edited in the same panel). UNSET sends nothing; this code never invents a
+/// mailbox. Deliberately sent through the SYSTEM mail configuration, never the asking workspace's,
+/// so it arrives even when that workspace's own mail is broken.
+///
+/// Best effort by design: the ticket row is already written, so a mail failure is logged and never
+/// turns a recorded sale into an error page. A reserved/harness destination is withheld at the
+/// transport chokepoint, so a probe can only ever prove the attempt — never a delivery.
+pub async fn send_plan_request_operator_alert(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    request_line: &str,
+) -> Result<(), String> {
+    let Some(to) = crate::email_provider::operator_alert_email(pool).await else {
+        return Ok(());
+    };
+    let cfg = crate::email_provider::resolve(pool).await.ok_or_else(|| {
+        "system mail is not configured, so no operator alert was sent".to_string()
+    })?;
+    // The two facts the operator needs to answer the row: which workspace, and who to reply to.
+    let who: Option<(String, String)> = sqlx::query_as(
+        "SELECT t.name,
+                COALESCE((SELECT u.email FROM users u WHERE u.tenant_id = t.id \
+                          ORDER BY (u.role IN ('admin','account_owner')) DESC, u.created_at ASC \
+                          LIMIT 1), '') \
+           FROM tenants t WHERE t.id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+    let (workspace, requester) =
+        who.unwrap_or_else(|| (format!("workspace {tenant_id}"), String::new()));
+    let requester = if requester.trim().is_empty() {
+        "(no owner address on file)"
+    } else {
+        requester.trim()
+    };
+    let subject = format!("A customer asked to buy a plan: {workspace}");
+    let text = format!(
+        "{workspace} asked to be moved onto a paid plan.\n\n\
+         The ask: {request_line}\n\
+         Requested by: {requester}\n\n\
+         No charge was made — this installation has no payment provider connected, so the switch has \
+         to be made by the team. The request is waiting in the admin console (Support -> Tickets, \
+         filter Plan requests). Resolving that row moves the workspace onto the plan.\n"
+    );
+    let outcome = crate::email_provider::deliver(&cfg, &to, &subject, &text, None).await;
+    // Recorded like every other system send: the admin screen's send history is where "did anyone
+    // get told?" is answered, and a withheld probe address must read as withheld, not as sent.
+    record_last_send(
+        pool,
+        "plan_request_operator_alert",
+        &to,
+        &cfg.provider,
+        &outcome,
+    )
+    .await;
+    outcome.map(|_| ())
+}
+
 /// Record the outcome of the last send attempt where an operator can see it.
 ///
 /// The defect this replaced was invisible from every surface: `auth::register` created the account,
