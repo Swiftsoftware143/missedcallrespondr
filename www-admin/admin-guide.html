@@ -409,6 +409,23 @@ to charge anyone: it only decides <em>where the buyer is sent</em>.</p>
     </tbody>
   </table>
   <p>A plan value no gate reads is a setting, not a control — if you add a limit to the plan model, add it to <code>src/feature_registry.rs</code> and call the gate on the route that ADDS the counted row, or the two anti-drift tests in that file will fail the build (that is deliberate). The registry is also the only thing the console can render or grant: a <code>feature_limits</code> row whose key is not in the registry is invisible in the plan matrix and refused by every write path, i.e. dead data — which is exactly how the <code>max_api_keys</code> row survived one card longer than the route it described.</p>
+  <h2 id="plan-and-pricing-the-workspace-plan-screen">Plan &amp; Pricing (the workspace's own plan screen)</h2>
+  <p>This is the customer-side twin of the operator's <strong>Plans &amp; Features</strong> screen, and the
+  two must never be confused: the operator decides what each plan <em>contains</em>, this screen shows a
+  workspace what it is <em>on</em> and what the rest cost. It reads
+  <code>GET /api/v1/auth/me</code> for the current plan and <code>GET /api/v1/plans</code> for the
+  catalogue, so the badge and the prices always come from the database rather than from a copy held in
+  the page.</p>
+  <p>The table has four columns — <strong>plan</strong>, <strong>monthly</strong>,
+  <strong>yearly</strong> and <strong>what's included</strong> — and the limits in the last column are
+  the real ones the runtime enforces (included credits, phone-number allowance, bonus credits, and so
+  on). The plan the workspace is on carries a <strong>Current</strong> marker, and only plans that are
+  not current keep a <strong>Choose</strong> button.</p>
+  <p><strong>Choose</strong> starts the upgrade in one press. Where a payment provider is connected the
+  console opens a secure checkout; where none is connected the same press <em>files the request</em> on
+  the way in, so the operator sees it in the plan-request queue and can switch the workspace over with
+  billing arranged directly. Nothing is charged from this screen — it either hands off to the provider
+  or records the ask.</p>
   <h2 id="plan-requests-the-operator-queue">Plan requests (the operator queue)</h2>
   <p>The tenant console's <strong>Plan &amp; Billing</strong> screen files a plan change as a ticket with <code>source = billing</code> (its "Request the &lt;plan&gt; plan" button) whenever checkout is closed. That request is the buying path on this install, and until 2026-10-20 the operator could not work it: every ticket read was scoped to the operator's own workspace, so the customer was mailed a receipt for a request that appeared in no queue, and the request's own id answered 404 in the panel.</p>
   <p><strong>What the console shows now</strong> (Admin → <strong>Tickets</strong>): every workspace's tickets, each with a <strong>Customer</strong> column naming the workspace that filed it, and a <strong>Plan requests</strong> filter beside <strong>All tickets</strong> that keeps only the <code>billing</code> / <code>plan_request</code> rows. Open a request to read the conversation and reply (the reply emails the customer); set the ticket to <strong>resolved</strong> once the plan is switched — the customer's own Plan &amp; Billing screen shows that state live, which is the "our team will confirm here" sentence it promises.</p>
@@ -455,6 +472,19 @@ to charge anyone: it only decides <em>where the buyer is sent</em>.</p>
   <p><strong>The console is the spec.</strong> Every screen claim in the guide must be checkable against the served tenant shell <code>www-app/dashboard/index.html</code>, whose nav is exactly <code>Overview / Calls / Phone Numbers / Response Rules / Templates / Messages / Follow-ups / Contacts / Tickets / Integrations / Profile</code>. A guide step that names a control that shell does not render is a defect in the guide (kanban t_b4cbe8bc: the whole Call Log filter/detail section and the whole Voicemails section did exactly that, and were retired).</p>
   <p>Screens with write controls, so the guide may promise them (kanban t_f06b1710): <strong>Calls</strong> (table + Refresh + <strong>Export CSV</strong> + per-row Respond), <strong>Phone Numbers</strong> (+ Add Number, per-row Release), <strong>Response Rules</strong> (add/edit/delete), <strong>Templates</strong> (add/edit/delete), <strong>Messages</strong> (Send), <strong>Follow-ups</strong> (+ New Follow-up, Mark done, Delete), <strong>Contacts</strong> (+ New Contact, <strong>Export CSV</strong>, per-row Fields / Edit / Delete, custom-field definitions), <strong>Tickets</strong> (+ New Ticket, Open (thread + reply, which emails the customer), Edit), <strong>Integrations</strong> (connect/disconnect/test), <strong>Profile</strong> (Save profile, Update password).</p>
   <p>Still read-only by design: <strong>Overview</strong> (counters + credits) and the <strong>Calls</strong> row detail — there is no search box, no status filter, no date range and no call detail panel on Calls.</p>
+  <h2 id="site-config-the-console-screen">Site Config (the console screen)</h2>
+  <p>The operator console's <strong>Site Config</strong> screen is where the public face of this
+  installation is edited without touching a file: page title, meta description, keywords, canonical
+  URL, the Open Graph title/description/image and the favicon; the Google Analytics and Tag Manager
+  ids plus any head and body scripts; the three legal pages (terms, privacy, refund &amp; cancellation)
+  that render at <code>/terms.html</code>, <code>/privacy.html</code> and <code>/refunds.html</code>;
+  and the Schema.org JSON. It reads and writes <code>GET|PUT /api/v1/admin/site</code>.</p>
+  <p><strong>It is saved immediately — and the public pages follow within about five minutes.</strong>
+  The fields are written straight to the site settings, and the served legal pages and the marketing
+  homepage are (re)generated from them on the host by <code>mcr-site-apply.sh</code>, whose own
+  schedule is the five-minute wait. So an edit that does not show on the public page yet is not a
+  failed save: re-save nothing, check the console first, then give the generator its window. This is
+  the screen the next section's "half a generated file" refers to.</p>
   <h2 id="the-marketing-homepage-www-index-html-half-a-generated-file">The marketing homepage (<code>www/index.html</code>) — half a generated file</h2>
   <p><code>www/index.html</code> (served at missedcallrespondr.com) is the one served page on this app with TWO owners, and they do not overlap:</p>
   <table>

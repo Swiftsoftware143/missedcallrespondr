@@ -308,13 +308,20 @@ const Overview = () => {
     const n = u && u.credits;
     if (typeof n !== 'number' || !isFinite(n)) return '';
     if (n <= 0) {
-      // CORRECTED 2026-10-17 (cron `default`): the first wording told the tenant to "Add credits",
-      // which no screen of this app offers — there is no top-up route and no top-up control, and a
-      // plan change deliberately does NOT touch `credit_balance` (plans_handler's UPDATE arm). So
-      // the sentence sent a stopped customer looking for a control that does not exist. The real
-      // route is the operator: `admin_handler`'s manual add (POS / adjust credits). It is named here
-      // with a mail link so the only instruction on the panel is one the customer can carry out.
-      return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">No call credits left \u2014 incoming calls are being refused. Credits are added by our team, not from this screen: message us from <a href="/contact.html" style="color:#b91c1c;text-decoration:underline">our contact page</a> to top them up.</p>`;
+      // TWO ARMS (cron 2026-11-08). `credits === 0` used to print ONE sentence, "No call credits
+      // left \u2014 incoming calls are being refused", to every workspace at zero — including a
+      // brand-new account whose plan grants no credits at all (measured on a fresh workspace:
+      // GET /me/usage answers credits 0 with an EMPTY allowances object). A new customer's first
+      // read about their phone service was an alarm about credits they never had, with no route to
+      // the screen that fixes it. The alarm is now reserved for a plan that DOES grant credits and
+      // has spent them; a workspace with nothing granted gets a plain sentence and a link into
+      // Plan & Billing. The top-up route is unchanged and still true: the operator adds credits
+      // (admin_handler's manual add) — no screen of this app sells them.
+      const declared = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al['included_credits']) : NaN;
+      if (isFinite(declared) && declared > 0) {
+        return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">You have used all ${declared} call credit${declared === 1 ? '' : 's'} this plan includes, so incoming calls are being refused. Credits are added by our team, not from this screen: message us from <a href="/contact.html" style="color:#b91c1c;text-decoration:underline">our contact page</a> to top them up.</p>`;
+      }
+      return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">This workspace has no call credits, so a missed call cannot be answered yet. Credits are added by our team, not from this screen \u2014 message us from <a href="/contact.html" style="color:#2563eb;text-decoration:underline">our contact page</a> and we will switch them on. <a href="#" style="color:#2563eb;text-decoration:underline" onClick=${(e) => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>Plan & Billing</a> shows what each plan includes.</p>`;
     }
     const cap = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al.included_credits) : null;
     const of = (cap !== null && isFinite(cap) && cap > 0) ? ' of ' + cap : '';
@@ -1232,6 +1239,7 @@ const Contacts = () => {
     list: [], fields: [], search: '', searching: false, showFields: false, showValues: null,
     values: {}, draft: { name: '', type: 'text', order: 0 }, responder: '', busy: null,
     notice: null, error: null,
+    gated: null,
     showForm: false, editItem: null, formSeeded: false,
     // A contact's own history (2026-10-22). The roster listed a person's number and nothing they
     // did with it: the calls they made and the messages they were sent had no screen in this console.
@@ -1334,6 +1342,12 @@ const Contacts = () => {
   //           cleared, and the row shows '-' again.
   const showContact = (c) => { st.editItem = c; st.formSeeded = false; st.error = null; st.notice = null; st.showForm = true; renderApp(); };
   const hideContact = () => { st.showForm = false; renderApp(); };
+  // `/contacts` POST answers 402 with the plan's own sentence — "Contacts limit reached (5/5).
+  // Upgrade to increase your limit." — once the workspace is at its allowance. That is a GATE, not a
+  // mistyped field: it is rendered with a way to the plans page, the same shape the calendar's
+  // Enterprise gate already uses, and the create button stops offering a form that can only fail.
+  const isCapGate = (e) => e && (e.status === 402
+    || /limit reached|upgrade to (increase|access)|current plan/i.test(String((e && e.message) || e)));
   const saveContact = async (data, isEdit) => {
     st.busy = 'form'; st.error = null; st.notice = null; renderApp();
     try {
@@ -1343,14 +1357,19 @@ const Contacts = () => {
         Object.keys(data).forEach(k => { const v = data[k]; if (v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '') && !(Array.isArray(v) && v.length === 0)) body[k] = v; });
         await API.post('/contacts', body);
       }
-      st.showForm = false; st.notice = isEdit ? 'Contact updated' : 'Contact added';
-    } catch (e) { st.error = 'Could not save the contact: ' + e.message; }
+      st.showForm = false; st.gated = null; st.notice = isEdit ? 'Contact updated' : 'Contact added';
+    } catch (e) {
+      if (isCapGate(e)) { st.gated = e.message; st.showForm = false; }
+      else st.error = 'Could not save the contact: ' + e.message;
+    }
     st.busy = null; load();
   };
   const removeContact = async (c) => {
     if (!confirm('Delete ' + (c.name || 'this contact') + '? Their custom-field values go too.')) return;
     st.busy = c.id; st.error = null; st.notice = null; renderApp();
-    try { await API.del('/contacts/' + c.id); st.notice = 'Contact deleted'; }
+    // Deleting a contact frees one slot, so the cap gate must lift with it — otherwise the
+    // customer who just made room still faces a disabled "+ New Contact".
+    try { await API.del('/contacts/' + c.id); st.notice = 'Contact deleted'; st.gated = null; }
     catch (e) { st.error = 'Could not delete the contact: ' + e.message; }
     st.busy = null; load();
   };
@@ -1407,7 +1426,7 @@ const Contacts = () => {
       <h2 class="text-xl font-bold">Contacts</h2>
       <div class="flex items-center gap-2" style="flex-wrap:wrap">
         <input class="input" style="width:240px;max-width:100%" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
-        <button class="btn btn-sm btn-green" onClick=${() => showContact(null)}>+ New Contact</button>
+        <button class="btn btn-sm btn-green" onClick=${() => showContact(null)} disabled=${!!st.gated}>+ New Contact</button>
         <button class="btn btn-sm btn-outline" onClick=${() => { st.showFields = !st.showFields; renderApp(); }}>Custom fields (${st.fields.length})</button>
         <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
         <button class="btn btn-sm btn-outline" onClick=${exportCsv}>Export CSV</button>
@@ -1416,6 +1435,11 @@ const Contacts = () => {
     ${st.searching && html`<p class="text-xs text-gray-400 mb-2">Searching…</p>`}
     ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
     ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.notice}</p></div>`}
+    ${st.gated && html`<div class="card" id="contacts-gated" style="border-left:4px solid #b45309">
+      <p class="text-sm text-gray-700">${st.gated}</p>
+      <p class="text-xs text-gray-500 mt-2">Nothing was saved and your existing contacts are untouched. A bigger plan raises the allowance.</p>
+      <button type="button" class="btn btn-sm mt-3" onClick=${() => { S.view = 'billing'; renderApp(); }}>See the plans</button>
+    </div>`}
     ${st.showFields && html`<div class="card">
       <h3 class="font-semibold mb-2">Custom field definitions</h3>
       <table class="table mb-3"><thead><tr><th>Name</th><th>Type</th><th>Order</th><th></th></tr></thead>
