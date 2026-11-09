@@ -215,7 +215,7 @@
   <h3>Template Fields</h3>
   <ul>
     <li><strong>name</strong> — display label</li>
-    <li><strong>template_type</strong> — <code>welcome</code> / <code>welcome_credentials</code> / <code>purchase_confirmed</code> / <code>password_reset</code>
+    <li><strong>template_type</strong> — <code>welcome</code> / <code>welcome_credentials</code> / <code>password_reset</code> / <code>email_change</code> / <code>purchase_confirmed</code> / <code>branding_preview</code> / <code>ticket_reply</code> / <code>support_reply</code> / <code>billing_request_receipt</code> — this is the whole list the app's senders look up, and the form prints the fields each one fills as you pick it
       <ul>
         <li><code>welcome</code> is the self-serve signup mail: the account owner just chose the password, so this template gets no <code>password</code> value and its default row carries no <code>{password}</code> placeholder.</li>
         <li><code>welcome_credentials</code> is the welcome mail for flows that GENERATE the password (checkout, where the email is the only place the customer can learn it). This is the one welcome type whose default row contains the <code>{password}</code> block.</li>

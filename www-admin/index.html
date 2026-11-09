@@ -717,9 +717,10 @@ const ResponseRules = () => {
 // route with no UI is a defect. The rows are platform-global (the handler writes `aid = NULL`, and
 // `list` selects the whole table), so this screen is adminOnly and the API family is inside the
 // platform-admin surface (src/auth/middleware.rs).
-// `template_type` is what the sender looks up: welcome, welcome_credentials and password_reset are
-// the three this app's own senders use; the field stays free-text so a new type needs no deploy.
-const EMAIL_TEMPLATE_TYPES = ['welcome', 'welcome_credentials', 'password_reset', 'purchase_confirmed', 'branding_preview', 'ticket_reply', 'support_reply', 'billing_request_receipt'];
+// `template_type` is what the sender looks up: the list below is every type this app's senders use,
+// measured off the `send_template_email` call sites (src/email.rs, src/auth/, src/handlers/). The
+// field stays free-text so a new type needs no deploy.
+const EMAIL_TEMPLATE_TYPES = ['welcome', 'welcome_credentials', 'password_reset', 'email_change', 'purchase_confirmed', 'branding_preview', 'ticket_reply', 'support_reply', 'billing_request_receipt'];
 // The merge fields each SENDER actually fills for a type, read off the send sites
 // (src/email.rs, src/auth/, src/handlers/, 2026-11-09). The renderer substitutes only keys it was
 // handed, so a placeholder outside this list is delivered to the customer LITERALLY.
@@ -727,6 +728,7 @@ const EMAIL_TEMPLATE_FIELDS = {
   welcome: ['name', 'email'],
   welcome_credentials: ['name', 'email', 'password'],
   password_reset: ['name', 'token'],
+  email_change: ['name', 'new_email', 'link', 'token', 'app_url'],
   purchase_confirmed: ['name', 'plan_name'],
   branding_preview: ['name', 'email'],
   ticket_reply: ['name', 'ticket_subject', 'reply_body', 'dashboard_url'],
