@@ -16,6 +16,7 @@ mod models;
 // Attribution for a workspace a test harness mints through the public signup
 // (`X-Swift-Harness`, kanban t_4a744754) — see `probe_harness`.
 mod probe_harness;
+mod probe_sweep;
 mod routes;
 mod security;
 mod state;
@@ -182,6 +183,11 @@ async fn main() -> anyhow::Result<()> {
 
     let funnelswift_url =
         std::env::var("FUNNELSWIFT_URL").unwrap_or_else(|_| "http://localhost:8080".into());
+
+    // Retire harness workspaces that nothing can sign into (cron 2026-11-09). FunnelSwift carried
+    // this sweeper and this app did not, so harness rows accumulated here for ever; the marker was
+    // being stamped at signup with no retention behind it.
+    crate::probe_sweep::spawn_probe_sweeper(pool.clone());
 
     let app_state = state::AppState {
         pool,
