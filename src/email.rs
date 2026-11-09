@@ -724,6 +724,111 @@ pub async fn send_plan_request_operator_alert(
     outcome.map(|_| ())
 }
 
+/// Tell the OPERATOR that a new workspace just signed up (2026-11-09, parity with FunnelSwift,
+/// WorkflowSwift, IncentiveSwift and ADASwift).
+///
+/// WHY THIS EXISTS (measured 2026-11-09): `POST /api/v1/auth/register` mints the tenant, the
+/// account_owner user, the free plan row and the credentials mail — and NOTHING told the person who
+/// runs the install. The plan-request and support-request arms next door already mail the operator;
+/// a new customer is the same kind of news and the one arrival the operator most wants to see.
+/// FunnelSwift closed the identical gap the same morning.
+///
+/// Destination = the operator's own address (`email_provider::operator_alert_email`, set from the
+/// console's Email Provider card). An unset address sends nothing: this code never invents a
+/// mailbox. Sent through the SYSTEM configuration (`None`), never the new workspace's, because the
+/// workspace has no sender identity yet and this is platform mail.
+///
+/// Never called for a harness/probe signup — the caller gates on the same two suppression reasons
+/// the credentials mail uses, so machinery cannot mail the operator. Best effort: the account is
+/// already committed, so the caller logs a failure and keeps its response.
+pub async fn send_signup_operator_alert(
+    pool: &PgPool,
+    workspace: &str,
+    owner_name: &str,
+    owner_email: &str,
+    plan_slug: &str,
+    source: &str,
+) -> Result<(), String> {
+    let Some(to) = crate::email_provider::operator_alert_email(pool).await else {
+        return Ok(());
+    };
+    let cfg = crate::email_provider::resolve(pool).await.ok_or_else(|| {
+        "system mail is not configured, so no operator alert was sent".to_string()
+    })?;
+    // The tier's DISPLAY name, not its slug: "Free", not "free". A catalogue that no longer holds
+    // the slug still gets a readable line rather than an empty one.
+    let plan_name: String = sqlx::query_scalar(
+        "SELECT COALESCE(NULLIF(btrim(name), ''), $1) FROM plans WHERE slug = $1 LIMIT 1",
+    )
+    .bind(plan_slug)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| {
+        if plan_slug.trim().is_empty() {
+            "no plan attached".to_string()
+        } else {
+            plan_slug.trim().to_string()
+        }
+    });
+    // The workspace name is what the operator recognises; a blank one falls back to the owner's
+    // address, never to an invented label.
+    let workspace = if workspace.trim().is_empty() {
+        if owner_email.trim().is_empty() {
+            "A workspace".to_string()
+        } else {
+            owner_email.to_string()
+        }
+    } else {
+        workspace.trim().to_string()
+    };
+    let who = if owner_name.trim().is_empty() {
+        owner_email.to_string()
+    } else {
+        format!("{} ({})", owner_name.trim(), owner_email)
+    };
+    let source = if source.trim().is_empty() {
+        "unknown"
+    } else {
+        source.trim()
+    };
+    let subject = format!("New workspace: {workspace}");
+    let text = format!(
+        "A new workspace signed up.\n\n\
+         Workspace: {workspace}\n\
+         Owner: {who}\n\
+         Plan: {plan_name}\n\
+         Source: {source}\n\n\
+         The account is live. It is in the admin console (Tenants) and on the operator dashboard."
+    );
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    let html = format!(
+        "<html><body style=\"font-family:Arial,sans-serif;line-height:1.6;color:#333\">\
+         <p>A new workspace signed up.</p>\
+         <p><strong>{}</strong><br>\
+         Owner: {}<br>\
+         Plan: {}<br>\
+         Source: {}</p>\
+         <p>The account is live. It is in the admin console (Tenants) and on the operator dashboard.</p>\
+         </body></html>",
+        esc(&workspace),
+        esc(&who),
+        esc(&plan_name),
+        esc(source),
+    );
+    let outcome = crate::email_provider::deliver(&cfg, &to, &subject, &text, Some(&html)).await;
+    // Recorded like every other system send, so the admin screen's send history answers
+    // "did anyone get told?" and a withheld probe address reads as withheld, not as sent.
+    record_last_send(pool, "signup_operator_alert", &to, &cfg.provider, &outcome).await;
+    outcome.map(|_| ())
+}
+
 /// Tell the OPERATOR that somebody wrote to support (2026-11-09).
 ///
 /// WHY THIS EXISTS (measured live on the sibling apps the same day): `POST /api/v1/public/support-request`
