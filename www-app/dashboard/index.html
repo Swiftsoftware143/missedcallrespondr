@@ -423,7 +423,8 @@ const Overview = () => {
           : (rate === null ? 'Not measured yet' : rate + '% of calls answered or sent an automatic reply')}</p></div>
       <div class="card"><h3 class="font-semibold mb-2">Your plan</h3>
         <p class="text-sm text-gray-600"><span class="badge badge-blue">${c.plan_name || '\u2014'}</span></p>
-        <p class="text-sm text-gray-600 mt-2">${withCap(u.rules, 'max_rules', 'response rule', 'response rules')} · ${withCap(u.phone_numbers, 'max_phone_numbers', 'phone number', 'phone numbers')} · ${withCap(u.contacts, 'max_contacts', 'contact', 'contacts')}</p>${creditNote(u)}</div>
+        <p class="text-sm text-gray-600 mt-2">${withCap(u.rules, 'max_rules', 'response rule', 'response rules')} · ${withCap(u.phone_numbers, 'max_phone_numbers', 'phone number', 'phone numbers')} · ${withCap(u.contacts, 'max_contacts', 'contact', 'contacts')}</p>${creditNote(u)}
+        <div class="mt-2"><a class="text-xs text-blue-600" id="overview-billing-link" href="#" onClick=${e => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>See plans & upgrade</a></div></div>
     </div>
     <div class="card mt-4"><h3 class="font-semibold mb-2">Recent activity</h3>
       ${(st.activity && st.activity.length)
