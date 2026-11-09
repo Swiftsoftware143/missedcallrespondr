@@ -724,6 +724,79 @@ pub async fn send_plan_request_operator_alert(
     outcome.map(|_| ())
 }
 
+/// Tell the OPERATOR that somebody wrote to support (2026-11-09).
+///
+/// WHY THIS EXISTS (measured live on the sibling apps the same day): `POST /api/v1/public/support-request`
+/// — the login page's contact form, the door a LOCKED-OUT customer has — answers 201 "Your message is
+/// with our team" and queued ZERO mail, and the signed-in door alerts an operator only for a PLAN
+/// request (`send_plan_request_operator_alert`). Any ordinary "I cannot sign in" ticket therefore
+/// waited in a console nobody had been told to open. FunnelSwift closed the identical gap at 10:59.
+///
+/// Destination is the operator's own address (`operator_alert_email`, stored beside the system mail
+/// config and edited in the same panel). UNSET sends nothing; this code never invents a mailbox.
+/// Deliberately sent through the SYSTEM mail configuration, never the asking workspace's, so it
+/// arrives even when that workspace's own mail is broken. The asker's own words are escaped before
+/// they enter the operator's inbox. Best effort: the ticket row is the record, so a mail failure is
+/// logged and never turns a filed request into an error.
+pub async fn send_support_request_operator_alert(
+    pool: &PgPool,
+    who: &str,
+    reply_to: &str,
+    subject_line: &str,
+    message: &str,
+) -> Result<(), String> {
+    let Some(to) = crate::email_provider::operator_alert_email(pool).await else {
+        return Ok(());
+    };
+    let cfg = crate::email_provider::resolve(pool).await.ok_or_else(|| {
+        "system mail is not configured, so no operator alert was sent".to_string()
+    })?;
+    let who = if who.trim().is_empty() {
+        "A customer"
+    } else {
+        who.trim()
+    };
+    let subject = format!("A support request needs an answer: {}", subject_line.trim());
+    let text = format!(
+        "{who} wrote to support.\n\n\
+         Subject: {subject_line}\n\
+         Reply to: {reply_to}\n\n\
+         {message}\n\n\
+         Answer it in the admin console (Support -> Tickets) and the asker is mailed your reply.\n"
+    );
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    let html = format!(
+        "<html><body style=\"font-family:Arial,sans-serif;line-height:1.6;color:#333\">\
+         <p><strong>{}</strong> wrote to support.</p>\
+         <p>Subject: <strong>{}</strong></p>\
+         <p>Reply to: <strong>{}</strong></p>\
+         <pre style=\"white-space:pre-wrap;font-family:inherit\">{}</pre>\
+         <p>Answer it in the admin console (Support &rarr; Tickets) and the asker is mailed your reply.</p>\
+         </body></html>",
+        esc(who),
+        esc(subject_line),
+        esc(reply_to),
+        esc(message),
+    );
+    let outcome = crate::email_provider::deliver(&cfg, &to, &subject, &text, Some(&html)).await;
+    // Recorded like every other system send: the admin send history is where "did anyone get told?"
+    // is answered, and a withheld probe address must read as withheld, not as sent.
+    record_last_send(
+        pool,
+        "support_request_operator_alert",
+        &to,
+        &cfg.provider,
+        &outcome,
+    )
+    .await;
+    outcome.map(|_| ())
+}
+
 /// Record the outcome of the last send attempt where an operator can see it.
 ///
 /// The defect this replaced was invisible from every surface: `auth::register` created the account,

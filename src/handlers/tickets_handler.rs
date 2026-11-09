@@ -354,6 +354,21 @@ pub async fn create_public(
     .execute(&state.pool)
     .await?;
 
+    // TELL THE OPERATOR (2026-11-09). The rows above are the record; this is the notification. Until
+    // it existed a locked-out customer's only way back in was a console nobody had been told to open.
+    // Best effort: the ticket is already written, so a mail failure is logged and the 201 kept.
+    if let Err(e) = crate::email::send_support_request_operator_alert(
+        &state.pool,
+        name.trim(),
+        &email,
+        &subject,
+        &description,
+    )
+    .await
+    {
+        tracing::warn!(ticket = %id, "public support request operator alert was not sent: {e}");
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -564,6 +579,53 @@ pub async fn create(
     let acknowledged = if matches!(item.source.as_str(), "billing" | "plan_request") {
         notify_customer_of_billing_request(&state, &item).await
     } else {
+        // An ORDINARY help request (2026-11-09): the billing arm above only ever covered a request
+        // to buy, so "I cannot sign in" or "my calls are not logging" wrote a row and told nobody.
+        // One alert per filed ticket; the billing arm is exclusive, so this can never double-mail.
+        let workspace: String = match item.tenant_id {
+            Some(tid) => sqlx::query_scalar(
+                "SELECT COALESCE(NULLIF(btrim(name), ''), 'A workspace') FROM tenants WHERE id = $1",
+            )
+            .bind(tid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "A workspace".to_string()),
+            None => "A visitor (not signed in)".to_string(),
+        };
+        let reply_to: String = match item.tenant_id {
+            Some(tid) => sqlx::query_scalar(
+                "SELECT COALESCE((SELECT u.email FROM users u WHERE u.tenant_id = t.id                                   ORDER BY (u.role IN ('admin','account_owner')) DESC, u.created_at ASC                                   LIMIT 1), '') FROM tenants t WHERE t.id = $1",
+            )
+            .bind(tid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
+            None => item.requester_email.clone().unwrap_or_default(),
+        };
+        let body = sqlx::query_scalar::<_, String>(
+            "SELECT COALESCE(body, '') FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC LIMIT 1",
+        )
+        .bind(item.id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        if let Err(e) = crate::email::send_support_request_operator_alert(
+            &state.pool,
+            &workspace,
+            &reply_to,
+            &item.subject,
+            &body,
+        )
+        .await
+        {
+            tracing::warn!(ticket = %item.id, "support request operator alert was not sent: {e}");
+        }
         false
     };
     let mut out = serde_json::to_value(&item).unwrap_or_else(|_| serde_json::json!({}));
