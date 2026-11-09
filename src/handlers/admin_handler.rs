@@ -991,6 +991,19 @@ pub async fn bulk_delete_tenants(
 /// `users` counts the people in the VISIBLE workspaces only, for the same reason: the canaries each
 /// carry a user row, and a landing screen that counts a probe workspace's user while refusing to
 /// count the workspace is the same divergence one column over.
+/// One row of the plan-value read used by the revenue card: (tenant, slug, name,
+/// monthly price, yearly price, plain price, billing term). A named alias so the tuple type does
+/// not trip clippy's type-complexity lint.
+type PlanValueRow = (
+    Uuid,
+    String,
+    String,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    String,
+);
+
 pub async fn platform_stats(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
@@ -999,8 +1012,8 @@ pub async fn platform_stats(
         .get("include_probe")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
-    let workspace_rows: Vec<(String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT COALESCE(t.probe_harness, '') AS probe_harness, \
+    let workspace_rows: Vec<(Uuid, String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT t.id, COALESCE(t.probe_harness, '') AS probe_harness, \
                 (SELECT u.email FROM users u WHERE u.tenant_id = t.id \
                  ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin') \
                                THEN 0 ELSE 1 END, \
@@ -1010,14 +1023,85 @@ pub async fn platform_stats(
     )
     .fetch_all(&state.pool)
     .await?;
-    let visible: Vec<&(String, Option<String>, i64)> = workspace_rows
+    let visible: Vec<&(Uuid, String, Option<String>, i64)> = workspace_rows
         .iter()
-        .filter(|(tag, owner, users)| {
+        .filter(|(_, tag, owner, users)| {
             include_probe || !is_hidden_workspace(tag, owner.as_deref(), *users)
         })
         .collect();
     let workspaces = visible.len() as i64;
-    let users_visible: i64 = visible.iter().map(|(_, _, n)| *n).sum();
+    let users_visible: i64 = visible.iter().map(|(_, _, _, n)| *n).sum();
+    let visible_ids: std::collections::HashSet<Uuid> =
+        visible.iter().map(|(id, _, _, _)| *id).collect();
+
+    // ── RECURRING REVENUE (cron 2026-11-09) ──────────────────────────────────────────────────
+    // The dashboard counted workspaces and calls but could not say what the install EARNS. Two
+    // kinds of workspace hold a paid-priced tier without paying for it: the operator's own and the
+    // portfolio workspaces (the fleet gives them the top plan), and any hand-granted plan. They are
+    // NOT hidden — they are reported beside the paid figure, because a revenue card that quietly
+    // folded them in would overstate the business, and one that dropped them silently would hide
+    // who is on the house. "Paying" is `billing_cycle IN ('monthly','yearly')`: the signup door
+    // writes 'free' and a hand switch writes 'manual', so only a real billing term counts. The
+    // tenant set is the SAME visible set the counters above use, so this card can never disagree
+    // with the Tenants screen. Value is LIST PRICE, monthly-equivalent (a yearly plan counts as its
+    // annual price over twelve months) — labelled as list price in the console, because no money
+    // has been collected until a provider is connected.
+    let plan_rows: Vec<PlanValueRow> = sqlx::query_as(
+            "SELECT tp.tenant_id, p.slug, p.name,                     p.price_monthly::float8, p.price_yearly::float8, p.price::float8,                     COALESCE(tp.billing_cycle, '')                FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id               WHERE tp.is_active",
+        )
+        .fetch_all(&state.pool)
+        .await?;
+    let mut plan_value_monthly = 0.0f64;
+    let mut paying_workspaces = 0i64;
+    let mut house_workspaces = 0i64;
+    let mut mix: Vec<(String, String, i64, i64, f64)> = Vec::new();
+    for (tenant_id, slug, name, pm, py, price, cycle) in plan_rows {
+        if !visible_ids.contains(&tenant_id) {
+            continue;
+        }
+        let monthly = if cycle.eq_ignore_ascii_case("yearly") {
+            py.or(pm).or(price).unwrap_or(0.0) / 12.0
+        } else {
+            pm.or(price).unwrap_or(0.0)
+        };
+        let paying = monthly > 0.0
+            && (cycle.eq_ignore_ascii_case("monthly") || cycle.eq_ignore_ascii_case("yearly"));
+        if paying {
+            paying_workspaces += 1;
+            plan_value_monthly += monthly;
+        } else if monthly > 0.0 {
+            house_workspaces += 1;
+        }
+        match mix.iter_mut().find(|m| m.0 == slug) {
+            Some(m) => {
+                m.2 += 1;
+                if paying {
+                    m.3 += 1;
+                    m.4 += monthly;
+                }
+            }
+            None => mix.push((
+                slug,
+                name,
+                1,
+                if paying { 1 } else { 0 },
+                if paying { monthly } else { 0.0 },
+            )),
+        }
+    }
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    let plan_mix_json: Vec<Value> = mix
+        .iter()
+        .map(|(slug, name, n, paying, monthly)| {
+            serde_json::json!({
+                "slug": slug,
+                "name": name,
+                "workspaces": n,
+                "paying": paying,
+                "monthly": round2(*monthly),
+            })
+        })
+        .collect();
 
     let row: (i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
@@ -1037,6 +1121,12 @@ pub async fn platform_stats(
         "missed_calls": row.1,
         "open_tickets": row.2,
         "plan_requests_waiting": row.3,
+        // What the install EARNS, and who is on the house (cron 2026-11-09).
+        "plan_value_monthly": round2(plan_value_monthly),
+        "plan_value_yearly": round2(plan_value_monthly * 12.0),
+        "paying_workspaces": paying_workspaces,
+        "house_workspaces": house_workspaces,
+        "plan_mix": plan_mix_json,
     })))
 }
 

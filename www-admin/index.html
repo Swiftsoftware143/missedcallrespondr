@@ -488,6 +488,16 @@ const Dashboard = () => {
         <div class="stat-card"><div class="stat-value">${p ? p.calls_received : '...'}</div><div class="stat-label">Calls received</div></div>
         <div class="stat-card"><div class="stat-value" style="color:${waiting ? '#92400e' : '#1e293b'}">${p ? waiting : '...'}</div><div class="stat-label">Plan requests waiting</div></div>
       </div>
+      <div class="card mt-4" data-revenue-card>
+        <div class="flex items-center justify-between" style="gap:16px">
+          <div>
+            <div class="font-semibold">Recurring revenue</div>
+            <div class="stat-value" style="margin-top:6px;font-size:26px">${p ? ('$' + Number(p.plan_value_monthly || 0).toFixed(2).replace(/\.00$/, '') + '/mo') : '...'}</div>
+            <p class="text-sm text-gray-500 mt-1">${p ? ('List price of the plans your ' + p.paying_workspaces + ' paying workspace' + (p.paying_workspaces === 1 ? '' : 's') + ' hold — $' + Number(p.plan_value_yearly || 0).toFixed(2).replace(/\.00$/, '') + ' a year. ' + (p.house_workspaces ? (p.house_workspaces + (p.house_workspaces === 1 ? ' workspace sits' : ' workspaces sit') + ' on a house plan and ' + (p.house_workspaces === 1 ? 'is' : 'are') + ' not counted as revenue.') : 'No workspace is on a house plan.')) : 'Loading…'}</p>
+            ${p && p.plan_mix && p.plan_mix.length ? html`<div class="flex flex-wrap gap-2 mt-2">${p.plan_mix.map(m => html`<span class="badge">${m.name}: ${m.workspaces}${m.paying ? ' (' + m.paying + ' paying)' : ''}</span>`)}</div>` : ''}
+          </div>
+        </div>
+      </div>
       <div class="card mt-4">
         <div class="flex items-center justify-between" style="gap:16px">
           <div>
