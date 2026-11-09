@@ -51,7 +51,7 @@ window.appGuidePages = {
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it.", actions: ["Upload your logo", "Set your brand name and colour", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
-  "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, and the password-reset mail. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
+  "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, the password-reset mail, the purchase receipt, the branded preview and the ticket mails. The form lists the merge fields the chosen type actually fills. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
   "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on"] },
   "email-provider": { title: "Email Provider", desc: "The mail provider every transactional message this install sends goes through \u2014 the welcome mail a new customer needs first, invitations and password resets. Choose the provider, then give its API URL, the API key, the sending domain and the From name and address. Two badges say whether it is ready: configured / not configured, and whether the STORED key is encrypted at rest \u2014 a key that arrived from a restored backup or a manual database write reads \u201cstored in the clear\u201d until the app seals it, and leaving the key field blank keeps the stored one instead of replacing it.", actions: ["Choose the provider and enter its API URL", "Paste the API key (leave it blank to keep the saved one)", "Set the sending domain and the From name and address", "Send a test email to prove the path end to end", "Save the provider"] },
@@ -719,7 +719,30 @@ const ResponseRules = () => {
 // platform-admin surface (src/auth/middleware.rs).
 // `template_type` is what the sender looks up: welcome, welcome_credentials and password_reset are
 // the three this app's own senders use; the field stays free-text so a new type needs no deploy.
-const EMAIL_TEMPLATE_TYPES = ['welcome', 'welcome_credentials', 'password_reset'];
+const EMAIL_TEMPLATE_TYPES = ['welcome', 'welcome_credentials', 'password_reset', 'purchase_confirmed', 'branding_preview', 'ticket_reply', 'support_reply', 'billing_request_receipt'];
+// The merge fields each SENDER actually fills for a type, read off the send sites
+// (src/email.rs, src/auth/, src/handlers/, 2026-11-09). The renderer substitutes only keys it was
+// handed, so a placeholder outside this list is delivered to the customer LITERALLY.
+const EMAIL_TEMPLATE_FIELDS = {
+  welcome: ['name', 'email'],
+  welcome_credentials: ['name', 'email', 'password'],
+  password_reset: ['name', 'token'],
+  purchase_confirmed: ['name', 'plan_name'],
+  branding_preview: ['name', 'email'],
+  ticket_reply: ['name', 'ticket_subject', 'reply_body', 'dashboard_url'],
+  support_reply: ['name', 'ticket_subject', 'reply_body', 'dashboard_url'],
+  billing_request_receipt: ['name', 'request_subject', 'dashboard_url'],
+};
+// Bound at the ONE send funnel for every message, whatever its type.
+const EMAIL_FIELDS_ALWAYS = ['app_name', 'app_url', 'login_url', 'brand_name', 'logo_url', 'logo_is_own'];
+const etBraces = (keys) => keys.map(k => '{' + k + '}').join(', ');
+const fieldsHint = (type) => {
+  const own = EMAIL_TEMPLATE_FIELDS[(type || '').trim()];
+  const always = etBraces(EMAIL_FIELDS_ALWAYS);
+  const tail = ' A placeholder that is not one of these is delivered to the customer as literal text.';
+  if (!own) return 'Always available in every mail: ' + always + '. Pick a type above to see the fields it fills.' + tail;
+  return 'Fields this type fills: ' + etBraces(own) + '.  Always available: ' + always + '.' + tail;
+};
 const EmailTemplates = () => {
   const st = viewState('email-templates', { list: null, note: null, showModal: false, editItem: null, busy: false });
   const load = async () => {
@@ -786,9 +809,10 @@ const EmailTemplates = () => {
           return html`<div class="space-y-3">
             <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} placeholder="Welcome" /></div>
             <div><label class="text-sm font-medium block mb-1">Type (what the sender looks up)</label>
-              <input class="input" list="et-types" value=${f.type} onInput=${e => { f.type = e.target.value; }} placeholder="welcome" />
+              <input class="input" list="et-types" value=${f.type} onInput=${e => { f.type = e.target.value; const hn = e.target.parentElement.querySelector('[data-et-fields]'); if (hn) hn.textContent = fieldsHint(f.type); }} placeholder="welcome" />
               <datalist id="et-types">${EMAIL_TEMPLATE_TYPES.map(x => html`<option value=${x}></option>`)}</datalist>
-              <p class="text-xs text-gray-400 mt-1">${EMAIL_TEMPLATE_TYPES.join(', ')} are the types this app's senders use. A row with no type is never sent.</p></div>
+              <p class="text-xs text-gray-400 mt-1">${EMAIL_TEMPLATE_TYPES.join(', ')} are the types this app's senders use. A row with no type is never sent.</p>
+              <p class="text-xs text-indigo-600 mt-1" data-et-fields>${fieldsHint(f.type)}</p></div>
             <div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div>
             <div><label class="text-sm font-medium block mb-1">Plain text body</label><textarea class="input" rows="6" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div>
             <div><label class="text-sm font-medium block mb-1">HTML body (optional)</label><textarea class="input" rows="5" value=${f.html_body} onInput=${e => { f.html_body = e.target.value; }}></textarea>
