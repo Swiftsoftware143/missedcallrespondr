@@ -438,6 +438,35 @@ async fn plan_slug_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> Option<Str
     .flatten()
 }
 
+/// The BILLING TERM the workspace actually holds — `"monthly"` or `"yearly"` (cron 2026-11-10).
+///
+/// The billing screen sells both terms and the invoice path already reads
+/// `tenant_plans.billing_cycle`, but the customer was never shown which one they were on: the
+/// "current plan" card printed the tier name alone, so a workspace billed yearly looked identical
+/// to one billed monthly. Read from the SAME active `tenant_plans` row `plan_name` names, so the
+/// term can never belong to a different switch than the tier beside it.
+///
+/// `manual` (an operator-seated switch with no recurring charge) and any value this fleet does not
+/// recognise answer `None`: the card then says nothing rather than claiming a term nobody pays.
+async fn plan_cycle_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> Option<String> {
+    let held = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT tp.billing_cycle FROM tenant_plans tp \
+         WHERE tp.tenant_id = $1 AND tp.status = 'active' \
+         ORDER BY tp.created_at DESC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .flatten()?;
+    match held.as_str() {
+        "monthly" | "month" => Some("monthly".to_string()),
+        "yearly" | "year" | "annual" => Some("yearly".to_string()),
+        _ => None,
+    }
+}
+
 /// `GET /api/v1/auth/me` — the signed-in account, INCLUDING the real plan tier (card t_9cd2c8f2).
 ///
 /// Before this card the route answered the raw `TeamMemberResponse`, which names no tier, so the
@@ -459,6 +488,7 @@ pub async fn me(
     let tenant_id: uuid::Uuid = row.try_get("tenant_id")?;
     let (plan_name, plan_assigned) = plan_for(&state.pool, tenant_id).await;
     let plan_slug = plan_slug_for(&state.pool, tenant_id).await;
+    let plan_cycle = plan_cycle_for(&state.pool, tenant_id).await;
 
     let has_avatar: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_avatars WHERE user_id = $1)")
@@ -477,6 +507,7 @@ pub async fn me(
         plan_name,
         plan_assigned,
         plan_slug,
+        plan_cycle,
         avatar_url: if has_avatar {
             Some(format!("/api/v1/auth/avatar/{}", claims.sub))
         } else {

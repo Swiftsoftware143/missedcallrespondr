@@ -308,6 +308,17 @@ pub struct MeResponse {
     /// exactly the tier `plan_name` labels "Free". Absent only when no plan row exists at all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_slug: Option<String>,
+    /// The BILLING TERM the workspace actually holds — `"monthly"` or `"yearly"` (cron 2026-11-10).
+    ///
+    /// The billing screen lets a customer buy either term and the invoice path already reads
+    /// `tenant_plans.billing_cycle`, but nothing told the CUSTOMER which one they were on: the
+    /// "current plan" card printed the tier name alone, so a workspace billed yearly looked
+    /// identical to one billed monthly. Read from the SAME active `tenant_plans` row `plan_name`
+    /// names. Absent for a workspace holding no plan, and for an operator-seated switch
+    /// (`billing_cycle = 'manual'`, no recurring charge) — the card then says nothing rather than
+    /// claiming a term nobody is billed on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_cycle: Option<String>,
     /// `/api/v1/auth/avatar/<id>` when the account has uploaded a picture, absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,

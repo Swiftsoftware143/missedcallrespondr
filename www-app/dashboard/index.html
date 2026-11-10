@@ -2231,7 +2231,7 @@ const withdraw = async (st, t) => {
 };
 
 const Billing = () => {
-  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, withdrawing: null, till: null, tillTried: false });
+  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, withdrawing: null, till: null, tillTried: false, term: 'month' });
   if (!st.loaded && !st.busy) {
     st.busy = true;
     loadPlanRequests(st);
@@ -2272,6 +2272,44 @@ const Billing = () => {
     return assigned && !!current && (a === current || b === current);
   };
   const monthly = p => Number(p.price_monthly || 0);
+  // ── THE BILLING TERM (2026-11-10) ─────────────────────────────────────────────────────────────
+  // Every plan record carries BOTH a monthly and a yearly price (the admin panel writes both), but
+  // this screen only ever quoted the monthly rate and only ever sent the monthly amount, so the
+  // annual offer in the catalogue could not be bought from the one place a customer buys. The switch
+  // below offers it, the amount sent is the chosen term's own figure from the row, and the saving is
+  // COMPUTED from the two figures in that row — never written here, so a price change cannot leave a
+  // stale claim on the tile.
+  const yearlyPrice = p => Number(p.price_yearly || 0);
+  const money = n => '$' + (Number(n) % 1 === 0 ? Number(n).toFixed(0) : Number(n).toFixed(2));
+  // A tier with NO yearly price is never sold a year: the switch simply keeps quoting its monthly
+  // rate, and the server refuses a yearly ask by name if one is ever sent.
+  const termOf = p => (st.term === 'year' && yearlyPrice(p) > 0 ? 'year' : 'month');
+  const amountOf = p => (termOf(p) === 'year' ? yearlyPrice(p) : monthly(p));
+  const termNote = p => {
+    if (termOf(p) !== 'year') return '';
+    const perYear = monthly(p) * 12;
+    if (perYear <= 0) return '';
+    const savings = perYear - yearlyPrice(p);
+    // NO DISCOUNT IS NOT A SAVING (measured live 2026-11-10): the Enterprise row prices a year at
+    // exactly 12 × its monthly rate, and the tile read "$0 off a year". A term that costs the same
+    // says nothing extra, so the line is simply not painted.
+    if (savings <= 0.005) return '';
+    const monthsFree = Math.round(savings / monthly(p));
+    if (monthsFree >= 1) return monthsFree + (monthsFree === 1 ? ' month free' : ' months free');
+    return money(savings) + ' off a year';
+  };
+  const termBar = () => {
+    const anyYearly = st.plans.some(p => yearlyPrice(p) > 0);
+    if (!anyYearly) return null;
+    const b = (v, label) => html`<button type="button" class=${'btn btn-sm' + (st.term === v ? '' : ' btn-outline')}
+        data-billing-term=${v} aria-pressed=${st.term === v ? 'true' : 'false'}
+        onClick=${() => { if (st.term !== v) { st.term = v; st.requestFor = null; st.notice = null; renderApp(); } }}>${label}</button>`;
+    return html`<div class="card" id="billing-term">
+      <h3 class="font-semibold mb-1">How you pay</h3>
+      <p class="text-sm text-gray-600 mb-2">Pay monthly, or pay for a year up front at the yearly price each plan carries. The yearly figure is not a guess: it is the tier's own stored price, and the saving shown on each tile is worked out from the monthly and yearly figures in that same row.</p>
+      <div class="flex items-center gap-2" style="flex-wrap:wrap">${b('month', 'Monthly')}${b('year', 'Yearly')}</div>
+    </div>`;
+  };
   // FALSE only when the till itself said nothing can be sold on this install: no provider armed
   // with a usable key AND no active plan carrying a usable hosted payment page (2026-11-08). An
   // absent answer (route failed, older server) is NOT "closed", so the purchase button and its
@@ -2284,7 +2322,7 @@ const Billing = () => {
   // WorkflowSwift renders "$0/mo" and IncentiveSwift "$0/month". Measured live 2026-10-15 on
   // app.missedcallrespondr.com/dashboard/ (the only tile on the screen whose price line was not a
   // price). Same "$X / month" shape as the paid tiles now, for every plan including free.
-  const priceLine = p => '$' + (monthly(p) % 1 === 0 ? monthly(p).toFixed(0) : monthly(p).toFixed(2)) + ' / month';
+  const priceLine = p => money(amountOf(p)) + (termOf(p) === 'year' ? ' / year' : ' / month');
   // WHAT THE BUYER READS ON A TILE (cron 2026-10-26). The tile used to print the plan row's own
   // JSON keys verbatim — "included credits: 50", "max phone numbers: 1", "multi_tenant" — so the
   // one screen where a customer decides to pay showed lower-case database slugs, and the Free
@@ -2343,7 +2381,7 @@ const Billing = () => {
   // details are entered either way.
   const askFor = p => {
     st.notice = null; st.error = null;
-    st.requestFor = { key: keyOf(p), slug: (p.slug || ''), name: nameOf(p), price: monthly(p) };
+    st.requestFor = { key: keyOf(p), slug: (p.slug || ''), name: nameOf(p), price: amountOf(p), term: termOf(p) };
     renderApp();
     setTimeout(() => {
       const el = document.getElementById('billing-request');
@@ -2360,8 +2398,12 @@ const Billing = () => {
       const r = await API.post('/checkout/create', {
         purchasable_type: 'plan',
         purchasable_id: p.id,
-        amount: monthly(p),
+        amount: amountOf(p),
         currency: 'USD',
+        // WHICH TERM (2026-11-10). Absent used to be the only thing the server could read, so every
+        // session was monthly. The field is optional there, so this is additive, and the server
+        // judges the amount against THIS term's own catalogue price.
+        billing_cycle: termOf(p),
         success_url: window.location.origin + '/dashboard/',
         cancel_url: window.location.origin + '/dashboard/'
       });
@@ -2457,10 +2499,15 @@ const Billing = () => {
     if (!want || st.busy) return;
     st.busy = true; st.notice = null; st.error = null; renderApp();
     try {
+      // The term travels with the ask: a yearly request quoted at the monthly rate is an invoice
+      // raised at the wrong amount. `want.term` is the switch's own state at the moment of the press.
+      const wantTerm = (want.term === 'year') ? 'year' : 'month';
       const res = await API.post('/tickets', {
-        subject: 'Upgrade request: ' + want.name + ' plan',
+        subject: 'Upgrade request: ' + want.name + ' plan' + (wantTerm === 'year' ? ' (yearly)' : ''),
         description: 'This workspace asked to move to the ' + want.name + ' plan ($' + want.price
-          + '/month) from Plan & Billing. Self-serve checkout is not open on this install, so the'
+          + '/' + wantTerm + ') from Plan & Billing. The customer chose the '
+          + (wantTerm === 'year' ? 'yearly' : 'monthly') + ' term, so quote that price when the'
+          + ' invoice is raised. Self-serve checkout is not open on this install, so the'
           + ' request has to be completed by the team.',
         priority: 'normal',
         // The fleet's own name for this queue. The operator console filters on it, the exact-source
@@ -2523,16 +2570,18 @@ const Billing = () => {
     <div class="card">
       <h3 class="font-semibold mb-1">Your current plan</h3>
       ${assigned
-        ? html`<p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || '\u2014'}</span></p>`
+        ? html`<p class="text-sm text-gray-600"><span class="badge badge-blue" id="billing-current">${me.plan_name || '\u2014'}</span>${me.plan_cycle ? html`<span class="badge" id="billing-cycle" data-plan-cycle=${me.plan_cycle} style="margin-left:6px;background:${me.plan_cycle === 'yearly' ? '#dcfce7' : '#f1f5f9'};color:${me.plan_cycle === 'yearly' ? '#166534' : '#475569'}">Billed ${me.plan_cycle === 'yearly' ? 'yearly' : 'monthly'}</span>` : null}</p>`
         : html`<p class="text-sm text-gray-600" data-plan-state="none">No plan chosen yet — this workspace runs on the <strong>${me.plan_name || 'Free'}</strong> limits below, which is what every screen here enforces. Pick a plan to move up.</p>`}
       <p class="text-sm text-gray-500 mt-2">Pressing a button below opens the payment provider's own secure checkout when self-serve checkout is open on that plan. While it is not open, the same press sends your request to our team, who complete the switch by hand — nothing is charged. No card details are entered on this site either way.</p>
     </div>
+    ${st.loaded ? termBar() : null}
     ${!st.loaded ? html`<div class="card text-sm text-gray-400">Loading the plans…</div>` : null}
     ${st.loaded && st.plans.length === 0 && !st.error ? html`<div class="card text-sm text-gray-400">No plans are on sale yet. The platform operator publishes them under Plans in the admin panel.</div>` : null}
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       ${st.plans.map(p => html`<div class="card" data-plan=${keyOf(p)}>
         <h3 class="font-semibold">${nameOf(p)}</h3>
-        <p class="text-2xl font-bold mt-1">${priceLine(p)}</p>
+        <p class="text-2xl font-bold mt-1" data-plan-price=${keyOf(p)}>${priceLine(p)}</p>
+        ${termNote(p) ? html`<p class="text-sm mt-1" style="color:#047857" data-plan-saving=${keyOf(p)}>${termNote(p)} — ${money(yearlyPrice(p) / 12)} a month, billed once a year</p>` : null}
         ${p.description ? html`<p class="text-sm text-gray-600 mt-2">${p.description}</p>` : null}
         ${features(p).length ? html`<ul class="text-sm text-gray-600 mt-3" style="list-style:disc;padding-left:18px">${features(p).map(f => html`<li>${f}</li>`)}</ul>` : null}
         <div class="mt-4">
