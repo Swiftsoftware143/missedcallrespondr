@@ -299,6 +299,15 @@ pub struct MeResponse {
     /// (`plan.assigned` / `plan_assigned`); this is the same flag under the same name. Always
     /// serialised (not optional) so the console has one shape to read.
     pub plan_assigned: bool,
+    /// The tier's SLUG — the fleet's plan identifier (cron `default`, 2026-11-09). The tag→free-
+    /// account provisioning contract names a tier by `source_app` + `plan_slug`, and every sibling
+    /// app answers this key on `/auth/me` (ADASwift, MissedCall-as-of-now, FunnelSwift, WorkflowSwift,
+    /// IncentiveSwift); this route carried only the display NAME. Resolved from the same
+    /// `tenant_plans JOIN plans` row `plan_name` reads, so the two cannot name different tiers, and
+    /// it falls back to the install's cheapest active plan's slug for a workspace holding none —
+    /// exactly the tier `plan_name` labels "Free". Absent only when no plan row exists at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_slug: Option<String>,
     /// `/api/v1/auth/avatar/<id>` when the account has uploaded a picture, absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,

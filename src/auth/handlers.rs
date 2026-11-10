@@ -408,6 +408,36 @@ async fn plan_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> (String, bool) 
     }
 }
 
+/// The SLUG of the tier `plan_for` names (cron `default`, 2026-11-09) — the fleet's plan identifier.
+///
+/// Reads the SAME `tenant_plans JOIN plans` row `plan_for` does, so the slug can never name a
+/// different tier than the display name beside it. A workspace holding no plan falls back to the
+/// install's cheapest active plan's slug, which is the tier `plan_for` labels "Free"; `None` only
+/// when no plan row exists at all (an empty catalogue — the route still answers, without the key).
+async fn plan_slug_for(pool: &sqlx::PgPool, tenant_id: uuid::Uuid) -> Option<String> {
+    let held = sqlx::query_scalar::<_, String>(
+        "SELECT p.slug FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id \
+         WHERE tp.tenant_id = $1 AND tp.status = 'active' \
+         ORDER BY tp.created_at DESC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    if held.is_some() {
+        return held;
+    }
+    sqlx::query_scalar::<_, String>(
+        "SELECT slug FROM plans WHERE is_active = true \
+         ORDER BY COALESCE(price_monthly, price, 0) ASC NULLS LAST, name ASC LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
 /// `GET /api/v1/auth/me` — the signed-in account, INCLUDING the real plan tier (card t_9cd2c8f2).
 ///
 /// Before this card the route answered the raw `TeamMemberResponse`, which names no tier, so the
@@ -428,6 +458,7 @@ pub async fn me(
 
     let tenant_id: uuid::Uuid = row.try_get("tenant_id")?;
     let (plan_name, plan_assigned) = plan_for(&state.pool, tenant_id).await;
+    let plan_slug = plan_slug_for(&state.pool, tenant_id).await;
 
     let has_avatar: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_avatars WHERE user_id = $1)")
@@ -445,6 +476,7 @@ pub async fn me(
         role: row.try_get("role")?,
         plan_name,
         plan_assigned,
+        plan_slug,
         avatar_url: if has_avatar {
             Some(format!("/api/v1/auth/avatar/{}", claims.sub))
         } else {
