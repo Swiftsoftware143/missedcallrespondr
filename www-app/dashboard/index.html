@@ -755,13 +755,13 @@ const Profile = () => {
           <p class="text-xs text-gray-400 mt-2">PNG, JPEG, GIF or WebP · up to 2 MB</p>
         </div>
         <div class="space-y-3" style="flex:1;max-width:420px">
-          <div><label class="text-sm font-medium block mb-1">Email</label>
+          <div><label class="text-sm font-medium block mb-1" for="profile-email">Email</label>
             <input id="profile-email" class="input" value=${c.email || ''} disabled /></div>
-          <div><label class="text-sm font-medium block mb-1">Name</label>
+          <div><label class="text-sm font-medium block mb-1" for="profile-name">Name</label>
             <input id="profile-name" class="input" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} /></div>
-          <div><label class="text-sm font-medium block mb-1">Company</label>
+          <div><label class="text-sm font-medium block mb-1" for="profile-company">Company</label>
             <input id="profile-company" class="input" value=${st.company || ''} onInput=${e => { st.company = e.target.value; }} /></div>
-          <div><label class="text-sm font-medium block mb-1">Username</label>
+          <div><label class="text-sm font-medium block mb-1" for="profile-username">Username</label>
             <input id="profile-username" class="input" maxlength="255" placeholder="Optional" value=${st.username || ''} onInput=${e => { st.username = e.target.value; }} />
             <p class="text-xs text-gray-400 mt-1">Optional. A short name the console can show in place of your full name. Clear it to remove it.</p></div>
           <div><label class="text-sm font-medium block mb-1">Level</label>
@@ -779,7 +779,7 @@ const Profile = () => {
         <p class="text-sm text-gray-600">Your current sign-in address is <b id="ec-current">${c.email || '—'}</b>. To move it, enter the new address below and we will email a confirmation link to it. Your current address keeps working until you open that link.</p>
         ${st.ecErr && html`<p class="text-sm text-red-700" id="ec-msg" role="status" aria-live="polite">${st.ecErr}</p>`}
         ${!st.ecErr && st.ecMsg && html`<p class="text-sm" style="color:#15803d" id="ec-msg" role="status" aria-live="polite">${st.ecMsg}</p>`}
-        <div><label class="text-sm font-medium block mb-1">New email address</label>
+        <div><label class="text-sm font-medium block mb-1" for="ec-new">New email address</label>
           <input id="ec-new" class="input" type="email" maxlength="254" autocomplete="email" placeholder="you@yourcompany.com" value=${st.ecNew || ''} onInput=${e => { st.ecNew = e.target.value; }} /></div>
         <button id="ec-send" class="btn btn-sm" disabled=${st.ecBusy} onClick=${sendEmailChange}>Send confirmation link</button>
       </div>
@@ -787,11 +787,11 @@ const Profile = () => {
     <div class="card">
       <h3 class="font-semibold mb-3">Change password</h3>
       <div class="space-y-3" style="max-width:420px">
-        <div><label class="text-sm font-medium block mb-1">New password (min 8)</label>
+        <div><label class="text-sm font-medium block mb-1" for="pw-new">New password (min 8)</label>
           <input id="pw-new" class="input" type="password" value=${st.next} onInput=${e => { st.next = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Confirm new password</label>
+        <div><label class="text-sm font-medium block mb-1" for="pw-confirm">Confirm new password</label>
           <input id="pw-confirm" class="input" type="password" value=${st.confirm} onInput=${e => { st.confirm = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Current password</label>
+        <div><label class="text-sm font-medium block mb-1" for="pw-current">Current password</label>
           <input id="pw-current" class="input" type="password" value=${st.cur} onInput=${e => { st.cur = e.target.value; }} /></div>
         <p class="text-xs text-gray-500">Your current password confirms the change — we ask for it underneath the new one.</p>
         <button id="save-password" class="btn btn-sm" disabled=${st.busy} onClick=${changePw}>Save password</button>
