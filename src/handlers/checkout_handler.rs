@@ -655,7 +655,32 @@ pub async fn create_checkout_session(
         .get("purchasable_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
-    let metadata = req.get("metadata").cloned().unwrap_or(json!({}));
+    // ── WHICH BILLING TERM THE BUYER CHOSE (2026-11-10) ─────────────────────────────────────────
+    // Plan records carry BOTH a monthly and a yearly price, but this route only ever sold the
+    // monthly one: `billing_cycle` was nowhere in the request, so the annual offer in the catalogue
+    // could not be bought and a settled payment had to be seated with no term at all. The field is
+    // OPTIONAL and defaults to what every existing caller already gets, so this is additive.
+    let billing_cycle: String = match req.get("billing_cycle").and_then(|v| v.as_str()) {
+        None => "monthly".to_string(),
+        Some(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "month" | "monthly" | "mo" => "monthly".to_string(),
+            "year" | "yearly" | "annual" | "annually" | "yr" => "yearly".to_string(),
+            other => {
+                return Err(AppError::BadRequest(format!(
+                    "billing_cycle must be \"month\" or \"year\" — got \"{other}\". Nothing was charged."
+                )))
+            }
+        },
+    };
+    let mut metadata = req.get("metadata").cloned().unwrap_or(json!({}));
+    // The term rides on the session so the payment that settles it seats the plan with the term the
+    // buyer chose (`deliver_credentials` reads it back) and so the operator's queue shows it.
+    if !metadata.is_object() {
+        metadata = json!({});
+    }
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert("billing_cycle".into(), json!(billing_cycle));
+    }
 
     // ── THE PRICE CHARGED IS THE CATALOGUE'S, NOT THE CALLER'S (2026-10-25) ─────────────────────
     // MEASURED 2026-10-25 on this live app: this handler took `amount` from the REQUEST BODY and
@@ -688,13 +713,38 @@ pub async fn create_checkout_session(
             .await?;
             if let Some((plan_name, monthly, yearly)) = catalogue {
                 let near = |p: f64| p.is_finite() && p > 0.0 && (amount - p).abs() <= 0.005;
-                if !near(monthly) && !near(yearly) {
+                // The TERM decides which catalogue figure the amount is judged against. A yearly ask
+                // is priced from `price_yearly` and refused by name when the tier carries none — the
+                // buyer is never sold a year at the monthly rate, and never at a rate they typed.
+                let (term_price, term_label, other_price, other_label) =
+                    if billing_cycle == "yearly" {
+                        (yearly, "a year", monthly, "a month")
+                    } else {
+                        (monthly, "a month", yearly, "a year")
+                    };
+                if term_price > 0.0 {
+                    if !near(term_price) {
+                        return Err(AppError::BadRequest(format!(
+                            "The {plan_name} plan costs {term_price:.2} for {term_label} — the \
+                             request asked for {amount:.2}. Nothing was charged; please reload the \
+                             Plans screen and try again."
+                        )));
+                    }
+                } else if other_price > 0.0 && near(other_price) {
+                    // No price for the chosen term, but the other term IS priced: say so, instead of
+                    // selling a term this tier does not carry.
+                    return Err(AppError::BadRequest(format!(
+                        "The {plan_name} plan has no {billing_cycle} price — it is sold at \
+                         {other_price:.2} for {other_label}. Nothing was charged; choose that term \
+                         on the Plans screen."
+                    )));
+                } else if !near(monthly) && !near(yearly) {
                     let priced = if monthly > 0.0 { monthly } else { yearly };
                     if priced > 0.0 {
                         return Err(AppError::BadRequest(format!(
-                            "The {} plan costs {:.2} — the request asked for {:.2}. \
-                             Nothing was charged; please reload the Plans screen and try again.",
-                            plan_name, priced, amount
+                            "The {plan_name} plan costs {priced:.2} — the request asked for \
+                             {amount:.2}. Nothing was charged; please reload the Plans screen and \
+                             try again."
                         )));
                     }
                 }
@@ -791,6 +841,7 @@ pub async fn create_checkout_session(
                     requested_plan_id,
                     "no payment provider is connected on this installation",
                     true,
+                    &billing_cycle,
                 )
                 .await;
                 return Ok(no_provider_refusal(plan_request).into_response());
@@ -851,6 +902,7 @@ pub async fn create_checkout_session(
                 requested_plan_id,
                 &format!("no active {provider_type} provider is configured"),
                 true,
+                &billing_cycle,
             )
             .await;
             return Ok(no_provider_refusal(plan_request).into_response());
@@ -883,6 +935,7 @@ pub async fn create_checkout_session(
             requested_plan_id,
             &format!("the configured {provider_type} provider has no API key"),
             true,
+            &billing_cycle,
         )
         .await;
         return Ok(no_provider_refusal(plan_request).into_response());
@@ -1813,6 +1866,7 @@ async fn deliver_credentials(
     session_account_id: Uuid,
     purchasable_type: &str,
     purchased_plan: Option<(Uuid, String)>,
+    billing_cycle: Option<&str>,
 ) -> Result<(), AppError> {
     // ── Address boundary (kanban t_54b1ffab) ────────────────────────────────────────────────
     // Every statement below runs off this value: the `INSERT INTO users` that mints the account and
@@ -1863,13 +1917,18 @@ async fn deliver_credentials(
         // `tenant_id == session_account_id`, and an address that has no user is handled by the mint
         // arm, which seats the plan on the tenant IT creates. Seating both would double-seat.
         //
-        // No cycle is passed (`None`): the session carries none and this app cannot derive one — see
-        // `plans_handler::seat_plan_for_tenant` for the measured reason. That gap is recorded as
-        // NEEDS-DAVID, deliberately NOT invented here.
+        // The cycle is the BUYER'S, read back from the session (`metadata.billing_cycle`, written by
+        // `create_checkout_session`). Before 2026-11-10 there was nothing to pass, so a paid session
+        // seated a plan with an empty term and the operator's "paying accounts" report could not tell
+        // a yearly subscriber from a monthly one. `None` (a session opened by an older build) keeps
+        // the previous behaviour exactly.
         match purchased_plan {
             Some((plan_id, plan_slug)) => {
                 crate::handlers::plans_handler::seat_plan_for_tenant(
-                    state, tenant_id, plan_id, None,
+                    state,
+                    tenant_id,
+                    plan_id,
+                    billing_cycle.filter(|c| *c == "monthly" || *c == "yearly"),
                 )
                 .await?;
                 tracing::info!(
@@ -2129,6 +2188,7 @@ async fn handle_checkout_completed(
                 account_id,
                 &purchasable_type,
                 purchased_plan,
+                metadata.get("billing_cycle").and_then(|v| v.as_str()),
             )
             .await
             {
@@ -2890,6 +2950,12 @@ async fn hand_off_to_payment_link(
         plan_id,
         &format!("the buyer was handed to the plan's own hosted payment page ({url})"),
         false,
+        // This helper is handed the session's metadata, and `create_checkout_session` put the term
+        // there — so the ask the operator reads is priced for the term the buyer pressed.
+        metadata
+            .get("billing_cycle")
+            .and_then(|v| v.as_str())
+            .unwrap_or("monthly"),
     )
     .await;
 
@@ -3043,16 +3109,20 @@ async fn record_checkout_plan_request(
     plan_id: Option<Uuid>,
     why: &str,
     send_receipt: bool,
+    billing_cycle: &str,
 ) -> Option<Value> {
     let plan_id = plan_id?;
-    let plan: Result<Option<(String, String, f64)>, sqlx::Error> = sqlx::query_as(
-        "SELECT slug, name, COALESCE(NULLIF(price_monthly, 0), price)::float8 \
+    // BOTH figures, so the ask the operator reads is priced for the term the buyer pressed. A yearly
+    // request quoted at the monthly rate is an invoice raised at the wrong amount.
+    let plan: Result<Option<(String, String, f64, f64)>, sqlx::Error> = sqlx::query_as(
+        "SELECT slug, name, COALESCE(NULLIF(price_monthly, 0), price)::float8, \
+                COALESCE(price_yearly, 0)::float8 \
            FROM plans WHERE id = $1",
     )
     .bind(plan_id)
     .fetch_optional(db)
     .await;
-    let (slug, name, price) = match plan {
+    let (slug, name, monthly, yearly) = match plan {
         Ok(Some(row)) => row,
         Ok(None) => return None,
         Err(e) => {
@@ -3060,19 +3130,32 @@ async fn record_checkout_plan_request(
             return None;
         }
     };
+    let yearly_ask = billing_cycle == "yearly";
+    let price = if yearly_ask { yearly } else { monthly };
+    let term_label = if yearly_ask { "year" } else { "month" };
+    // A term the tier does not price is not an ask anybody can act on: the buyer is told on the
+    // Plans screen (the button is not offered there) and no ticket is filed at a made-up rate.
     if price <= 0.0 {
-        // A free tier is not an ask anybody can act on.
         return None;
     }
+    // The subject carries the term, and the dedupe keys on it, so a yearly ask and a monthly ask on
+    // the same tier stay two distinct asks while a second press of the SAME one stays one ticket.
+    let subject = if yearly_ask {
+        format!("Upgrade request: {name} plan (yearly)")
+    } else {
+        format!("Upgrade request: {name} plan")
+    };
     let open: Option<Uuid> = match sqlx::query_scalar(
         "SELECT id FROM tickets \
           WHERE tenant_id = $1 AND source = 'plan_request' \
             AND status IN ('open','in_progress') \
             AND plan_slug IS NOT DISTINCT FROM $2 \
+            AND subject = $3 \
           ORDER BY created_at DESC LIMIT 1",
     )
     .bind(tenant_id)
     .bind(&slug)
+    .bind(&subject)
     .fetch_optional(db)
     .await
     {
@@ -3092,11 +3175,11 @@ async fn record_checkout_plan_request(
     }
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
-    let subject = format!("Upgrade request: {name} plan");
     let body = format!(
-        "This workspace pressed Upgrade on the {name} plan (${price:.0}/month) from Plan & Billing \
-         and no charge was made: {why}, so the switch has to be completed by the team. Filed by the \
-         checkout route itself, so the ask stands even if the buyer closed the tab."
+        "This workspace pressed Upgrade on the {name} plan (${price:.2}/{term_label}) from Plan & \
+         Billing and no charge was made: {why}, so the switch has to be completed by the team. The \
+         buyer chose the {billing_cycle} term, so quote that price when the invoice is raised. Filed \
+         by the checkout route itself, so the ask stands even if the buyer closed the tab."
     );
     let written: Result<(), sqlx::Error> = async {
         sqlx::query(
