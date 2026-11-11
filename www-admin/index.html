@@ -107,8 +107,21 @@ const API = (() => {
   const post = (p, b) => send(p, {method:'POST', headers:headers(), body:JSON.stringify(b)});
   const put = (p, b) => send(p, {method:'PUT', headers:headers(), body:JSON.stringify(b)});
   const del = (p) => send(p, {method:'DELETE', headers:headers()});
+  // A CSV export cannot go through `handle` — it parses JSON, and this response is a file. Same 401
+  // discipline as `send`: a 401 on a request that CARRIED a session ends the panel's session instead
+  // of handing the operator a broken file. Filename comes from the app's own Content-Disposition, so
+  // the download is named exactly what the backend chose (contacts-YYYY-MM-DD.csv).
+  const download = async (p) => {
+    const carried = !!token;
+    const r = await fetch(base + p, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+    if (r.status === 401 && carried) sessionEnded();
+    if (!r.ok) throw new Error('Export failed (' + r.status + ')');
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="([^"]+)"/);
+    return { blob: await r.blob(), name: m ? m[1] : 'export.csv' };
+  };
   return {
-    login, get, post, put, del,
+    login, get, post, put, del, download,
     get token(){ return token; },
     get user(){ return user; },
     setAuth(t, u){ token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
@@ -251,9 +264,18 @@ const LoginView = () => {
       const u = r.team_member || r.user || null;
       if (!u || PLATFORM_ADMIN_ROLES.indexOf(u.role) < 0) {
         API.logout();
-        S.error = 'This is the platform admin panel, and your account is not a platform administrator. Opening your own dashboard ...';
+        // kanban cron 2026-11-11 — this used to redirect to TENANT_APP + '/dashboard', whose signed-out
+        // shell is a BLANK sign-in form: the customer had just typed their address and password, saw
+        // "Opening your own dashboard ...", and was asked for both again with no explanation (measured
+        // in a real browser: login answered 200, the browser landed on /dashboard and rendered the
+        // login inputs). Hand the address over so the second step is one password, and say why.
+        const addr = ((f && f.email) || '').trim();
+        S.error = 'This is the platform admin panel, and your account is not a platform administrator. Opening your own workspace sign-in'
+          + (addr ? ' with your email filled in' : '') + ' ...';
         S.loading = false; renderApp();
-        setTimeout(() => { window.location.replace(TENANT_APP + '/dashboard'); }, 1500);
+        setTimeout(() => {
+          window.location.replace(TENANT_APP + '/login?from=admin' + (addr ? '&email=' + encodeURIComponent(addr) : ''));
+        }, 1500);
         return;
       }
       API.setAuth(r.token, u); S.sessionEnded = false; f.email = ''; f.pw = ''; S.view = 'dashboard';
@@ -953,6 +975,23 @@ const Contacts = () => {
   const cv = viewState('contacts_values', { rows: null, busy: false, msg: null });
 
   const load = async () => { try { const data = await API.get('/contacts'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
+  // `GET /api/v1/contacts/export` has served the tenant's whole contact list as a CSV download since
+  // 2026-10-31, and this screen had no way to reach it: the same defect the custom-fields block above
+  // describes (a backend route with no UI). A plain <a href> cannot carry the session, so the file is
+  // fetched WITH the bearer token and handed to the browser as a Blob under the app's own filename.
+  const exportCsv = async () => {
+    try {
+      const f = await API.download('/contacts/export');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f.blob);
+      a.download = f.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    } catch (e) { alert(e.message || 'Could not export contacts'); }
+    renderApp();
+  };
   const loadFields = async () => {
     try { const d = await API.get('/contacts/custom-fields'); cf.list = Array.isArray(d) ? d : []; cf.err = null; }
     catch (e) { cf.err = e.message || 'Could not list the fields'; }
@@ -1035,6 +1074,7 @@ const Contacts = () => {
       <div class="flex gap-2 items-center">
         <input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} />
         <button class="btn btn-sm btn-outline" id="cfToggle" data-contacts="fields-toggle" onClick=${() => { cf.open = !cf.open; renderApp(); }}>Custom fields (${cf.list ? cf.list.length : 0})</button>
+        <button class="btn btn-sm btn-outline" id="contactsExport" data-contacts="export" onClick=${exportCsv}>Export CSV</button>
       </div>
     </div>
     ${cf.open && html`<div class="card mb-4" id="cfCard" data-contacts="fields-card">
@@ -3172,9 +3212,17 @@ const App = () => {
         // the operator never touched carries the value the modal was seeded with (so a rename
         // cannot silently take a plan off sale-by-link).
         body.purchase_url = (f.purchase_url == null ? '' : String(f.purchase_url).trim());
-        if (modal.mode === 'edit') await API.put('/admin/plans/' + modal.id, body);
-        else await API.post('/admin/plans', body);
-        setModal(null); flash(modal.mode === 'edit' ? 'Plan updated' : 'Plan created'); await load();
+        const saved = (modal.mode === 'edit')
+          ? await API.put('/admin/plans/' + modal.id, body)
+          : await API.post('/admin/plans', body);
+        setModal(null);
+        // A payment link that was SAVED but could not be judged at save time (a provider that blocks
+        // automated visits) comes back as `link_warning`. Say it out loud instead of a green tick:
+        // the server refuses a dead link outright, and this is the honest half for the rest
+        // (cron 2026-11-11, missedcallrespondr plans_handler::require_hosted_payment_url_resolves).
+        flash((modal.mode === 'edit' ? 'Plan updated' : 'Plan created')
+          + (saved && saved.link_warning ? ' — ' + saved.link_warning : ''));
+        await load();
       } catch(e) { alert('Not saved: ' + e.message); }
       setBusy(false);
     };

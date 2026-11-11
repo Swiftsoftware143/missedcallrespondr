@@ -34,6 +34,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:linear-g
 <div class="c">
 <h1>MissedCall Respondr</h1>
 <p class="sub">Auto-Response Platform</p>
+<!-- kanban cron 2026-11-11 — a customer who signs in at the OPERATOR console
+     (admin.missedcallrespondr.com, linked as "Admin" in the marketing footer) is sent here, because a
+     workspace belongs to this host. They used to land on a blank form and had to type everything a
+     second time with no explanation; the address now arrives prefilled and this line says why. -->
+<div id="why" class="msg i" style="display:none;text-align:left">You signed in at the operator console &mdash; that panel is for platform staff. Your own workspace is here, with your email already filled in.</div>
 <input id="e" type="email" placeholder="Email" autocomplete="email" aria-label="Email" onkeydown="if(event.key==='Enter'&&!document.getElementById('b').disabled){event.preventDefault();L();}">
 <input id="p" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" onkeydown="if(event.key==='Enter'&&!document.getElementById('b').disabled){event.preventDefault();L();}">
 <button id="b" onclick="L()">Sign In</button>
@@ -44,6 +49,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:linear-g
 <p class="sup">Never received your password email, or still locked out after <a href="/forgot-password.html">resetting it</a>? Write to <a href="/contact.html">our contact page</a> and we will get you signed in.</p>
 </div>
 <script>
+// Arriving here from the operator console carries ?from=admin&email=<address>: prefill the address the
+// customer just typed and show the one-line explanation, so the second step is one password and not a
+// blank form that looks like their sign-in failed.
+(function(){try{
+  var q=new URLSearchParams(window.location.search);
+  var em=(q.get('email')||'').trim();
+  if(em){document.getElementById('e').value=em;var p=document.getElementById('p');if(p)p.focus();}
+  if(q.get('from')==='admin'){var n=document.getElementById('why');if(n)n.style.display='block';}
+}catch(err){}})();
 function L(){
 var e=document.getElementById("e").value.trim(),p=document.getElementById("p").value,m=document.getElementById("m"),b=document.getElementById("b");
 if(!e||!p){m.className="msg e";m.textContent="Enter email and password";return}
