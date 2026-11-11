@@ -516,6 +516,20 @@ const Dashboard = () => {
         ? { rows: rows.length, canPurchase: cs.can_purchase } : null;
       renderApp();
     });
+    // CAN ANY CALL OR TEXT BE ANSWERED? (cron 2026-11-11). The same class as the card directly
+    // above, for the one credential the PRODUCT cannot work without: `telnyx_config` holds the
+    // signing key every inbound call and text is verified against, and with none the receiver
+    // refuses EVERY delivery (503 telnyx_verification_not_configured) before a byte of the event is
+    // read. So no missed caller is ever answered and nothing is recorded, while the customer's own
+    // screen shows a normal setup and a queue of zeros. The fact lived only on the Response Rules
+    // screen and inside the Telnyx panel -- both screens an operator opens AFTER the call he
+    // believes is being answered. `inbound_verification_ready` is the SERVER's own resolution
+    // (panel key OR the deployment env var), so a correctly configured install can never be
+    // accused. `undefined` until an answer lands and reset to null on a failed read, so the card
+    // paints ONLY on a real "not ready" answer and never turns "I could not check" into a warning.
+    if (isOps) _get('/admin/telnyx-config')
+      .then(c => { st.answerGap = { ready: !!(c && c.inbound_verification_ready === true) }; renderApp(); })
+      .catch(() => { st.answerGap = null; renderApp(); });
   }
   if (isOps) {
     const p = st.platform;
@@ -532,6 +546,16 @@ const Dashboard = () => {
             <div style="color:#475569;font-size:13px;margin-top:2px">No payment provider is connected to MissedCall Respondr and no plan carries its own payment page, so a buyer who presses Upgrade on any paid plan is turned away before a charge is made — the press is recorded as a plan request for you to switch by hand. Add a Stripe or PayPal key under Payment Providers and buyers can pay again.</div>
           </div>
           <button type="button" class="btn" data-open-payment-providers="1" onClick=${() => { S.view = 'payment-providers'; renderApp(); }}>Connect a payment provider</button>
+        </div>
+      </div>`}
+      ${st.answerGap && st.answerGap.ready === false && html`<div class="card" data-console="calls-refused" data-telephony-not-ready="1" style="border-left:4px solid #dc2626">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em">Calls and texts are being refused</div>
+            <div style="font-size:20px;font-weight:800">MissedCall cannot answer anybody</div>
+            <div style="color:#475569;font-size:13px;margin-top:2px">No calling provider is connected, so every inbound call and text is turned away before it is read: no missed caller gets a reply and the call is not even recorded. A customer sees a normal setup and a queue of zeros. Save the Telnyx credential - or paste the account signing key - under Telnyx Config and Numbers and the receiver starts accepting calls again.</div>
+          </div>
+          <button type="button" class="btn" data-open-telnyx-config="1" onClick=${() => { S.view = 'ops'; renderApp(); setTimeout(() => { const el = document.getElementById('ops-panel-5-telnyx-config-numbers'); if (el) el.scrollIntoView({ block: 'center' }); }, 60); }}>Connect the calling provider</button>
         </div>
       </div>`}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
