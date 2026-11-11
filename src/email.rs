@@ -701,6 +701,15 @@ pub async fn send_plan_request_operator_alert(
     } else {
         requester.trim()
     };
+    // A FLEET PROBE MUST NEVER RING THE OPERATOR (kanban t_f17b5802). Requester, not route: the
+    // ticket row still lands in the operator's queue, only the alert to a person is withheld.
+    if let Some(reason) = crate::security::probe_addr::synthetic_requester(requester, &workspace) {
+        tracing::info!(
+            reason = %reason,
+            "plan-request operator alert WITHHELD — the requester is a synthetic identity"
+        );
+        return Ok(());
+    }
     let subject = format!("A customer asked to buy a plan: {workspace}");
     let text = format!(
         "{workspace} asked to be moved onto a paid plan.\n\n\
@@ -861,6 +870,14 @@ pub async fn send_support_request_operator_alert(
     } else {
         who.trim()
     };
+    // A FLEET PROBE MUST NEVER RING THE OPERATOR (kanban t_f17b5802). Requester, not route.
+    if let Some(reason) = crate::security::probe_addr::synthetic_requester(reply_to, who) {
+        tracing::info!(
+            reason = %reason,
+            "support operator alert WITHHELD — the filer is a synthetic identity"
+        );
+        return Ok(());
+    }
     let subject = format!("A support request needs an answer: {}", subject_line.trim());
     let text = format!(
         "{who} wrote to support.\n\n\
