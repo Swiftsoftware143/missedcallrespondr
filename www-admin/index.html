@@ -30,7 +30,7 @@ window.appGuidePages = {
   "plans": { title: "Plans & Features", desc: "The subscription plans this install sells and the features each one grants. A plan is a set of permissions that decides what a workspace can use.", actions: ["Create or edit a plan", "Turn a feature on or off per plan", "Assign a workspace to a plan"] },
   "provisioning": { title: "Provisioning", desc: "The switch that lets a tag in another SwiftSoftware app create a free account here. While it is off the incoming request is refused and no account is made.", actions: ["Turn tag-driven provisioning on or off", "Choose the free plan a provisioned account starts on"] },
   "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data.", actions: ["Search for a workspace", "Select rows and delete the selected workspaces"] },
-  "dashboard": { title: "Dashboard", desc: "The whole install at a glance: workspaces, people, calls received, and how many customers are waiting on a plan switch. The queue tile opens the plan requests already filtered; a workspace user sees that workspace's own figures instead.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list"] },
+  "dashboard": { title: "Dashboard", desc: "The whole install at a glance: workspaces, people, calls received, and how many customers are waiting on a plan switch. The queue tile opens the plan requests already filtered; a workspace user sees that workspace's own figures instead. When nobody can be charged — no payment provider is connected and no plan carries its own payment page — a red Buyers cannot pay card sits at the top, with the button that opens Payment Providers so you can connect a Stripe or PayPal key.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list", "If Buyers cannot pay is showing, press Connect a payment provider"] },
   "portfolio": { title: "Portfolio Companies", desc: "The businesses and brands this workspace lists.", actions: ["Add or edit a portfolio company", "Open a company's record"] },
   "rules": { title: "Response Rules", desc: "What should happen automatically when a call is missed or a message arrives — the routing and reply rules that run without anyone watching.", actions: ["Create a rule", "Choose the trigger", "Enable or disable a rule"] },
   "templates": { title: "Message Templates", desc: "The message and email templates used to reply to a caller. Edit the wording without touching code.", actions: ["Preview a template", "Edit the subject and body", "Enable or disable a template"] },
@@ -474,6 +474,26 @@ const Dashboard = () => {
     // `undefined` until the read lands, so an unknown state never renders a warning; '' is the
     // answered-and-blank case, which is the one worth saying out loud.
     if (isOps) API.get('/admin/email-config').then(c => { st.alertTo = ((c && c.config && c.config.operator_alert_email) || ''); renderApp(); }).catch(() => {});
+    // CAN ANYBODY PAY? (kanban t_f11f71fb, 2026-11-11). A workspace that presses Upgrade while no
+    // payment provider is armed is refused BEFORE any charge; the buyer is told, the operator was
+    // not — the Payment Providers screen shows an empty list only to whoever opens it. Measured
+    // 2026-11-11 01:00 EST: `payment_providers` holds 0 rows on this install and no plan carries a
+    // hosted payment page, so every paid tier is refused at the till and the dashboard said nothing.
+    // The reads are the RAW getter on purpose: `API.get` reports a failure through the shell's
+    // "could not load" banner, and a refusal here is not a screen failure. Both reads must SUCCEED
+    // before anything paints — a failed read (null here) leaves `st.payGap` null, which paints
+    // nothing, so "I could not check" can never be shown as "buyers cannot pay". A provider row (a
+    // workspace with its own merchant key) or a plan carrying its own payment page means money can
+    // still be taken, so no card is painted at all.
+    if (isOps) Promise.all([
+      _get('/payment-providers').catch(() => null),
+      _get('/checkout/status').catch(() => null)
+    ]).then(([pv, cs]) => {
+      const rows = pv && Array.isArray(pv.providers) ? pv.providers : (Array.isArray(pv) ? pv : null);
+      st.payGap = (rows && cs && typeof cs.can_purchase === 'boolean')
+        ? { rows: rows.length, canPurchase: cs.can_purchase } : null;
+      renderApp();
+    });
   }
   if (isOps) {
     const p = st.platform;
@@ -482,6 +502,16 @@ const Dashboard = () => {
     const goPlanRequests = () => { try { const tk = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false, filter: 'all' }); tk.filter = 'plan'; } catch (e) {} S.view = 'tickets'; renderApp(); };
     return html`<div>
       <h2 class="text-xl font-bold mb-4">Dashboard</h2>
+      ${st.payGap && st.payGap.rows === 0 && st.payGap.canPurchase === false && html`<div class="card" data-console="payments-closed" data-payment-provider-missing="1" style="border-left:4px solid #dc2626">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em">Checkout is switched off</div>
+            <div style="font-size:20px;font-weight:800">Buyers cannot pay</div>
+            <div style="color:#475569;font-size:13px;margin-top:2px">No payment provider is connected to MissedCall Respondr and no plan carries its own payment page, so a buyer who presses Upgrade on any paid plan is turned away before a charge is made — the press is recorded as a plan request for you to switch by hand. Add a Stripe or PayPal key under Payment Providers and buyers can pay again.</div>
+          </div>
+          <button type="button" class="btn" data-open-payment-providers="1" onClick=${() => { S.view = 'payment-providers'; renderApp(); }}>Connect a payment provider</button>
+        </div>
+      </div>`}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="stat-card"><div class="stat-value">${p ? p.workspaces : '...'}</div><div class="stat-label">Workspaces</div></div>
         <div class="stat-card"><div class="stat-value">${p ? p.users : '...'}</div><div class="stat-label">People</div></div>
