@@ -205,6 +205,89 @@ fn require_hosted_payment_url(raw: &str) -> Result<(), AppError> {
     ))
 }
 
+/// THE DEAD LINK REFUSED AT SAVE TIME (2026-11-11).
+///
+/// [`require_hosted_payment_url`] above proves the SHAPE of a payment link; it cannot tell a live page
+/// from a slug that was retired, mistyped, or pasted from a different product. Four sibling apps
+/// (FunnelSwift, IncentiveSwift, WorkflowSwift, ADASwift) refuse a dead link at the moment the
+/// operator pastes it; this app only checked the shape, so a well-formed link to a page that 404s was
+/// stored, the console said "Plan updated", and every buyer pressing Upgrade was handed to a broken
+/// page. That is the same defect class that made every CoreSwift plan page dead.
+///
+/// The verdict is deliberately CONSERVATIVE — it refuses only what is definitively dead:
+/// * a transport failure that proves there is no such host (`is_connect`: DNS failure, refused
+///   connection);
+/// * a `404 Not Found` / `410 Gone` from the host that answered.
+///
+/// Anything else is accepted, including `2xx`/`3xx`, and the 4xx a real payment page returns to a
+/// robot (`401`, `403`, `405`, `429`) — refusing those would block the operator's working Stripe /
+/// PayPal page for a reason that has nothing to do with the money reaching him. A TIMEOUT is not a
+/// verdict either: we could not look, so the save goes through rather than failing on our own network
+/// hiccup. The probe never follows more than 6 redirects and never takes longer than 6 s, so an
+/// operator's save is not held hostage by a slow host.
+///
+/// `Ok(None)` means VERIFIED (a real page answered, or no link at all). `Ok(Some(warning))` means the
+/// save is allowed but we could not judge the page — `buy.stripe.com` answers `403 AccessDenied` to
+/// this box for every slug, live or not, so status alone can never clear a Stripe Payment Link.
+/// Saying so out loud is the honest half: the operator is told to open the link once himself instead
+/// of being given a silent green tick.
+async fn require_hosted_payment_url_resolves(raw: &str) -> Result<Option<String>, AppError> {
+    let url = raw.trim().to_string();
+    if url.is_empty() {
+        return Ok(None);
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .redirect(reqwest::redirect::Policy::limited(6))
+        .user_agent("Mozilla/5.0 (compatible; MissedCallRespondr-link-check/1.0)")
+        .build()
+    {
+        Ok(c) => c,
+        // A client we cannot build is OUR problem, not the operator's: never block the save on it.
+        Err(_) => return Ok(Some(unverified_note())),
+    };
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            if status == 404 || status == 410 {
+                return Err(AppError::BadRequest(format!(
+                    "That payment link did not work, so it was NOT saved: the payment page answered \
+                     {status} (it does not exist any more). A buyer pressing Upgrade on this plan \
+                     would have landed on that broken page. Open the link in your own browser first, \
+                     copy the address a buyer should see, and paste that - or leave the box empty if \
+                     this plan is not sold by link."
+                )));
+            }
+            // A page the buyer's browser can load (2xx/3xx) is confirmed. A robot refusal
+            // (401/403/405/429) is NOT a verdict about the page, so it is saved with a note.
+            if (200..400).contains(&status) {
+                Ok(None)
+            } else {
+                Ok(Some(unverified_note()))
+            }
+        }
+        Err(e) if e.is_connect() => Err(AppError::BadRequest(
+            "That payment link did not work, so it was NOT saved: the address could not be reached \
+             at all (no such site, or the connection was refused). A buyer pressing Upgrade on this \
+             plan would have landed on that broken page. Open the link in your own browser first, \
+             copy the address a buyer should see, and paste that - or leave the box empty if this \
+             plan is not sold by link."
+                .to_string(),
+        )),
+        // Timeout or a mid-flight failure: we could not verify it, so we do not refuse it.
+        Err(_) => Ok(Some(unverified_note())),
+    }
+}
+
+/// What the console says when a link was saved but could not be judged (see
+/// [`require_hosted_payment_url_resolves`]). Worded for the operator, not for a log.
+fn unverified_note() -> String {
+    "Saved, but we could not confirm that payment page works: it refused our check (a payment \
+     provider often blocks automated visits). Open the link once in your own browser to be sure a \
+     buyer lands somewhere live."
+        .to_string()
+}
+
 pub async fn create_plan(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -262,8 +345,12 @@ pub async fn create_plan(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    let mut link_warning: Option<String> = None;
     if let Some(url) = purchase_url.as_deref() {
         require_hosted_payment_url(url)?;
+        // A well-formed but DEAD link is refused before a buyer can be handed it; one we could
+        // not judge is saved with a note the console shows the operator.
+        link_warning = require_hosted_payment_url_resolves(url).await?;
     }
 
     sqlx::query(
@@ -285,7 +372,7 @@ pub async fn create_plan(
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({"id": id, "message": "Plan created"})),
+        Json(json!({ "id": id, "message": "Plan created", "link_warning": link_warning })),
     ))
 }
 
@@ -369,6 +456,7 @@ pub async fn update_plan(
     // anything else sets it. A plain `Option<String>` read of the request would collapse "absent"
     // and "null" into one value, which is why the `None`/`Some` arm is spelled out here rather than
     // folded into the `.or_else(existing…)` idiom the other columns use.
+    let mut link_warning: Option<String> = None;
     let purchase_url: Option<String> = match req.get("purchase_url") {
         None => existing
             .try_get::<Option<String>, _>("purchase_url")
@@ -381,6 +469,9 @@ pub async fn update_plan(
                     None
                 } else {
                     require_hosted_payment_url(trimmed)?;
+                    // Same save-time verdict as create_plan: a dead page is refused, not stored;
+                    // one we could not judge is saved with the note the console shows.
+                    link_warning = require_hosted_payment_url_resolves(trimmed).await?;
                     Some(trimmed.to_string())
                 }
             }
@@ -406,7 +497,9 @@ pub async fn update_plan(
     .execute(&state.pool)
     .await?;
 
-    Ok(Json(json!({"message": "Plan updated"})))
+    Ok(Json(
+        json!({ "message": "Plan updated", "link_warning": link_warning }),
+    ))
 }
 
 pub async fn delete_plan(
