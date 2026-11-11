@@ -230,6 +230,18 @@ function endImpersonation() {
 
 const S = { view: 'overview', loading: false, error: null, views: {} };
 const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
+// PROFILE PICTURE URLS — the server already stamps its own version on the address it hands back
+// (`avatar_url` is `/api/v1/auth/avatar/<id>?v=<epoch of the row's updated_at>`), so a console-side
+// cache-buster has to JOIN that query, not start a second one. Appending `?t=` produced
+// `/api/v1/auth/avatar/<id>?v=1794424215?t=1794424215238`, where the browser reads everything after
+// the FIRST `?` as one query — `v` became the value `1794424215?t=1794424215238` and the millisecond
+// buster was inert (the server's stamp is second-granular, so two uploads inside one second could
+// still show the old picture). One helper for the two places the picture is drawn.
+const avatarSrc = (url, bust) => {
+  if (!url) return null;
+  if (!bust) return url;
+  return url + (url.indexOf('?') === -1 ? '?' : '&') + 't=' + bust;
+};
 
 // ===== LOGIN =====
 const LoginView = () => {
@@ -594,7 +606,7 @@ const Profile = () => {
   if (st.name === null) st.name = c.name || '';
   if (st.company === null) st.company = c.company || '';
   if (st.username === null) st.username = c.username || '';
-  const pictureUrl = () => (c.avatar_url ? c.avatar_url + (st.bust ? '?t=' + st.bust : '') : null);
+  const pictureUrl = () => avatarSrc(c.avatar_url, st.bust);
 
   const refresh = async () => {
     const me = await API.refreshMe();
@@ -2724,7 +2736,7 @@ const App = () => {
     <aside class="sidebar">
       <div class="flex items-center gap-2 px-3 py-4 mb-2">
         ${c.avatar_url
-          ? html`<img id="header-avatar" src=${c.avatar_url + (S.avatarBust ? '?t=' + S.avatarBust : '')} alt="Profile" class="w-8 h-8 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
+          ? html`<img id="header-avatar" src=${avatarSrc(c.avatar_url, S.avatarBust)} alt="Profile" class="w-8 h-8 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
           : html`<span class="text-2xl">📞</span>`}
         <span class="nav-txt font-bold text-gray-800">MissedCall</span>
       </div>
