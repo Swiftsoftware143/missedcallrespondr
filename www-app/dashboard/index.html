@@ -66,7 +66,7 @@ window.appGuidePages = {
   // map against this map: 16 views, 14 entries, Profile deliberately excluded, Calendar missed.
   calendar:     { title: "Calendar", desc: "Your own appointments, callbacks and reminders for this workspace. An event lives only in your account \u2014 nothing is sent to a caller from here. Events are sorted by when they happen: what is still coming is listed under Upcoming, and the older ones sit below under Already passed, dimmed.", actions: ["Press + New event to add a callback, an appointment or a reminder", "Give it a title, a date and time, a type (call, callback, appointment, reminder or other) and, if you like, a note", "Press Edit beside an event to change it, or Delete to take it off your calendar \u2014 it asks first", "Refresh re-reads the list, and the calendar is part of the Enterprise plan: on a plan without it the screen says so and nothing is saved"] },
   inbox:        { title: "Inbox", desc: "Your own addresses on your own domain, and the newest mail that reached them. Add the domain you already own, paste the records we print at your DNS provider, and create as many addresses as your plan sells. Reading and answering happens in the mail client at inbox.missedcallrespondr.com \u2014 the same account, nothing to sign in to twice.", actions: ["Press Open the mail client to read and answer", "Add your domain and press Show records", "Press Check again once the records are in DNS", "Create an address and mail to it"] },
-  workspaces:   { title: "Workspaces", desc: "A workspace is a separate drawer inside this business account \u2014 a client, a location, or a brand you run from the same login. Your plan says how many you may have. Exactly one is the default that opens when you sign in.", actions: ["Press Create workspace to add one", "Press Make default to choose the one that opens", "Press Rename to change its name", "Press Delete to remove one \u2014 the account always keeps at least one"] },
+  workspaces:   { title: "Workspaces", desc: "A workspace is a separate drawer inside this business account \u2014 a client, a location, or a brand you run from the same login. Your plan says how many you may have, and exactly one is the default that opens when you sign in. The 🗂️ button at the top of the screen switches you between workspaces from any screen, and adds a new one; the owner can also rename, delete or change the default.", actions: ["Press Create workspace to add one", "Press Make default to choose the one that opens", "Press Rename to change its name", "Press Delete to remove one \u2014 the account always keeps at least one", "Press the 🗂️ button at the top to switch workspace from any screen"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
   // YOUR TEAM (2026-10-31): the screen that gives a colleague their own login. Listed here because
@@ -2975,6 +2975,149 @@ const Inbox = () => {
   </div>`;
 };
 
+/* ── Top-bar workspace switcher (kanban t_7f817fa5) ───────────────────────────────────────────
+   Switch / add / rename / delete / make-default, from a 🗂️ button at the top of the main area,
+   ported from the fleet standard (FunnelSwift/CoreSwift). A member sees Switch + Add; the owner,
+   a company_admin and the platform admins also see Rename / Delete / Make default — the server
+   enforces the SAME rule (src/workspaces/handlers.rs::may_manage), so this gate is cosmetic.
+   Switching re-mints the session token with the target workspace's wsid, so we adopt the returned
+   token through API.setAuth and reload; the current workspace id is persisted in sessionStorage so
+   a reload paints the right name. */
+const WS = { items: [], current: null, busy: false, open: false, loaded: false };
+
+const wsCanManage = () => {
+  const r = API.user && API.user.role;
+  return !!r && ['account_owner', 'company_admin', 'admin', 'super_admin', 'agency_admin'].indexOf(r) !== -1;
+};
+
+const wsLoad = async () => {
+  try {
+    const d = await API.get('/workspaces');
+    WS.items = (d && d.workspaces) || [];
+  } catch (e) { WS.items = []; }
+  let cur = null;
+  try { cur = JSON.parse(sessionStorage.getItem('mc_workspace') || 'null'); } catch (e) {}
+  let match = null;
+  if (cur && cur.id) match = WS.items.filter(w => w.id === cur.id)[0];
+  if (!match) match = WS.items.filter(w => w.is_default)[0] || WS.items[0] || null;
+  WS.current = match;
+  if (match) { try { sessionStorage.setItem('mc_workspace', JSON.stringify(match)); } catch (e) {} }
+  renderApp();
+};
+
+const wsSwitch = async (w) => {
+  if (!w || WS.busy) return;
+  WS.busy = true;
+  try {
+    const d = await API.post('/workspaces/' + w.id + '/switch', {});
+    if (!d || !d.token) throw new Error('No token returned');
+    API.setAuth(d.token, API.user);
+    try { sessionStorage.setItem('mc_workspace', JSON.stringify(d.workspace || w)); } catch (e) {}
+    location.reload();
+  } catch (e) {
+    alert(e && e.message ? e.message : 'Could not switch workspace');
+    WS.busy = false;
+  }
+};
+
+const wsAdd = async () => {
+  if (WS.busy) return;
+  const name = (prompt('Name for the new workspace') || '').trim();
+  if (!name) return;
+  WS.busy = true;
+  try {
+    await API.post('/workspaces', { name });
+    await wsLoad();
+  } catch (e) {
+    alert(e && e.message ? e.message : 'Could not add workspace');
+  } finally {
+    WS.busy = false;
+    renderApp();
+  }
+};
+
+const wsRename = async (w) => {
+  if (!w || WS.busy) return;
+  const name = (prompt('New name for this workspace:', w.name || '') || '').trim();
+  if (!name || name === w.name) return;
+  WS.busy = true;
+  try {
+    await API.patch('/workspaces/' + w.id, { name });
+    await wsLoad();
+  } catch (e) {
+    alert(e && e.message ? e.message : 'Could not rename workspace');
+  } finally {
+    WS.busy = false;
+    renderApp();
+  }
+};
+
+const wsMakeDefault = async (w) => {
+  if (!w || WS.busy) return;
+  WS.busy = true;
+  try {
+    await API.post('/workspaces/' + w.id + '/default', {});
+    await wsLoad();
+  } catch (e) {
+    alert(e && e.message ? e.message : 'Could not change the default workspace');
+  } finally {
+    WS.busy = false;
+    renderApp();
+  }
+};
+
+const wsDelete = async (w) => {
+  if (!w || WS.busy) return;
+  if (!confirm('Delete "' + (w.name || '') + '"? Your account must keep at least one workspace.')) return;
+  WS.busy = true;
+  try {
+    await API.del('/workspaces/' + w.id);
+    await wsLoad();
+  } catch (e) {
+    alert(e && e.message ? e.message : 'Could not delete workspace');
+  } finally {
+    WS.busy = false;
+    renderApp();
+  }
+};
+
+const wsMenuBtn = (danger) => 'background:#fff;color:' + (danger ? '#b91c1c' : '#1e1b4b')
+  + ';border:1px solid ' + (danger ? '#fecaca' : '#e2e8f0')
+  + ';border-radius:8px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer';
+
+const WsSwitcher = () => {
+  const admin = wsCanManage();
+  return html`<div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:16px">
+    <div style="position:relative">
+      <button type="button" id="ws-switcher-btn" title="Workspaces" onClick=${() => { WS.open = !WS.open; renderApp(); }}
+        style="background:#fff;color:#1e1b4b;border:1px solid #e2e8f0;border-radius:100px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🗂️ <span id="wsCurrentName">${WS.current ? WS.current.name : 'Workspace'}</span> <span style="font-size:10px">▾</span></button>
+      ${WS.open && html`<div style="position:fixed;inset:0;z-index:999" onClick=${() => { WS.open = false; renderApp(); }}></div>`}
+      ${WS.open && html`<div id="wsMenu" style="position:absolute;right:0;top:calc(100% + 6px);min-width:280px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:1000;padding:4px 0;text-align:left">
+        <div style="padding:8px 14px 4px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.4px">Workspaces</div>
+        ${WS.items.length === 0 && html`<div style="padding:6px 14px;font-size:13px;color:#64748b">No workspaces yet.</div>`}
+        ${WS.items.map(w => {
+          const cur = WS.current && WS.current.id === w.id;
+          return html`<div key=${w.id}>
+            <div style="display:flex;align-items:center;gap:6px;padding:6px 14px 2px">
+              <span style="flex:1;font-weight:${cur ? '600' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.name}</span>
+              ${w.is_default ? html`<span style="font-size:10px;color:#64748b">default</span>` : null}
+              ${cur ? html`<span style="font-size:12px">✓</span>` : null}
+            </div>
+            <div style="display:flex;gap:4px;padding:2px 14px 8px;border-bottom:1px solid #eef2f7">
+              ${!cur && html`<button type="button" style=${wsMenuBtn(false)} onClick=${() => wsSwitch(w)}>Switch</button>`}
+              ${admin && html`<button type="button" style=${wsMenuBtn(false)} onClick=${() => wsRename(w)}>Rename</button>`}
+              ${admin && !w.is_default && html`<button type="button" style=${wsMenuBtn(false)} onClick=${() => wsMakeDefault(w)}>Make default</button>`}
+              ${admin && html`<button type="button" style=${wsMenuBtn(true)} onClick=${() => wsDelete(w)}>Delete</button>`}
+            </div>
+          </div>`;
+        })}
+        <div style="border-top:1px solid #eef2f7;margin:4px 0 0"></div>
+        <button type="button" onClick=${() => wsAdd()} style="width:100%;text-align:left;background:none;border:none;padding:8px 14px;font-size:13px;font-weight:600;color:#1e1b4b;cursor:pointer">➕ Add workspace</button>
+      </div>`}
+    </div>
+  </div>`;
+};
+
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
@@ -2983,6 +3126,8 @@ const App = () => {
   // this the label could only be guessed. Guarded by S.meLoaded so the refresh's own render cannot
   // loop it, and cleared on sign-in so every session re-reads.
   if (!S.meLoaded) { S.meLoaded = true; API.refreshMe().then(() => renderApp()); }
+  // One-shot: read the workspace list for the top-bar switcher (kanban t_7f817fa5).
+  if (!WS.loaded) { WS.loaded = true; wsLoad(); }
   // kanban t_25b8c662 — an impersonated session belongs to the CUSTOMER's tenant, but the token
   // keeps the OPERATOR's `sub` (admin_handler::impersonate switches `aid` only). So PUT
   // /auth/profile and PUT /auth/password would write to the OPERATOR's own user row: the Profile
@@ -3039,6 +3184,7 @@ const App = () => {
       <button type="button" class="nav-item text-red-500" onClick=${() => { API.logout(); location.href = '/'; }}><span aria-hidden="true">🚪</span><span class="nav-txt">Logout</span></button>
     </aside>
     <div class="main">
+      <${WsSwitcher} />
       ${impTenant && html`<div class="imp-banner" id="imp-banner" data-impersonating=${impTenant}>
         <span>🔑 Impersonating <b>${impTenant}</b> — this tab is the customer's session, not yours. Your operator session stays open on the admin panel.</span>
         <button id="imp-stop" onClick=${() => endImpersonation()}>Exit impersonation</button>
