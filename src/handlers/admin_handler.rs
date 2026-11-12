@@ -785,7 +785,13 @@ fn refusal_message(e: &AppError) -> String {
         | AppError::PayloadTooLarge(m)
         | AppError::Unprocessable(m)
         | AppError::ServiceUnavailable(m)
-        | AppError::UpstreamRefused(m) => m.clone(),
+        | AppError::UpstreamRefused(m)
+        | AppError::Duplicate(m)
+        | AppError::Validation(m)
+        | AppError::UnauthorizedReason(m) => m.clone(),
+        // A database failure's own text names the schema, so it is never reported: the generic
+        // sentence this app answers the client with is the whole message (see `AppError::Database`).
+        AppError::Database(_) => "Database error".to_string(),
         // A paused sign-in never reaches this bulk path (it is answered on the login route), but the
         // match must stay exhaustive: the refusal's own sentence is the throttle's, not a bare code.
         AppError::TooManyAttempts { retry_after_secs } => format!(

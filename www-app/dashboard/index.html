@@ -65,6 +65,8 @@ window.appGuidePages = {
   // defect earlier passes fixed for lists/team/branding. Measured by enumerating the console's view
   // map against this map: 16 views, 14 entries, Profile deliberately excluded, Calendar missed.
   calendar:     { title: "Calendar", desc: "Your own appointments, callbacks and reminders for this workspace. An event lives only in your account \u2014 nothing is sent to a caller from here. Events are sorted by when they happen: what is still coming is listed under Upcoming, and the older ones sit below under Already passed, dimmed.", actions: ["Press + New event to add a callback, an appointment or a reminder", "Give it a title, a date and time, a type (call, callback, appointment, reminder or other) and, if you like, a note", "Press Edit beside an event to change it, or Delete to take it off your calendar \u2014 it asks first", "Refresh re-reads the list, and the calendar is part of the Enterprise plan: on a plan without it the screen says so and nothing is saved"] },
+  inbox:        { title: "Inbox", desc: "Your own addresses on your own domain, and the newest mail that reached them. Add the domain you already own, paste the records we print at your DNS provider, and create as many addresses as your plan sells. Reading and answering happens in the mail client at inbox.missedcallrespondr.com \u2014 the same account, nothing to sign in to twice.", actions: ["Press Open the mail client to read and answer", "Add your domain and press Show records", "Press Check again once the records are in DNS", "Create an address and mail to it"] },
+  workspaces:   { title: "Workspaces", desc: "A workspace is a separate drawer inside this business account \u2014 a client, a location, or a brand you run from the same login. Your plan says how many you may have. Exactly one is the default that opens when you sign in.", actions: ["Press Create workspace to add one", "Press Make default to choose the one that opens", "Press Rename to change its name", "Press Delete to remove one \u2014 the account always keeps at least one"] },
   tickets:      { title: "Tickets", desc: "Work that needs a person \u2014 raised from a call or message and tracked through to done.", actions: ["Open a ticket", "See what is still open"] },
   integrations: { title: "Integrations", desc: "Connect MissedCall Respondr to your other tools so leads and messages flow automatically.", actions: ["Add an integration", "Check a connection is working"] },
   // YOUR TEAM (2026-10-31): the screen that gives a colleague their own login. Listed here because
@@ -135,6 +137,9 @@ const API = (() => {
   const post = (p, b) => send(p, { method: 'POST', headers: headers(), body: JSON.stringify(b) });
   const put = (p, b) => send(p, { method: 'PUT', headers: headers(), body: JSON.stringify(b) });
   const del = (p) => send(p, { method: 'DELETE', headers: headers() });
+  // Renaming a workspace is a PATCH (kanban t_44028656): the console only ever needed GET/POST/
+  // PUT/DELETE before, so this is the one new verb.
+  const patch = (p, b) => send(p, { method: 'PATCH', headers: headers(), body: JSON.stringify(b) });
   // A WRONG CURRENT PASSWORD IS A 401 BY CONTRACT, NOT A DEAD SESSION (2026-10-17). PUT /auth/password
   // answers 401 "Current password is incorrect" NAMING the field (src/auth/handlers.rs:275), while
   // send() ends the session on ANY 401 that carried a token — so a mistyped current password signed
@@ -164,7 +169,7 @@ const API = (() => {
     const err = new Error(msg); err.status = r.status; err.field = fieldRefusal; throw err;
   });
   return {
-    get, post, put, del, changePassword,
+    get, post, put, del, patch, changePassword,
     get token() { return token; },
     get user() { return user; },
     setAuth(t, u) { token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
@@ -2698,6 +2703,248 @@ const Team = () => {
   </div>`;
 };
 
+/* ── Workspaces and the inbox (kanban t_44028656) ────────────────────────────────────────────────
+   The workspace model and the multi-address private inbox, ported from ADASwift/CoreSwift. The
+   server owns every rule — a plan ceiling answers 402 with its own sentence, a duplicate name 409,
+   "keep at least one" 400 — so these screens print the server's sentence and never invent one. */
+
+const Workspaces = () => {
+  const st = viewState('workspaces', { loaded: false, busy: false, items: [], name: '', error: null, notice: null });
+  const load = async () => {
+    try {
+      const d = await API.get('/workspaces');
+      st.items = (d && d.workspaces) || [];
+    } catch (e) { st.error = 'Could not load your workspaces: ' + e.message; }
+    renderApp();
+  };
+  if (!st.loaded) { st.loaded = true; load(); }
+
+  const create = async () => {
+    const name = (st.name || '').trim();
+    st.error = null; st.notice = null;
+    if (!name) { st.error = 'Give the workspace a name first.'; renderApp(); return; }
+    st.busy = true; renderApp();
+    try {
+      await API.post('/workspaces', { name });
+      st.name = '';
+      st.notice = 'Workspace created.';
+    } catch (e) { st.error = e.message; }
+    st.busy = false; load();
+  };
+  const rename = async (w) => {
+    const name = prompt('New name for this workspace:', w.name || '');
+    if (name === null) return;
+    st.error = null; st.notice = null;
+    try {
+      await API.patch('/workspaces/' + w.id, { name });
+      st.notice = 'Workspace renamed.';
+    } catch (e) { st.error = e.message; }
+    load();
+  };
+  const makeDefault = async (w) => {
+    st.error = null; st.notice = null;
+    try {
+      await API.post('/workspaces/' + w.id + '/default', {});
+      st.notice = 'This workspace now opens on sign-in.';
+    } catch (e) { st.error = e.message; }
+    load();
+  };
+  const remove = async (w) => {
+    if (!confirm('Delete ' + (w.name || 'this workspace') + '? Your account must keep at least one.')) return;
+    st.error = null; st.notice = null;
+    try {
+      await API.del('/workspaces/' + w.id);
+      st.notice = 'Workspace deleted.';
+    } catch (e) { st.error = e.message; }
+    load();
+  };
+
+  return html`<div>
+    <h2 class="text-xl font-bold mb-1">Workspaces</h2>
+    <p class="text-sm text-gray-500 mb-4">A workspace is a separate drawer inside this business account. Your plan says how many you may have, and the first one is always the default a new sign-in opens.</p>
+    ${st.error && html`<div class="card" id="ws-error" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" id="ws-notice" style="border-left:4px solid #059669"><p class="text-sm">${st.notice}</p></div>`}
+    <div class="card p-0 overflow-hidden">
+      <table class="table"><thead><tr><th>Workspace</th><th>Opens on sign-in</th><th></th></tr></thead>
+        <tbody>
+          ${st.items.length === 0 && html`<tr><td colspan="3" class="text-gray-500">No workspaces yet — create the first one below.</td></tr>`}
+          ${st.items.map(w => html`<tr>
+            <td class="font-medium">${w.name}</td>
+            <td>${w.is_default ? html`<span class="badge badge-blue">Default</span>` : html`<span class="text-gray-400">-</span>`}</td>
+            <td class="text-right" style="white-space:nowrap">
+              ${!w.is_default && html`<button type="button" class="btn btn-sm btn-outline" id=${'ws-default-' + w.id} onClick=${() => makeDefault(w)}>Make default</button> `}
+              <button type="button" class="btn btn-sm btn-outline" id=${'ws-rename-' + w.id} onClick=${() => rename(w)}>Rename</button>
+              <button type="button" class="btn btn-sm btn-outline" id=${'ws-delete-' + w.id} onClick=${() => remove(w)}>Delete</button>
+            </td>
+          </tr>`)}
+        </tbody></table>
+    </div>
+    <div class="card">
+      <h3 class="text-base font-bold mb-1">Add a workspace</h3>
+      <p class="text-sm text-gray-500 mb-3">Give it the name your team will recognise — a client, a location, or a brand you run from the same account.</p>
+      <div class="flex gap-2 items-center flex-wrap">
+        <input id="ws-name" class="input" style="max-width:320px" maxlength="120" placeholder="e.g. Miami office" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} />
+        <button type="button" id="ws-create" class="btn" disabled=${st.busy} onClick=${create}>${st.busy ? 'Creating…' : 'Create workspace'}</button>
+      </div>
+    </div>
+  </div>`;
+};
+
+const Inbox = () => {
+  const st = viewState('inbox', {
+    loaded: false, busy: '', domains: [], boxes: [], messages: [],
+    domName: '', domKey: '', boxLocal: '', records: null, error: null, notice: null
+  });
+  const MAIL_HOST = 'https://inbox.missedcallrespondr.com';
+  const load = async () => {
+    try {
+      const d = await API.get('/private-email/domains');
+      st.domains = Array.isArray(d) ? d : ((d && d.domains) || []);
+    } catch (e) { st.error = 'Could not load your domains: ' + e.message; }
+    try {
+      const b = await API.get('/private-email/boxes');
+      st.boxes = Array.isArray(b) ? b : ((b && b.boxes) || []);
+    } catch (e) { st.error = st.error || ('Could not load your addresses: ' + e.message); }
+    try {
+      const m = await API.get('/private-email/messages?limit=20');
+      st.messages = (m && m.messages) || [];
+    } catch (e) { /* an empty inbox is not an error worth a banner */ }
+    renderApp();
+  };
+  if (!st.loaded) { st.loaded = true; load(); }
+
+  const addDomain = async () => {
+    const domain = (st.domName || '').trim();
+    st.error = null; st.notice = null;
+    if (!domain) { st.error = 'Type the domain you own first.'; renderApp(); return; }
+    st.busy = 'domain'; renderApp();
+    try {
+      await API.post('/private-email/domains', { domain, mailgun_api_key: (st.domKey || '').trim() || null });
+      st.domName = ''; st.domKey = '';
+      st.notice = 'Domain added. Show its records, paste them at your DNS provider, then press Check again.';
+    } catch (e) { st.error = e.message; }
+    st.busy = ''; load();
+  };
+  const addBox = async (domainId) => {
+    const local = (st.boxLocal || '').trim();
+    st.error = null; st.notice = null;
+    if (!domainId) { st.error = 'Add a domain first.'; renderApp(); return; }
+    if (!local) { st.error = 'Type the address you want, e.g. info.'; renderApp(); return; }
+    st.busy = 'box'; renderApp();
+    try {
+      await API.post('/private-email/boxes', { domain_id: domainId, local_part: local });
+      st.boxLocal = '';
+      st.notice = 'Address created. Mail to it now lands in the inbox.';
+    } catch (e) { st.error = e.message; }
+    st.busy = ''; load();
+  };
+  const verify = async (d) => {
+    st.error = null; st.notice = null; st.busy = 'verify-' + d.id; renderApp();
+    try {
+      const r = await API.post('/private-email/domains/' + d.id + '/verify', {});
+      const ok = !!(r && r.verified);
+      st.notice = ok ? 'Your records are live — this domain receives mail now.' : 'Not verified yet: the records are not visible in DNS.';
+    } catch (e) { st.error = e.message; }
+    st.busy = ''; load();
+  };
+  const showRecords = async (d) => {
+    st.error = null;
+    try {
+      const r = await API.get('/private-email/domains/' + d.id + '/records');
+      st.records = { domain: d.domain, groups: (r && r.groups) || [], verified: !!(r && r.verified) };
+    } catch (e) { st.error = e.message; }
+    renderApp();
+  };
+
+  const verified = st.domains.filter(d => d.verified);
+  const pick = verified.length ? verified : st.domains;
+
+  return html`<div>
+    <h2 class="text-xl font-bold mb-1">Inbox</h2>
+    <p class="text-sm text-gray-500 mb-4">Your own addresses on your own domain. Reading and answering happens in the mail client — it is the same account, so there is nothing to sign in to twice.</p>
+    <div class="card">
+      <a class="btn" id="inbox-open-client" href=${MAIL_HOST} target="_blank" rel="noopener" style="text-decoration:none;display:inline-block">Open the mail client</a>
+      <span class="text-sm text-gray-500" style="margin-left:12px">${MAIL_HOST.replace('https://', '')}</span>
+    </div>
+    ${st.error && html`<div class="card" id="inbox-error" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" id="inbox-notice" style="border-left:4px solid #059669"><p class="text-sm">${st.notice}</p></div>`}
+
+    <div class="card p-0 overflow-hidden">
+      <div style="padding:16px 16px 4px"><h3 class="text-base font-bold">Your domains</h3>
+        <p class="text-sm text-gray-500" style="margin:4px 0 0">Add the domain you already own. We print the exact records to paste at your DNS provider, and until they verify the addresses below cannot receive mail.</p></div>
+      <table class="table"><thead><tr><th>Domain</th><th>State</th><th></th></tr></thead>
+        <tbody>
+          ${st.domains.length === 0 && html`<tr><td colspan="3" class="text-gray-500">No domain yet — add the one you own below.</td></tr>`}
+          ${st.domains.map(d => html`<tr>
+            <td class="font-medium">${d.domain}</td>
+            <td>${d.verified ? html`<span class="badge badge-green">Receiving</span>` : html`<span class="badge badge-yellow">Waiting for your records</span>`}</td>
+            <td class="text-right" style="white-space:nowrap">
+              <button type="button" class="btn btn-sm btn-outline" id=${'dom-records-' + d.id} onClick=${() => showRecords(d)}>Show records</button>
+              <button type="button" class="btn btn-sm btn-outline" id=${'dom-verify-' + d.id} disabled=${st.busy === 'verify-' + d.id} onClick=${() => verify(d)}>${st.busy === 'verify-' + d.id ? 'Checking…' : 'Check again'}</button>
+            </td>
+          </tr>`)}
+        </tbody></table>
+      <div style="padding:16px">
+        <div class="flex gap-2 items-end flex-wrap">
+          <div style="flex:1;min-width:200px"><label class="text-sm font-medium" for="dom-name">Your domain</label>
+            <input id="dom-name" class="input" maxlength="255" placeholder="yourbusiness.com" value=${st.domName || ''} onInput=${e => { st.domName = e.target.value; }} /></div>
+          <div style="flex:1;min-width:220px"><label class="text-sm font-medium" for="dom-key">Mailgun API key (stored encrypted)</label>
+            <input id="dom-key" type="password" class="input" maxlength="200" placeholder="key-…" value=${st.domKey || ''} onInput=${e => { st.domKey = e.target.value; }} /></div>
+          <button type="button" id="dom-add" class="btn" disabled=${st.busy === 'domain'} onClick=${addDomain}>${st.busy === 'domain' ? 'Adding…' : 'Add domain'}</button>
+        </div>
+      </div>
+    </div>
+
+    ${st.records && html`<div class="card" id="dom-records" style="border-left:4px solid #2563eb">
+      <h3 class="text-base font-bold mb-1">Records for ${st.records.domain}</h3>
+      <p class="text-sm text-gray-500 mb-3">Paste each line at your DNS provider exactly as shown, then press Check again on the domain.</p>
+      ${st.records.groups.map(g => html`<div style="margin-top:10px">
+        <p class="text-sm font-medium">${g.title}</p>
+        ${(g.records || []).map(r => html`<div style="display:grid;grid-template-columns:70px 1fr 1fr;gap:10px;padding:6px 0;border-bottom:1px solid #eef2f7">
+          <strong>${r.type || ''}</strong><span class="text-sm text-gray-600" style="word-break:break-all">${r.name || ''}</span><span class="text-sm text-gray-600" style="word-break:break-all">${String(r.value == null ? '' : r.value)}</span>
+        </div>`)}
+      </div>`)}
+      <button type="button" class="btn btn-outline btn-sm" style="margin-top:10px" onClick=${() => { st.records = null; renderApp(); }}>Hide records</button>
+    </div>`}
+
+    <div class="card p-0 overflow-hidden">
+      <div style="padding:16px 16px 4px"><h3 class="text-base font-bold">Your addresses</h3>
+        <p class="text-sm text-gray-500" style="margin:4px 0 0">Every address the inbox receives on. A plan limit is enforced by the server, and its refusal is the sentence shown above — never a dead button.</p></div>
+      <table class="table"><thead><tr><th>Address</th><th>Status</th></tr></thead>
+        <tbody>
+          ${st.boxes.length === 0 && html`<tr><td colspan="2" class="text-gray-500">No address yet — create the first one below.</td></tr>`}
+          ${st.boxes.map(b => html`<tr><td class="font-medium">${b.email_address}</td><td><span class="badge badge-gray">${b.status || ''}</span></td></tr>`)}
+        </tbody></table>
+      <div style="padding:16px">
+        <div class="flex gap-2 items-end flex-wrap">
+          <div style="flex:1;min-width:180px"><label class="text-sm font-medium" for="box-domain">On domain</label>
+            <select id="box-domain" class="input" value=${st.domainId || (pick[0] && pick[0].id) || ''} onChange=${e => { st.domainId = e.target.value; }}>
+              ${pick.map(d => html`<option value=${d.id}>${d.domain}</option>`)}
+            </select></div>
+          <div style="flex:1;min-width:140px"><label class="text-sm font-medium" for="box-local">Address</label>
+            <input id="box-local" class="input" maxlength="64" placeholder="info" value=${st.boxLocal || ''} onInput=${e => { st.boxLocal = e.target.value; }} /></div>
+          <button type="button" id="box-add" class="btn" disabled=${st.busy === 'box' || !pick.length} onClick=${() => addBox(st.domainId || (pick[0] && pick[0].id))}>${st.busy === 'box' ? 'Creating…' : 'Create address'}</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-0 overflow-hidden">
+      <div style="padding:16px 16px 4px"><h3 class="text-base font-bold">Recent mail</h3>
+        <p class="text-sm text-gray-500" style="margin:4px 0 0">The newest messages that arrived at any of your addresses. Reading the whole thread happens in the mail client.</p></div>
+      <table class="table"><thead><tr><th>Subject</th><th>From</th><th>To</th><th>Received</th></tr></thead>
+        <tbody>
+          ${st.messages.length === 0 && html`<tr><td colspan="4" class="text-gray-500">Nothing has arrived yet. Mail to any address above appears here.</td></tr>`}
+          ${st.messages.map(m => html`<tr>
+            <td class="font-medium">${m.subject || '(no subject)'}</td>
+            <td class="text-gray-600">${m.from_address || ''}</td>
+            <td class="text-gray-600">${m.address || ''}</td>
+            <td class="text-gray-500">${m.received_at ? utcDate(m.received_at) : ''}</td>
+          </tr>`)}
+        </tbody></table>
+    </div>
+  </div>`;
+};
+
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
@@ -2723,13 +2970,15 @@ const App = () => {
     { id: 'contacts', label: 'Contacts', icon: '👥' },
     { id: 'lists', label: 'Lists', icon: '🗂️' },
     { id: 'tickets', label: 'Tickets', icon: '🎫' },
+    { id: 'inbox', label: 'Inbox', icon: '📬' },
+    { id: 'workspaces', label: 'Workspaces', icon: '🗂️' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'team', label: 'Your team', icon: '🤝' },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, inbox: Inbox, workspaces: Workspaces, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">

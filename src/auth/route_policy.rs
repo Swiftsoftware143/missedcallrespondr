@@ -29,12 +29,12 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   140 mounted `.route(..)` entries in the one routing file, 140 distinct paths (every path is
+//!   141 mounted `.route(..)` entries in the one routing file, 141 distinct paths (every path is
 //!       mounted once; `:id`-style templates make each one unique)
 //!
-//!   121 entries reach `protected_routes`, which carries `auth_middleware`
-//!    19 entries reach the ANONYMOUS `public_routes`:
-//!        16 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   122 entries reach `protected_routes`, which carries `auth_middleware`
+//!    20 entries reach the ANONYMOUS `public_routes`:
+//!        17 deliberate public routes  (this module's PUBLIC_ROUTES)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -175,6 +175,13 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // the body-read deadline.
     "/api/v1/webhooks/stripe",
     "/api/v1/webhooks/paypal",
+    // --- the mail provider's delivery receiver (kanban t_44028656) ------------------------------
+    // Mailgun posts a delivery here with no session; the credential is the per-domain signing key
+    // the handler verifies over the raw body (`timestamp`+`token`+`signature`). A domain with no
+    // key configured accepts nothing, so an unconfigured address is refused rather than trusted.
+    // It reads a raw body before it can verify anything, which is why it is also mounted with the
+    // body-read deadline (the public router's own `route_layer`).
+    "/api/v1/webhooks/mailgun/inbound",
     // --- public checkout-session polling -------------------------------------------------------
     // `get_checkout_session_public` reads one session by its UUID (unguessable) and returns the
     // status summary the post-checkout page shows. Read-only, and no tenant scope is decided here.
@@ -531,18 +538,16 @@ mod tests {
     /// from the code without a test failing.
     #[test]
     fn the_census_shape_is_what_the_docs_say() {
-        // Pin RE-MEASURED 2026-11-07: the anonymous lists hold 16 + 3 = 19 (two deliberate
-        // public mounts landed without moving this pin, so the suite has been red since the first
-        // of them), and the route table holds 139 entries / 139 distinct paths, not 137. These are
-        // the measured values of the constants and of `src/routes.rs`; no route was changed.
-        assert_eq!(super::PUBLIC_ROUTES.len(), 16, "PUBLIC_ROUTES size");
+        // Pin RE-MEASURED 2026-11-12 (kanban t_44028656): PUBLIC_ROUTES holds 16 + 1 = 17 — the
+        // mail provider's delivery receiver joined the four account/entry routes and the payment
+        // receivers below — and the route table holds 141 entries / 141 distinct paths (140 at
+        // HEAD plus that one mount).
+        assert_eq!(super::PUBLIC_ROUTES.len(), 17, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
-        // The 17 anonymous mounts the census found: 14 deliberate + 3 key receivers.
-        // (`GET /api/v1/public/plans` joined on 2026-10-30 — the marketing site's price list, so
-        // PUBLIC_ROUTES went 13 → 14 and the anonymous total 16 → 17.)
+        // The 20 anonymous mounts: 17 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            19
+            20
         );
         // 135 entries / 135 distinct paths (the "sign out every other device" door
         // `POST /api/v1/auth/logout-all` joined on 2026-11-01 — a PROTECTED mount beside
@@ -598,11 +603,11 @@ mod tests {
         // `POST /api/v1/admin/tenants/:id/suspension` joined on 2026-11-01 — a PROTECTED
         // `/api/v1/admin/*` mount like the rest of that block, so both anonymous lists are
         // untouched; before it, 135 entries / 135 distinct paths).
-        assert_eq!(lits.len(), 140, "mounted .route entries");
+        assert_eq!(lits.len(), 141, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 140, "distinct mounted paths");
+        assert_eq!(uniq.len(), 141, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

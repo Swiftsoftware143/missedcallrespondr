@@ -17,10 +17,16 @@ mod models;
 // (`X-Swift-Harness`, kanban t_4a744754) — see `probe_harness`.
 mod probe_harness;
 mod probe_sweep;
+// The workspace model and the multi-address private inbox, ported from ADASwift/CoreSwift
+// (kanban t_44028656).
+mod module_registry;
+mod private_email;
 mod routes;
+mod secret_box;
 mod security;
 mod state;
 mod validation;
+mod workspaces;
 
 use std::net::SocketAddr;
 #[tokio::main]

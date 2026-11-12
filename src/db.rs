@@ -418,6 +418,28 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000049_email_send_log_subject",
             include_str!("../migrations/000049_email_send_log_subject.sql"),
         ),
+        // The workspace model and the multi-address private inbox (kanban t_44028656), ported from
+        // ADASwift/CoreSwift. BOTH files are fully idempotent (`CREATE TABLE IF NOT EXISTS`,
+        // `CREATE OR REPLACE FUNCTION`, `DROP TRIGGER IF EXISTS`, NOT EXISTS-guarded backfills)
+        // because this runner re-executes every entry on EVERY boot with no ledger — see the header
+        // of `000050`. `sqlx::raw_sql` sends the whole file as one statement, so the semicolons
+        // inside comments are harmless here.
+        (
+            "000050_workspaces_and_private_inbox",
+            include_str!("../migrations/000050_workspaces_and_private_inbox.sql"),
+        ),
+        (
+            "000051_workspace_on_tenant_insert",
+            include_str!("../migrations/000051_workspace_on_tenant_insert.sql"),
+        ),
+        // The column the ported code needs and 000050 does not create (`api_key_id`, the optional
+        // pointer at a saved provider credential). Without it a domain row cannot be read or
+        // inserted at all — see the file's header for the two failures it caused on ADASwift.
+        // Additive and idempotent (`ADD COLUMN IF NOT EXISTS`), like every entry above.
+        (
+            "000052_domain_api_key_id",
+            include_str!("../migrations/000052_domain_api_key_id.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

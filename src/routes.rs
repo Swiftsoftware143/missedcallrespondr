@@ -141,6 +141,18 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/webhooks/paypal",
             post(checkout_handler::paypal_webhook),
         )
+        // ── Mailgun inbound delivery (kanban t_44028656, ported from ADASwift/CoreSwift) ──────
+        // ANONYMOUS BY NECESSITY: the provider posts here with no session; the credential is the
+        // per-domain signing key the handler verifies over the raw body. A domain with no key
+        // configured accepts nothing, so an unconfigured address is refused rather than trusted.
+        // The 25 MB limit is set on this ONE route: an attached message arrives as multipart with
+        // the file's bytes, and axum's 2 MB default would refuse it before the handler ran. The
+        // body-read deadline is already applied to this whole public router below.
+        .route("/api/v1/webhooks/mailgun/inbound", {
+            let with_limit: axum::routing::MethodRouter<crate::state::AppState> =
+                post(crate::private_email::webhook_handler::inbound_webhook);
+            with_limit.layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024))
+        })
         // Thank-you page lookup (public, id-scoped, non-sensitive summary)
         .route(
             "/api/v1/checkout/session/:id",
@@ -175,6 +187,17 @@ pub fn create_router(state: AppState) -> Router {
 
     // ── Protected routes (auth required) ──
     let protected_routes = Router::new()
+        // ── Workspaces and the private inbox (kanban t_44028656, ported from ADASwift) ──────
+        // Two sub-routers, each carrying this app's own auth middleware, nested here so every path
+        // stays inside the one credential boundary the merged router applies.
+        .nest(
+            "/api/v1/workspaces",
+            crate::workspaces::router(state.clone()),
+        )
+        .nest(
+            "/api/v1/private-email",
+            crate::private_email::router(state.clone()),
+        )
         .route("/api/v1/auth/me", get(auth_handlers::me))
         .route("/api/v1/me/usage", get(auth_handlers::get_usage))
         // The TENANT-facing plan catalogue (kanban t_a57ae7db). The console could see its own

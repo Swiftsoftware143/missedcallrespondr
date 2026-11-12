@@ -58,6 +58,61 @@ pub enum AppError {
     TooManyAttempts {
         retry_after_secs: u64,
     },
+    // ── Variants the ported private-inbox + workspaces module brings with it (kanban
+    // t_44028656). They are the ADASwift/CoreSwift spellings of answers this file already gives
+    // under other names, added because ~150 call sites in that module name them directly, and
+    // rewriting those sites would be churn in code that is otherwise byte-for-byte the proven
+    // original. Each maps onto a status this app already uses elsewhere:
+    /// 409 — the row already exists (a duplicate workspace name, a mailbox already provisioned).
+    Duplicate(String),
+    /// 422 — well-formed input that names something impossible (a colour that is not a colour).
+    /// Distinct from [`AppError::Unprocessable`] only in provenance: this is the ported module's
+    /// spelling of the same status.
+    Validation(String),
+    /// 401 that carries the server's own sentence, safe to show because it names a missing or
+    /// expired credential the caller already holds. Same status as [`AppError::Unauthorized`].
+    UnauthorizedReason(String),
+    /// 500 from a database failure, logged in full and answered generically — byte-identical in
+    /// behaviour to the [`From<sqlx::Error>`] mapping below, which is what every other handler
+    /// uses. The ported module writes `map_err(AppError::Database)` explicitly.
+    Database(sqlx::Error),
+}
+
+/// The ported private-inbox module's spelling of `Result<T, AppError>` (kanban t_44028656).
+/// Every handler in this app returns the same thing; the alias exists because that module was
+/// written against it.
+pub type ApiResult<T> = Result<T, AppError>;
+
+/// A one-line rendering of the refusal, for logs only (kanban t_44028656).
+///
+/// It is deliberately the same sentence the client is given and NEVER a wrapped driver error: a
+/// `Database` variant prints the generic text and its detail goes to the log at the point the error
+/// is created. Code that needs the message for a body should keep matching on the variant (see
+/// `handlers::admin_handler::refusal_message`), which is why this impl exists for `tracing` and not
+/// as a second source of truth.
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::BadRequest(m)
+            | AppError::Unauthorized(m)
+            | AppError::Duplicate(m)
+            | AppError::Validation(m)
+            | AppError::UnauthorizedReason(m)
+            | AppError::Forbidden(m)
+            | AppError::NotFound(m)
+            | AppError::Internal(m)
+            | AppError::Conflict(m)
+            | AppError::UpgradeRequired(m)
+            | AppError::PayloadTooLarge(m)
+            | AppError::Unprocessable(m)
+            | AppError::ServiceUnavailable(m)
+            | AppError::UpstreamRefused(m) => f.write_str(m),
+            AppError::Database(e) => write!(f, "Database error: {e}"),
+            AppError::TooManyAttempts { retry_after_secs } => {
+                write!(f, "too many failed sign-in attempts ({retry_after_secs}s)")
+            }
+        }
+    }
 }
 
 impl IntoResponse for AppError {
@@ -78,6 +133,16 @@ impl IntoResponse for AppError {
             AppError::UpgradeRequired(msg) => (StatusCode::PAYMENT_REQUIRED, msg),
             AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
             AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
+            AppError::Duplicate(msg) => (StatusCode::CONFLICT, msg),
+            AppError::Validation(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
+            AppError::UnauthorizedReason(msg) => (StatusCode::UNAUTHORIZED, msg),
+            AppError::Database(e) => {
+                tracing::error!("Database error: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            }
             AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             AppError::UpstreamRefused(msg) => (StatusCode::FAILED_DEPENDENCY, msg),
             AppError::TooManyAttempts { retry_after_secs } => {

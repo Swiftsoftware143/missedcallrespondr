@@ -48,6 +48,13 @@ pub const APP_NAME: &str = "MissedCall Respondr";
 /// The public origin a mail client resolves a relative logo path against.
 pub const APP_URL: &str = "https://app.missedcallrespondr.com";
 
+/// The mail client's own front door — the private inbox's host (kanban t_44028656).
+///
+/// Every link a storage or inbox notice points at resolves to this ONE host, so a second copy of
+/// the address can never appear in a mail. Served by `/opt/swift/nginx/sites/mail-missedcall.conf`,
+/// which proxies `/api/` to this same container.
+pub const APP_URL_MAIL: &str = "https://inbox.missedcallrespondr.com";
+
 /// One account's email branding, as stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Branding {

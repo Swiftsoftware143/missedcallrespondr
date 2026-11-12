@@ -1,0 +1,617 @@
+use serde_json::Value;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use super::models::{PrivateEmailPlanFeatures, TenantEmailLimits};
+use crate::error::AppError;
+
+/// Sentinel for "no numeric cap configured".
+///
+/// The registry stores an unlimited limit as `limit_value = NULL` **with the feature enabled**
+/// (`enabled = false` means the plan does not get the feature at all). Every check below compares
+/// `count >= max`, so a very large number behaves exactly like SQL's `NULL` would.
+const UNLIMITED: i32 = i32::MAX;
+
+/// Fetch any tenant-specific email limit overrides (returns None if none set).
+pub async fn get_tenant_limits(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<Option<TenantEmailLimits>, AppError> {
+    sqlx::query_as::<_, TenantEmailLimits>("SELECT * FROM tenant_email_limits WHERE tenant_id = $1")
+        .bind(tenant_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::Database)
+}
+
+/// Plan features and limits for private email, resolved from the MODULE REGISTRY (CS-20/CS-26).
+///
+/// Returns `None` when the tenant's plan does not get the private-mailbox module at all.
+///
+/// The numeric limits used to be read out of `plans.features` JSON. That is why they fired for
+/// nobody: `tenant_email_limits` had 0 rows and no plan defined `max_domains` / `max_mailboxes`, so
+/// both numbers came back 0 and the "limit reached" branches were unreachable. They are DATA in the
+/// registry now (`module_features` where `kind='limit'`), which is the same table the admin panel
+/// edits — so a limit can be changed without a redeploy and without a hardcoded table.
+///
+/// `max_aliases_per_mailbox` and `catch_all_enabled` have no registry feature yet; they still come
+/// from the plan JSON exactly as before, so nothing about them changes here.
+pub async fn get_plan_features(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<Option<PrivateEmailPlanFeatures>, AppError> {
+    let module = crate::module_registry::resolve(pool, tenant_id, "private_email").await?;
+
+    // A tenant with NO active plan row resolves as ALLOWED at module level (deliberate legacy
+    // tolerance in module_registry). Private email was plan-gated before this change and stays
+    // gated: `no_plan` is not a plan, and treating it as one would hand every plan-less tenant
+    // unlimited domains — the opposite of enforcing the sold limits.
+    if !module.enabled || module.source == "no_plan" {
+        return Ok(None);
+    }
+
+    let max_domains = limit_for(pool, tenant_id, "email_domains").await?;
+    let max_mailboxes = limit_for(pool, tenant_id, "email_mailboxes").await?;
+    let legacy = legacy_alias_features(pool, tenant_id).await?;
+
+    Ok(Some(PrivateEmailPlanFeatures {
+        private_email: true,
+        max_domains,
+        max_mailboxes,
+        max_aliases_per_mailbox: legacy.max_aliases_per_mailbox,
+        catch_all_enabled: legacy.catch_all_enabled,
+    }))
+}
+
+/// One numeric limit from the registry: `enabled=false` -> 0 ("not available on your plan"),
+/// an enabled feature with no `limit_value` -> unlimited, otherwise the configured number.
+async fn limit_for(pool: &PgPool, tenant_id: Uuid, key: &str) -> Result<i32, AppError> {
+    let ent = crate::module_registry::resolve(pool, tenant_id, key).await?;
+    if !ent.enabled {
+        return Ok(0);
+    }
+    Ok(match ent.limit_value {
+        None => UNLIMITED,
+        Some(v) if v <= 0.0 => 0,
+        Some(v) => v.min(i32::MAX as f64) as i32,
+    })
+}
+
+/// The two spellings `catch_all` is stored under: `catch_all` is what the live `plans.features`
+/// rows carry, `catch_all_enabled` is this module's own field name (and what an override may have
+/// been written with).
+const CATCH_ALL_KEYS: &[&str] = &["catch_all", "catch_all_enabled"];
+
+/// The CHEAPEST ACTIVE plan that actually sells catch-all — name and monthly price — read from the
+/// plan catalogue, never a hardcoded tier name (kanban t_f2234ffa).
+///
+/// WHY THIS IS DATA, NOT COPY. The refusal that names this plan used to hardcode `Professional`.
+/// Before that it said `Pro`. Both are the same defect seen twice: a tier name in a sentence
+/// drifts from the catalogue the moment a plan is re-priced, renamed, given the feature or
+/// deactivated. Measured on this install 2026-11-11: `pro` still carries `features.catch_all =
+/// true` but its `plans.is_active` is **false** (deactivated 2026-11-10), so `Pro` is on no
+/// purchase screen while `Professional` ($79) is the cheapest plan a customer can actually buy
+/// that sells catch-all. Read here, the sentence follows `is_active`, the price and the feature
+/// flag together, so reactivating Pro makes the message say "Pro ($29)" with no redeploy.
+///
+/// The feature is read out of `plans.features` under BOTH spellings `json_bool` accepts, because
+/// that is exactly the blob `legacy_alias_features` — the gate this sentence describes — grants
+/// from. The plan must also carry the `private_email` module, or the switch would still be refused
+/// on it, and naming it would be a second lie.
+pub async fn catch_all_unlock_plan(pool: &PgPool) -> Result<Option<(String, f64)>, AppError> {
+    let rows: Vec<(String, f64, Value)> = sqlx::query_as(
+        r#"
+        SELECT p.name, p.price_monthly::float8, p.features
+          FROM plans p
+         WHERE p.is_active
+           AND EXISTS (
+                 SELECT 1 FROM plan_modules pm
+                   JOIN modules m ON m.id = pm.module_id
+                  WHERE pm.plan_id = p.id AND m.key = 'private_email' AND pm.enabled
+               )
+         ORDER BY p.price_monthly ASC, p.sort_order ASC NULLS LAST, p.name ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+    Ok(cheapest_catch_all(&rows))
+}
+
+/// The pure half of `catch_all_unlock_plan`: first row — the caller orders cheapest-first — whose
+/// features blob SELLS catch-all. Separate so the choice is testable without a database, which is
+/// where every previous version of this string went wrong unobserved.
+fn cheapest_catch_all(rows: &[(String, f64, Value)]) -> Option<(String, f64)> {
+    rows.iter()
+        .find(|(_, _, features)| json_bool(features, CATCH_ALL_KEYS) == Some(true))
+        .map(|(name, price, _)| (name.clone(), *price))
+}
+
+/// `79` for a whole-dollar price, `29.50` when a tier is not — never `79.000000`.
+fn price_label(price: f64) -> String {
+    if (price - price.round()).abs() < 0.005 {
+        format!("{:.0}", price)
+    } else {
+        format!("{:.2}", price)
+    }
+}
+
+/// The door to catch-all, as an English clause that can be dropped into any sentence:
+/// `the Professional plan ($79/month)`. Built from the catalogue above so no surface can drift.
+///
+/// The two fallbacks are deliberately different facts: "no plan sells it" is a catalogue answer
+/// (an operator has withdrawn the feature), while a failed read is NOT an answer and must not be
+/// printed as one — it points at the upgrade screen, which lists every plan and its price.
+pub async fn catch_all_upgrade_clause(pool: &PgPool) -> String {
+    match catch_all_unlock_plan(pool).await {
+        Ok(Some((name, price))) => format!("the {} plan (${}/month)", name, price_label(price)),
+        Ok(None) => "a plan that includes it — contact support and we will enable it".to_string(),
+        Err(_) => "a higher plan — open Upgrade to see what each plan includes".to_string(),
+    }
+}
+
+/// The 400 a workspace sees when its plan does not sell catch-all. One sentence, built from the
+/// catalogue, so the switch's refusal, the guide and the plan data cannot disagree.
+pub async fn catch_all_refusal(pool: &PgPool) -> String {
+    format!(
+        "Catch-all requires {} or higher.",
+        catch_all_upgrade_clause(pool).await
+    )
+}
+
+/// Read a boolean out of a plan/override JSON blob under ANY of `keys`; the first name PRESENT
+/// wins, so an override blob and a plan blob are read by the same helper.
+///
+/// BOTH shapes this schema writes are accepted: a bare boolean (`{"catch_all": true}`, what every
+/// live `plans.features` row carries) and the registry's object form
+/// (`{"catch_all": {"enabled": true}}`, the shape `module_registry::override_value` reads out of
+/// `tenant_plans.feature_overrides`). Reading only one shape is the defect this replaces: a
+/// `#[derive(Deserialize)]` struct matched ONE spelling and answered `false` for every other one,
+/// silently. Measured live 2026-11-11 (kanban t_3b954854): the paid tiers that sell catch-all
+/// (`professional`, `agency`, `enterprise`) carry `"catch_all": true`, while
+/// `PrivateEmailPlanFeatures::catch_all_enabled` only ever looked for `catch_all_enabled` — so the
+/// deserialise answered `false` for EVERY tenant and `PATCH /api/private-email/domains/<id>` was
+/// refused with 400 "Catch-all requires Pro plan or higher" (that copy named an inactive tier; the
+/// sentence is now read from the plan catalogue — see `catch_all_unlock_plan`) for owners, agency
+/// impersonated sessions alike. The three live domains only carried `catch_all_enabled = true`
+/// because that column had been written by direct SQL, i.e. no shipped surface could produce the
+/// state the rows were in.
+fn json_bool(v: &Value, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|k| {
+        let x = v.get(*k)?;
+        x.as_bool()
+            .or_else(|| x.get("enabled").and_then(|e| e.as_bool()))
+    })
+}
+
+/// Read an integer out of a plan/override JSON blob under ANY of `keys`, same "first present wins"
+/// rule and the same two shapes as `json_bool` (`25` or `{"limit_value": 25}`).
+///
+/// The SIGN is preserved on purpose: `-1` is this schema's established spelling for "unlimited"
+/// (`plans.features.max_users` and friends, migration 064) and the read this replaces kept it, so
+/// clamping negatives to 0 would silently turn "unlimited aliases" into "no aliases".
+fn json_i32(v: &Value, keys: &[&str]) -> Option<i32> {
+    keys.iter().find_map(|k| {
+        let x = v.get(*k)?;
+        let n = x.as_i64().or_else(|| {
+            x.get("limit_value")
+                .and_then(|l| l.as_i64().or_else(|| l.as_f64().map(|f| f.floor() as i64)))
+        })?;
+        Some(n.clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+    })
+}
+
+/// The two keys that have no registry feature yet (`catch_all`, `max_aliases_per_mailbox`),
+/// resolved from one plan's `features` blob and one tenant's `feature_overrides` blob.
+///
+/// Pure on purpose: this mapping — plan JSON key to feature flag — is exactly what was broken, so it
+/// has to be testable without a database. Most specific first, the order
+/// `module_registry::resolve` documents: an explicit per-tenant override outranks the plan, and an
+/// absent key at both levels means the defaults (false / 0), never "yes".
+fn pre_registry_features(plan: &Value, overrides: &Value) -> (bool, i32) {
+    let catch_all = json_bool(overrides, CATCH_ALL_KEYS)
+        .or_else(|| json_bool(plan, CATCH_ALL_KEYS))
+        .unwrap_or(false);
+    let max_aliases = json_i32(overrides, &["max_aliases_per_mailbox"])
+        .or_else(|| json_i32(plan, &["max_aliases_per_mailbox"]))
+        .unwrap_or(0);
+    (catch_all, max_aliases)
+}
+
+/// The two keys that have no registry feature yet: `catch_all` and `max_aliases_per_mailbox`.
+///
+/// Read from `tenant_plans.feature_overrides` and then the tenant's ACTIVE plan, through
+/// `pre_registry_features`. The override arm exists because that column is the operator's instrument
+/// for one tenant: this app's admin override route only accepts keys registered in `modules` /
+/// `module_features`, and neither of these two is, so an override for them arrives by a direct row
+/// write — which is exactly what the catch-all workaround used to be. It now parses as an override
+/// instead of being the only way to get the behaviour.
+///
+/// The tenant is the ACCOUNT the caller's token points at (`claims.aid`), for every role: this
+/// function takes an id and never a token, so an impersonation session (`role = "impersonated"`,
+/// `aid` = the target workspace) resolves exactly the plan that workspace's own owner resolves.
+async fn legacy_alias_features(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<PrivateEmailPlanFeatures, AppError> {
+    let row = sqlx::query_as::<_, (Value, Value)>(
+        r#"
+        SELECT p.features, COALESCE(tp.feature_overrides, '{}'::jsonb)
+        FROM tenant_plans tp
+        JOIN plans p ON p.id = tp.plan_id
+        WHERE tp.tenant_id = $1 AND tp.status = 'active'
+        LIMIT 1
+        "#,
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let Some((features, overrides)) = row else {
+        return Ok(PrivateEmailPlanFeatures::default());
+    };
+
+    let (catch_all, max_aliases) = pre_registry_features(&features, &overrides);
+
+    Ok(PrivateEmailPlanFeatures {
+        private_email: true,
+        // Owned by the registry (`limit_for` above) on purpose: `plans.features` also carries
+        // `max_users`/`max_contacts`-style numbers, and reading domain/mailbox ceilings from here
+        // would create the second source of truth this module was cleaned of (CS-25/CS-26).
+        max_domains: 0,
+        max_mailboxes: 0,
+        max_aliases_per_mailbox: max_aliases,
+        catch_all_enabled: catch_all,
+    })
+}
+
+#[cfg(test)]
+mod plan_feature_key_tests {
+    use super::{catch_all_effective, json_bool, json_i32, pre_registry_features};
+    use serde_json::json;
+
+    /// The defect this guard exists for (kanban t_3b954854): the plans table stores `catch_all`, the
+    /// Rust struct names the field `catch_all_enabled`, and a derive-based read answered `false` for
+    /// every paid tenant. The PRODUCTION composition is what is asserted here, so dropping either
+    /// spelling from the call site fails this test.
+    #[test]
+    fn the_plan_key_that_is_sold_grants_catch_all() {
+        assert!(pre_registry_features(&json!({"catch_all": true}), &json!({})).0);
+        assert!(pre_registry_features(&json!({"catch_all_enabled": true}), &json!({})).0);
+        // A plan that does not sell it stays refused: absent is not "yes".
+        assert!(!pre_registry_features(&json!({"max_users": 3}), &json!({})).0);
+        assert!(!pre_registry_features(&json!({"catch_all": false}), &json!({})).0);
+    }
+
+    /// Both shapes are honoured: a bare boolean and the registry's `{enabled}` object.
+    #[test]
+    fn both_json_shapes_are_read() {
+        assert_eq!(
+            json_bool(&json!({"catch_all": true}), &["catch_all"]),
+            Some(true)
+        );
+        assert_eq!(
+            json_bool(&json!({"catch_all": {"enabled": true}}), &["catch_all"]),
+            Some(true)
+        );
+        assert_eq!(
+            json_i32(
+                &json!({"max_aliases_per_mailbox": {"limit_value": 25}}),
+                &["max_aliases_per_mailbox"]
+            ),
+            Some(25)
+        );
+    }
+
+    /// An explicit per-tenant override is the most specific answer and is read first — in either
+    /// direction, because a `false` override is a real answer and not a missing one.
+    #[test]
+    fn an_override_outranks_the_plan_blob() {
+        assert!(pre_registry_features(&json!({"catch_all": false}), &json!({"catch_all": true})).0);
+        assert!(
+            !pre_registry_features(&json!({"catch_all": true}), &json!({"catch_all": false})).0
+        );
+    }
+
+    /// The refusal that names a plan is read from the catalogue, not typed (kanban t_f2234ffa).
+    /// Rows arrive cheapest-first; the FIRST row that sells catch-all is the one named, and a plan
+    /// whose blob does not sell it — however cheap — is skipped. Both JSON shapes count, because the
+    /// gate itself reads both. This is the defect's own regression test: hardcoding a tier name here
+    /// makes the test fail the moment the catalogue order or the active set changes.
+    #[test]
+    fn the_named_plan_is_the_cheapest_one_that_sells_it() {
+        use super::cheapest_catch_all;
+        use serde_json::json;
+        let rows = vec![
+            ("Free".to_string(), 0.0, json!({})),
+            ("Starter".to_string(), 29.0, json!({"max_users": 3})),
+            ("Professional".to_string(), 79.0, json!({"catch_all": true})),
+            (
+                "Enterprise".to_string(),
+                119.0,
+                json!({"catch_all": {"enabled": true}}),
+            ),
+        ];
+        assert_eq!(
+            cheapest_catch_all(&rows),
+            Some(("Professional".to_string(), 79.0))
+        );
+
+        // A cheaper plan that sells it WINS — this is what stops the sentence over-selling a tier.
+        let with_cheaper = vec![
+            ("Starter".to_string(), 29.0, json!({})),
+            ("Pro".to_string(), 29.0, json!({"catch_all": true})),
+            ("Professional".to_string(), 79.0, json!({"catch_all": true})),
+        ];
+        assert_eq!(
+            cheapest_catch_all(&with_cheaper),
+            Some(("Pro".to_string(), 29.0))
+        );
+
+        // A withdrawn feature is a catalogue answer, not a crash and not a guess.
+        let none = vec![("Starter".to_string(), 29.0, json!({"catch_all": false}))];
+        assert_eq!(cheapest_catch_all(&none), None);
+    }
+
+    /// Prices print as a customer reads them: `$79` and `$29.50`, never `$79.000000`.
+    #[test]
+    fn prices_are_printed_as_money() {
+        use super::price_label;
+        assert_eq!(price_label(79.0), "79");
+        assert_eq!(price_label(29.5), "29.50");
+        assert_eq!(price_label(0.0), "0");
+    }
+
+    /// `-1` is this schema's "unlimited"; it must survive the read (0 is "not included").
+    #[test]
+    fn unlimited_survives_and_junk_does_not() {
+        assert_eq!(
+            pre_registry_features(&json!({"max_aliases_per_mailbox": -1}), &json!({})).1,
+            -1
+        );
+        assert_eq!(
+            pre_registry_features(&json!({"max_aliases_per_mailbox": "25"}), &json!({})).1,
+            0
+        );
+    }
+
+    /// The WITHDRAWAL arm (kanban t_6b54961b): a stored preference is only permission while the
+    /// plan still sells the feature. Asserting the four combinations on the DECISION the router
+    /// itself calls means a later "fix" that reads the column alone, or the plan alone, goes red
+    /// instead of silently re-opening the paid feature to a downgraded workspace.
+    #[test]
+    fn a_stored_preference_is_in_force_only_while_the_plan_sells_it() {
+        use super::{catch_all_route, CatchAllRoute};
+        // enabled on a plan that sells it -> delivered (the normal paid state)
+        assert_eq!(catch_all_route(true, true), CatchAllRoute::Route);
+        // enabled, then downgraded -> REFUSED (the defect this arm closes)
+        assert_eq!(catch_all_route(true, false), CatchAllRoute::Refuse);
+        // off, plan sells it -> refused (nothing was asked for)
+        assert_eq!(catch_all_route(false, true), CatchAllRoute::Refuse);
+        // off, plan does not sell it -> refused
+        assert_eq!(catch_all_route(false, false), CatchAllRoute::Refuse);
+        // and the boolean the reporting surfaces use is the same rule, not a second one
+        assert!(catch_all_effective(true, true));
+        assert!(!catch_all_effective(true, false));
+    }
+}
+
+/// Check if tenant has room for another domain.
+pub async fn check_domain_limit(pool: &PgPool, tenant_id: Uuid) -> Result<(), AppError> {
+    let features = get_plan_features(pool, tenant_id).await?.ok_or_else(|| {
+        AppError::UpgradeRequired(
+            "Private email is not available on your current plan. Upgrade to add your own \
+                 domain and mailboxes."
+                .into(),
+        )
+    })?;
+
+    // Check for admin override first
+    let max_domains = if let Some(limits) = get_tenant_limits(pool, tenant_id).await? {
+        limits.max_domains.unwrap_or(features.max_domains)
+    } else {
+        features.max_domains
+    };
+
+    if max_domains == 0 {
+        return Err(AppError::UpgradeRequired(
+            "Domain provisioning is not available on your plan. Upgrade to add a domain.".into(),
+        ));
+    }
+
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM private_email_domains WHERE tenant_id = $1")
+            .bind(tenant_id)
+            .fetch_one(pool)
+            .await
+            .map_err(AppError::Database)?;
+
+    if max_domains > 0 && count.0 >= max_domains as i64 {
+        return Err(AppError::UpgradeRequired(format!(
+            "Domain limit reached ({}/{}). Upgrade to add more domains.",
+            count.0, max_domains
+        )));
+    }
+
+    Ok(())
+}
+
+/// Check if tenant has room for another mailbox.
+pub async fn check_mailbox_limit(pool: &PgPool, tenant_id: Uuid) -> Result<(), AppError> {
+    let features = get_plan_features(pool, tenant_id).await?.ok_or_else(|| {
+        AppError::UpgradeRequired(
+            "Private email is not available on your current plan. Upgrade to add your own \
+                 domain and mailboxes."
+                .into(),
+        )
+    })?;
+
+    // Check for admin override first
+    let max_mailboxes = if let Some(limits) = get_tenant_limits(pool, tenant_id).await? {
+        limits.max_mailboxes.unwrap_or(features.max_mailboxes)
+    } else {
+        features.max_mailboxes
+    };
+
+    // The refusal names the door (David 2026-11-11): "Upgrade to create more mailboxes" tells a
+    // customer nothing about what to buy or what it costs. The next plan that actually carries MORE
+    // inboxes is read from the same registry the gate enforces, so the sentence can never promise an
+    // allowance the plan does not sell.
+    let next_plan = |current: i32| async move { next_mailbox_plan(pool, current).await };
+
+    if max_mailboxes == 0 {
+        let unlock = match next_plan(0).await {
+            Some((name, price, limit)) => format!(
+                "{} includes up to {} inboxes for ${:.0}/month.",
+                name, limit, price
+            ),
+            None => "Add an inbox plan to your account to use it.".to_string(),
+        };
+        return Err(AppError::UpgradeRequired(format!(
+            "Private email is not part of your current plan. {unlock}"
+        )));
+    }
+
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM private_email_boxes WHERE tenant_id = $1 AND status = 'active'",
+    )
+    .bind(tenant_id)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    if max_mailboxes > 0 && count.0 >= max_mailboxes as i64 {
+        let noun = if max_mailboxes == 1 {
+            "inbox"
+        } else {
+            "inboxes"
+        };
+        let detail = match next_plan(max_mailboxes).await {
+            Some((name, price, limit)) => format!(
+                "{} lifts that to {} inboxes for ${:.0}/month and you can add the next address right away.",
+                name, limit, price
+            ),
+            // Already on the largest allowance: the honest door is freeing a slot, not buying.
+            None => "You are on the largest inbox allowance, so free a slot by deleting an inbox you \
+                     no longer use."
+                .to_string(),
+        };
+        return Err(AppError::UpgradeRequired(format!(
+            "Your plan includes {} {} and all of them are in use. {} Nothing is charged and no mail \
+             is deleted either way.",
+            max_mailboxes, noun, detail
+        )));
+    }
+
+    Ok(())
+}
+
+/// The cheapest plan that carries MORE mailboxes than `current`, with its price and allowance.
+async fn next_mailbox_plan(pool: &PgPool, current: i32) -> Option<(String, f64, i32)> {
+    sqlx::query_as::<_, (String, f64, f64)>(
+        r#"
+        SELECT p.name, p.price_monthly::float8, pf.limit_value::float8
+          FROM plans p
+          JOIN plan_module_features pf ON pf.plan_id = p.id
+          JOIN module_features f ON f.id = pf.module_feature_id
+         WHERE f.key = 'email_mailboxes'
+           AND pf.enabled
+           -- Only a plan a customer can actually buy: naming an inactive plan in a refusal sends
+           -- them to a plan screen with no working payment page.
+           AND p.is_active
+           AND pf.limit_value IS NOT NULL
+           AND pf.limit_value > $1
+         ORDER BY p.price_monthly ASC NULLS LAST
+         LIMIT 1
+        "#,
+    )
+    .bind(current as f64)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|(name, price, limit)| (name, price, limit as i32))
+}
+
+pub async fn can_enable_catch_all(pool: &PgPool, tenant_id: Uuid) -> Result<bool, AppError> {
+    plan_catch_all(pool, tenant_id).await?.ok_or_else(|| {
+        AppError::UpgradeRequired(
+            "Private email is not available on your current plan. Upgrade to enable it.".into(),
+        )
+    })
+}
+
+/// Is catch-all IN FORCE for this tenant right now — asked where the mail is actually routed.
+///
+/// WHY THIS EXISTS (kanban t_6b54961b — the WITHDRAWAL arm). Catch-all is a paid entitlement, but
+/// it was only checked on the way IN: `can_enable_catch_all` guarded the PATCH that switches it on,
+/// while inbound routing keyed on the bare `private_email_domains.catch_all_enabled` column. A
+/// workspace that legitimately enabled catch-all on a plan that sells it and was then moved to
+/// free/starter (or downgraded) therefore kept accepting mail for every unmatched address, while a
+/// fresh PATCH on that same workspace was refused with 400 — the feature was sold, the withdrawal
+/// did not exist.
+///
+/// WHY THE PLAN IS ASKED AT THE POINT OF USE INSTEAD OF CLEARING THE COLUMN ON A PLAN CHANGE.
+/// There are three writers of `tenant_plans` today (`assign_tenant_plan`, `update_subscription`,
+/// `cancel_subscription`) and a fourth would silently miss the clear — and clearing the column also
+/// throws away the customer's own choice, so an upgrade could not restore what they had set. Asking
+/// the plan where the decision is made cannot be bypassed by any plan writer, and the column stays
+/// exactly what it is: the tenant's stored preference (`catch_all_effective` below is the only rule
+/// that reads it as permission).
+///
+/// It deliberately shares `plan_catch_all` with `can_enable_catch_all`, so the door that lets a
+/// tenant switch catch-all on and the router that lets mail in can never disagree about the plan.
+/// A tenant whose plan does not include private email at all answers `false` here (not an error):
+/// the receiver must refuse the delivery, and a paid-feature question is not a server fault.
+pub async fn catch_all_granted(pool: &PgPool, tenant_id: Uuid) -> Result<bool, AppError> {
+    Ok(plan_catch_all(pool, tenant_id).await?.unwrap_or(false))
+}
+
+/// The plan's own answer, `None` when the tenant's plan does not include private email at all.
+/// One expression, two callers: `can_enable_catch_all` (which turns `None` into the upgrade 400 the
+/// console prints verbatim) and `catch_all_granted` (which turns it into "not granted").
+///
+/// Reads exactly what `get_plan_features` reads for this ONE field — the private_email module is
+/// granted, and the plan/override blob sells catch-all — but skips the domain/mailbox limit lookups
+/// nothing here consumes. That matters because `catch_all_granted` sits on the UNAUTHENTICATED
+/// inbound path (a catch-all domain receives the most junk), where an extra query is paid per
+/// delivery before the signature is even checked. The answer is provably the same: both read
+/// `legacy_alias_features`, and both treat "this plan does not include private email" as not
+/// granted, which is what keeps the switch and the router agreeing.
+async fn plan_catch_all(pool: &PgPool, tenant_id: Uuid) -> Result<Option<bool>, AppError> {
+    let module = crate::module_registry::resolve(pool, tenant_id, "private_email").await?;
+    if !module.enabled || module.source == "no_plan" {
+        return Ok(None);
+    }
+    Ok(Some(
+        legacy_alias_features(pool, tenant_id)
+            .await?
+            .catch_all_enabled,
+    ))
+}
+
+/// The inbound router's decision, named as its own type so the seam is testable and the router
+/// cannot quietly go back to reading the stored column alone (kanban t_6b54961b).
+#[derive(Debug, PartialEq, Eq)]
+pub enum CatchAllRoute {
+    Route,
+    Refuse,
+}
+
+/// THE one rule: a stored catch-all preference is in force only while the plan still sells it.
+///
+/// Both the inbound router and the domain list apply this, so what the panel reports and what the
+/// mail path decides cannot drift (kanban t_6b54961b).
+pub fn catch_all_route(stored: bool, plan_sells: bool) -> CatchAllRoute {
+    if stored && plan_sells {
+        CatchAllRoute::Route
+    } else {
+        CatchAllRoute::Refuse
+    }
+}
+
+/// The same rule as a boolean, for the reporting surfaces (`true` = catch-all is in force).
+pub fn catch_all_effective(stored: bool, plan_sells: bool) -> bool {
+    catch_all_route(stored, plan_sells) == CatchAllRoute::Route
+}
