@@ -260,6 +260,7 @@ pub async fn impersonate(
         pwd_minted: false,
         exp: now + 900,
         iat: now,
+        wsid: None,
     };
 
     let token = create_token(&imp_claims, &state.config.jwt_secret)

@@ -2,11 +2,13 @@ use axum::{
     extract::{Path, State},
     Extension, Json,
 };
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::auth::models::create_token;
 use crate::config::Claims;
 use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
@@ -36,6 +38,30 @@ fn clean_name(raw: &str) -> Result<String, AppError> {
         ));
     }
     Ok(n.to_string())
+}
+
+/// May this session rename / delete / re-point the default workspace? The account owner
+/// (`account_owner`, the role signup mints), a tenant `company_admin`, and the platform operators
+/// (`admin` / `super_admin` / `agency_admin`). A plain member (`team_member`) may only switch and
+/// add — never rename, delete or change the default.
+fn may_manage(claims: &Claims) -> bool {
+    crate::auth::middleware::is_platform_admin(&claims.role)
+        || matches!(claims.role.as_str(), "account_owner" | "company_admin")
+}
+
+/// The portfolio businesses (ZaarHub, SwiftImpact, Giraudy Capital, SwiftSoftware) always keep
+/// their account, whatever their workspace count (David's standing rule: the sister companies
+/// always keep their account). Matched on the account's own name and slug.
+fn protected_marker(name: &str, slug: &str) -> Option<&'static str> {
+    const MARKERS: &[&str] = &[
+        "missedcall",
+        "swiftsoftware",
+        "swiftimpact",
+        "zaarhub",
+        "giraudy",
+    ];
+    let hay = format!("{name} {slug}").to_ascii_lowercase();
+    MARKERS.iter().copied().find(|m| hay.contains(m))
 }
 
 fn row_json(r: &sqlx::postgres::PgRow) -> serde_json::Value {
@@ -74,10 +100,9 @@ pub async fn create_workspace(
     let tid = tenant(&claims)?;
     let name = clean_name(&req.name)?;
 
-    // plan ceiling, when the plan states one
-    // Plan ceiling, when the plan states one. MissedCall Respondr sells its allowances in `plans.features`
-    // (JSONB) reached through `tenant_plans`; a plan that names no `max_workspaces` is uncapped,
-    // because a ceiling exists only where one was sold.
+    // Plan ceiling, when the plan states one. MissedCall Respondr sells its allowances in
+    // `plans.features` (JSONB) reached through `tenant_plans`; a plan that names no
+    // `max_workspaces` is uncapped, because a ceiling exists only where one was sold.
     let ceiling: Option<i64> = sqlx::query_scalar(
         "SELECT NULLIF(p.features->>'max_workspaces','')::bigint
            FROM tenant_plans tp
@@ -146,6 +171,11 @@ pub async fn rename_workspace(
     Json(req): Json<RenameWorkspace>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let tid = tenant(&claims)?;
+    if !may_manage(&claims) {
+        return Err(AppError::Forbidden(
+            "Only the workspace owner or an admin can rename a workspace.".into(),
+        ));
+    }
     let name = clean_name(&req.name)?;
 
     let dup: Option<Uuid> = sqlx::query_scalar(
@@ -185,6 +215,11 @@ pub async fn set_default_workspace(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let tid = tenant(&claims)?;
+    if !may_manage(&claims) {
+        return Err(AppError::Forbidden(
+            "Only the workspace owner or an admin can change the default workspace.".into(),
+        ));
+    }
 
     let exists: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 AND tenant_id = $2")
@@ -221,6 +256,27 @@ pub async fn delete_workspace(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let tid = tenant(&claims)?;
+    if !may_manage(&claims) {
+        return Err(AppError::Forbidden(
+            "Only the workspace owner or an admin can delete a workspace.".into(),
+        ));
+    }
+
+    // Portfolio businesses are never removed, whatever their workspace count (David's standing
+    // rule: the sister companies always keep their account). Matched on the account's own name and
+    // slug — the SAME marker set the tenant purge door uses.
+    let (tname, tslug): (String, String) =
+        sqlx::query_as("SELECT name, slug FROM tenants WHERE id = $1")
+            .bind(tid)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(AppError::Database)?
+            .ok_or_else(|| AppError::NotFound("Workspace not found.".into()))?;
+    if let Some(marker) = protected_marker(&tname, &tslug) {
+        return Err(AppError::Conflict(format!(
+            "This is a portfolio business ('{marker}') and its workspaces cannot be deleted."
+        )));
+    }
 
     let rows = sqlx::query("SELECT id, is_default FROM workspaces WHERE tenant_id = $1")
         .bind(tid)
@@ -239,6 +295,26 @@ pub async fn delete_workspace(
         .find(|r| r.get::<Uuid, _>("id") == id)
         .ok_or_else(|| AppError::NotFound("Workspace not found.".into()))?;
     let was_default = target.get::<bool, _>("is_default");
+
+    // Refuse deleting the workspace the caller is signed into: the session's `wsid`, or — for a
+    // token minted before the switcher shipped — the account's default. Deleting the floor you are
+    // standing on would strand the session; switch away first.
+    let signed_in = claims
+        .wsid
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .filter(|w| rows.iter().any(|r| r.get::<Uuid, _>("id") == *w))
+        .or_else(|| {
+            rows.iter()
+                .find(|r| r.get::<bool, _>("is_default"))
+                .map(|r| r.get::<Uuid, _>("id"))
+        });
+    if signed_in == Some(id) {
+        return Err(AppError::Conflict(
+            "You are signed into this workspace. Switch to a different workspace before deleting it."
+                .into(),
+        ));
+    }
 
     let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
     sqlx::query("DELETE FROM workspaces WHERE id = $1 AND tenant_id = $2")
@@ -262,4 +338,47 @@ pub async fn delete_workspace(
     tx.commit().await.map_err(AppError::Database)?;
 
     Ok(Json(json!({ "ok": true, "deleted": id })))
+}
+
+/// POST /api/workspaces/:id/switch — move this session's active workspace.
+///
+/// The switcher re-mints the session token with `wsid` set to the target workspace, reusing the
+/// SAME `create_token` the login/register handlers use — no second auth route. The caller may only
+/// switch to a workspace inside their OWN account (`aid`); any other id answers 404, so the door
+/// cannot leak which accounts exist. The session keeps its subject, role and account — only the
+/// workspace the console shows changes.
+pub async fn switch_workspace(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let tid = tenant(&claims)?;
+
+    let row =
+        sqlx::query("SELECT id, name, is_default FROM workspaces WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(tid)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(AppError::Database)?
+            .ok_or_else(|| AppError::NotFound("Workspace not found.".into()))?;
+
+    let now = Utc::now().timestamp() as usize;
+    let claims = Claims {
+        sub: claims.sub,
+        email: claims.email.clone(),
+        aid: claims.aid,
+        role: claims.role.clone(),
+        pwd_minted: false,
+        exp: now + 86400 * 7,
+        iat: now,
+        wsid: Some(id.to_string()),
+    };
+    let token = create_token(&claims, &state.config.jwt_secret)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(json!({
+        "token": token,
+        "workspace": row_json(&row),
+    })))
 }

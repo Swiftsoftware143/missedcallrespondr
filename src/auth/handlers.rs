@@ -224,6 +224,7 @@ pub async fn register(
         pwd_minted: minted_password && !credentials_emailed,
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
+        wsid: None,
     };
 
     let token = create_token(&claims, &state.config.jwt_secret)
@@ -359,6 +360,7 @@ pub async fn login(
         pwd_minted: false,
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
+        wsid: None,
     };
 
     let token = create_token(&claims, &state.config.jwt_secret)
@@ -582,6 +584,7 @@ pub async fn change_password(
         pwd_minted: false,
         exp: valid_from as usize + 86400 * 7,
         iat: valid_from as usize,
+        wsid: None,
     };
     let token = create_token(&fresh, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -638,6 +641,7 @@ pub async fn logout_all(
         pwd_minted: false,
         exp: now + 86400 * 7,
         iat: now,
+        wsid: None,
     };
     let token = create_token(&fresh, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;

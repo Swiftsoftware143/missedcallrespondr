@@ -186,6 +186,10 @@ pub struct Claims {
     pub pwd_minted: bool,
     pub exp: usize,
     pub iat: usize,
+    /// The workspace this session is working in (`workspaces.id`). `None` on a token minted before
+    /// the switcher shipped, or on an impersonation/API-key token. Switching re-mints with this set.
+    #[serde(default)]
+    pub wsid: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
