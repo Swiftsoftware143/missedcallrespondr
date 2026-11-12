@@ -330,6 +330,13 @@ pub fn create_router(state: AppState) -> Router {
             get(response_rule_handler::list_response_rules)
                 .post(response_rule_handler::create_response_rule),
         )
+        // "Would my rule answer this caller?" — a READ-ONLY evaluation of the live rules through
+        // the same matcher the inbound webhook uses. Registered as its own static segment so it can
+        // never be read as a rule id, and it writes no call log, message or provider request.
+        .route(
+            "/api/v1/response-rules/preview",
+            post(response_rule_handler::preview_response_rule),
+        )
         .route(
             "/api/v1/response-rules/:id",
             put(response_rule_handler::update_response_rule)

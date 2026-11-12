@@ -172,6 +172,77 @@ pub async fn delete_response_rule(
     ))
 }
 
+/// `POST /api/v1/response-rules/preview` — "would my rule answer THIS caller, and what would it say?"
+///
+/// The console could describe a rule but never let the customer SEE it fire: with no phone number
+/// connected, and no way to place a test call, the only proof a rule works was a real missed call
+/// from a real customer. This answers the same question the inbound webhook asks, using the same
+/// pure matcher ([`crate::handlers::response_rule_eval::trigger_matches`]) and the same renderer
+/// ([`rule_text`]), against ONE caller number and the current clock — and it writes NOTHING: no
+/// call log, no `messages` row, no provider request. The rules are read in the order the call path
+/// walks them (priority, then created_at) and the first match is reported as the one that would
+/// fire, because that is exactly what `run_for_inbound_call` does with the rest.
+pub async fn preview_response_rule(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let caller = req
+        .get("caller")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    if caller.is_empty() {
+        return Err(AppError::BadRequest(
+            "Enter the caller's number to test against.".into(),
+        ));
+    }
+
+    let rules = sqlx::query_as::<_, ResponseRule>(
+        "SELECT * FROM response_rules
+         WHERE tenant_id = $1 AND is_active = true
+         ORDER BY priority ASC, created_at ASC",
+    )
+    .bind(claims.aid)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let now = chrono::Utc::now().naive_utc();
+    let mut evaluated: Vec<serde_json::Value> = Vec::new();
+    let mut winner: Option<serde_json::Value> = None;
+    for rule in &rules {
+        let fires = crate::handlers::response_rule_eval::trigger_matches(rule, &caller, now);
+        let text = crate::handlers::response_rule_eval::rule_text(&rule.response_content);
+        let row = serde_json::json!({
+            "id": rule.id.to_string(),
+            "name": rule.name,
+            "trigger_condition": rule.trigger_condition,
+            "response_type": rule.response_type,
+            "text": text,
+            "priority": rule.priority,
+            "matches": fires,
+        });
+        if fires && winner.is_none() {
+            winner = Some(row.clone());
+        }
+        evaluated.push(row);
+    }
+
+    Ok(Json(serde_json::json!({
+        "caller": caller,
+        // The instant this answer is about. Published so the console can say WHEN it was tested
+        // instead of implying the verdict is a permanent property of the rule.
+        "evaluated_at": now.and_utc().to_rfc3339(),
+        "rules_checked": rules.len(),
+        // null => no active rule answers this caller right now; the console says so in words
+        // rather than printing an empty card.
+        "would_fire": winner,
+        "rules": evaluated,
+        "wrote": false,
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1027,16 +1027,46 @@ const ruleScheduleOf = (f) => f.trigger === 'specific_numbers'
     ? { window: { start: f.start || '09:00', end: f.end || '17:00' } }
     : f.trigger === 'day_of_week' ? { days: (f.days || []).slice() } : null;
 const ResponseRules = () => {
-  const st = viewState('rules', { list: [], showModal: false, editItem: null });
+  const st = viewState('rules', { list: [], showModal: false, editItem: null, testCaller: '', testResult: null, testBusy: false });
   const load = async () => { try { const d = await API.get('/response-rules'); st.list = Array.isArray(d) ? d : []; renderApp(); } catch (e) { console.error(e); } };
   if (!st._loaded) { st._loaded = true; load(); }
   const show = (i) => { st.editItem = i; st.formSeeded = false; st.showModal = true; renderApp(); };
   const hide = () => { st.showModal = false; renderApp(); };
   const save = async (data) => { try { if (st.editItem) await API.put('/response-rules/' + st.editItem.id, data); else await API.post('/response-rules', data); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   const remove = async (id) => { if (!confirm('Delete this rule?')) return; await API.del('/response-rules/' + id); load(); };
+  // "Would my rule answer this caller?" — the server evaluates the SAME rules the inbound call path
+  // walks and answers with the first match plus the text it would send. Read-only: no call log, no
+  // message row, no provider request, which is what makes it safe to press repeatedly.
+  const testRule = async () => {
+    const caller = (st.testCaller || '').trim();
+    if (!caller) { st.testResult = { ok: false, text: 'Type the caller\u2019s number first.' }; renderApp(); return; }
+    st.testBusy = true; st.testResult = null; renderApp();
+    try {
+      const d = await API.post('/response-rules/preview', { caller });
+      st.testBusy = false;
+      if (d && d.would_fire) {
+        const w = d.would_fire;
+        st.testResult = { ok: true, text: 'Rule \u201c' + (w.name || 'untitled') + '\u201d answers this caller: '
+          + (w.response_type === 'callback' ? 'a callback is queued for you (no text is sent).' : '\u201c' + (w.text || '(no message text)') + '\u201d') };
+      } else {
+        st.testResult = { ok: false, text: 'No active rule answers this caller right now \u2014 a real call would get no automatic reply. '
+          + (d && d.rules_checked === 0 ? 'You have no active rules yet.' : 'Check the trigger on each rule below (a time-of-day or day-of-week rule only answers inside its window).') };
+      }
+    } catch (e) { st.testBusy = false; st.testResult = { ok: false, text: e.message || 'Could not test that number.' }; }
+    renderApp();
+  };
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><button class="btn btn-sm btn-green" onClick=${() => show(null)}>+ Add Rule</button></div>
     <p class="text-sm text-gray-500 mb-4">Rules run when a call comes in. They are checked in priority order (lowest first) and the first matching rule acts: a text back to the caller, or a callback queued for you in Follow Ups. A text back leaves through the platform's own message service — there is no provider credential for you to enter here. If that service is not set up on this installation yet, a send is refused with the reason shown on the Messages screen and nothing is recorded as sent; message us from <a href="/contact.html" style="color:#4338ca;text-decoration:underline">our contact page</a> and our team finishes the setup.</p>
+    <div class="card mb-4">
+      <h3 class="text-base font-bold mb-1">Test a caller</h3>
+      <p class="text-sm text-gray-500 mb-3">Type a number to see which rule answers it right now, and what the caller would receive. Nothing is sent and nothing is recorded \u2014 this only reads your rules.</p>
+      <div class="flex gap-2 items-center flex-wrap">
+        <input id="rule-test-caller" class="input" style="max-width:260px" placeholder="+1 555 010 1234" value=${st.testCaller || ''} onInput=${e => { st.testCaller = e.target.value; }} />
+        <button id="rule-test-btn" class="btn btn-sm btn-outline" disabled=${st.testBusy} onClick=${testRule}>${st.testBusy ? 'Testing\u2026' : 'Test this number'}</button>
+      </div>
+      ${st.testResult && html`<p id="rule-test-result" class="text-sm" style="margin:10px 0 0;color:${st.testResult.ok ? '#047857' : '#b45309'}">${st.testResult.text}</p>`}
+    </div>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Name</th><th>Trigger</th><th>Action</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${st.list.map(r => html`<tr><td class="font-medium">${r.name||'-'}</td><td class="text-gray-500">${ruleLabel(RULE_TRIGGERS, r.trigger_condition)}</td><td class="text-gray-500">${ruleLabel(RULE_ACTIONS, r.response_type)}</td><td class="text-gray-500">${r.priority == null ? 100 : r.priority}</td><td><span class="badge ${r.is_active?'badge-green':'badge-red'}">${r.is_active?'Active':'Inactive'}</span></td><td><button class="btn btn-sm btn-outline" onClick=${() => show(r)}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(r.id)}>Delete</button></td></tr>`)}
