@@ -2604,6 +2604,20 @@ const OpsPanel = ({ panel }) => {
 // Definition ported verbatim from the fleet standard (FunnelSwift www-admin/index.html).
 const RESERVED_ADDR_RE = /@(?:[^@]*\.)?(?:invalid|example|test|local)$|@(?:[^@]*\.)?example\.(?:com|net|org)$/i;
 const FLEET_PROBE_ADDR_RE = /@(?:[^@]*\.)?(?:swiftsoftware\.(?:dev|local)|sw\.dev|maxxspace\.com)$|@local\.(?:funnelswift|coreswift|adaswift|incentiveswift|workflowswift|missedcallrespondr|multidirectory)$/i;
+// WHAT THE CUSTOMER WAS TOLD when the operator moves a workspace onto a plan (2026-11-12).
+//
+// With no payment provider on this install, a hand-move IS the purchase, so the app now emails the
+// workspace's admin. The assignment answer carries `notified` / `notify_reason`
+// (`emailed` | `unchanged` | `no_recipient` | `mail_failed`) and this turns that into one plain
+// sentence — the operator must never be left guessing what the customer knows.
+function planNotifyNote(r) {
+  if (!r) return '';
+  if (r.notified === true) return ' The customer has been emailed about the change.';
+  if (r.notify_reason === 'unchanged') return ' The workspace was already on that plan, so no email was sent.';
+  if (r.notify_reason === 'no_recipient') return ' No customer email address was found, so nobody was told.';
+  if (r.notify_reason === 'mail_failed') return ' The customer could NOT be emailed — the plan is set, so tell them yourself.';
+  return '';
+}
 function isProbeAddress(addr) {
   const a = String(addr || '');
   return RESERVED_ADDR_RE.test(a) || FLEET_PROBE_ADDR_RE.test(a);
@@ -2827,8 +2841,8 @@ const TenantsScreen = () => {
     if (!confirm('Put "' + (t.name || t.slug || t.id) + '" on ' + label + '?')) return;
     st.busy = 'plan:' + t.id; st.msg = null; st.ok = true; renderApp();
     try {
-      await API.post('/admin/plans/assign', { tenant_id: t.id, plan_id: planId, billing_cycle: 'monthly' });
-      st.msg = 'Assigned ' + label + ' to ' + (t.name || t.slug || t.id);
+      const r = await API.post('/admin/plans/assign', { tenant_id: t.id, plan_id: planId, billing_cycle: 'monthly' });
+      st.msg = 'Assigned ' + label + ' to ' + (t.name || t.slug || t.id) + planNotifyNote(r);
     } catch (e) { st.ok = false; st.msg = 'Not assigned: ' + e.message; }
     st.busy = null;
     await load();
@@ -3269,7 +3283,7 @@ const App = () => {
     const doAssign = async () => {
       if (!assign.tenant_id || !assign.plan_id) { alert('tenant_id and plan are required'); return; }
       setBusy(true);
-      try { await API.post('/admin/plans/assign', assign); flash('Plan assigned'); }
+      try { const r = await API.post('/admin/plans/assign', assign); flash('Plan assigned' + planNotifyNote(r)); }
       catch(e) { alert('Not assigned: ' + e.message); }
       setBusy(false);
     };

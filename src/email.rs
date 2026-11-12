@@ -283,6 +283,10 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
         // The receipt for a filed plan request (cron 2026-10-20). Named for what the customer just
         // did, so it is not mistaken for the answer itself — the answer arrives later, from a person.
         "billing_request_receipt" => format!("We have your plan request — {}", app_name),
+        // A PERSON MOVED THE WORKSPACE ONTO A PLAN (2026-11-12). Only reached when a stored
+        // `plan_changed` row exists without a subject of its own — no install has that row, so the
+        // inline arm below (which names the PLAN) is the mail customers actually receive.
+        "plan_changed" => format!("Your {} plan has changed", app_name),
         // The operator's own branding sample (cron 2026-10-24, parity with FunnelSwift,
         // IncentiveSwift and ADASwift). Named for what it IS, so it cannot be mistaken for the
         // missed-call reply a caller receives.
@@ -448,6 +452,27 @@ async fn send_inline(
             )
             .await
         }
+        // A PERSON MOVED THE WORKSPACE ONTO A PLAN (2026-11-12). Self-serve checkout needs a payment
+        // provider and no install in this fleet has one, so nearly every paid seat is given BY HAND
+        // from the operator console. That switch used to be silent: the tier changed and the
+        // customer's only clue was a screen whose allowances had moved. Nothing is charged for a
+        // hand-move, so this says so, and it points at the plan screen rather than the marketing
+        // site. No install has a `plan_changed` template row, so THIS body is the mail that is sent.
+        "plan_changed" => {
+            let body = format!(
+                "Hi {name},\n\nYour workspace has been moved onto the {plan_name_val} plan. Our team made this change for you, and nothing was charged for it.\n\nOpen {app_url}/dashboard and choose Plan & Billing to see exactly what the plan includes and when it renews. If you expected a different plan, reply to this message and we will put it right.\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("Your {app_name} plan is now {plan_name_val}"),
+                &body,
+                "",
+            )
+            .await
+        }
         // The operator's own branding PREVIEW (cron 2026-10-24, parity with FunnelSwift,
         // IncentiveSwift and ADASwift). The header the operator is judging is added by
         // `apply_branding` at the send choke point — that is the account's real logo, name and
@@ -520,6 +545,29 @@ pub async fn send_purchase_confirmed_email(
         "app_url": "https://app.missedcallrespondr.com",
     });
     send_template_email(pool, tenant_id, to, "purchase_confirmed", &vars).await
+}
+
+/// Tell a customer their workspace now sits on a different plan (2026-11-12).
+///
+/// With no payment provider on this install, a hand-move from the operator console IS the purchase,
+/// so it must send the same confirmation a card payment would. Routed through
+/// `send_template_email`, the app's one transactional funnel, so it carries the workspace's own
+/// branding and the fleet's reserved-address gate (a probe recipient is recorded `withheld` and never
+/// handed to a relay).
+pub async fn send_plan_changed_email(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    to: &str,
+    name: &str,
+    plan_name: &str,
+) -> Result<(), String> {
+    let vars = json!({
+        "name": name,
+        "plan_name": plan_name,
+        "email": to,
+        "app_url": "https://app.missedcallrespondr.com",
+    });
+    send_template_email(pool, tenant_id, to, "plan_changed", &vars).await
 }
 
 /// Convenience wrapper — now uses DB template system
@@ -727,6 +775,7 @@ pub async fn send_plan_request_operator_alert(
         "plan_request_operator_alert",
         &to,
         &cfg.provider,
+        &subject,
         &outcome,
     )
     .await;
@@ -834,7 +883,15 @@ pub async fn send_signup_operator_alert(
     let outcome = crate::email_provider::deliver(&cfg, &to, &subject, &text, Some(&html)).await;
     // Recorded like every other system send, so the admin screen's send history answers
     // "did anyone get told?" and a withheld probe address reads as withheld, not as sent.
-    record_last_send(pool, "signup_operator_alert", &to, &cfg.provider, &outcome).await;
+    record_last_send(
+        pool,
+        "signup_operator_alert",
+        &to,
+        &cfg.provider,
+        &subject,
+        &outcome,
+    )
+    .await;
     outcome.map(|_| ())
 }
 
@@ -913,6 +970,7 @@ pub async fn send_support_request_operator_alert(
         "support_request_operator_alert",
         &to,
         &cfg.provider,
+        &subject,
         &outcome,
     )
     .await;
@@ -933,6 +991,7 @@ pub async fn record_last_send(
     kind: &str,
     to: &str,
     provider: &str,
+    subject: &str,
     outcome: &Result<String, String>,
 ) {
     // `deliver` answers Ok("suppressed: …") for a reserved/harness recipient — it deliberately
@@ -965,6 +1024,7 @@ pub async fn record_last_send(
         "kind": kind,
         "to": to,
         "provider": provider,
+        "subject": subject,
         "ok": status == "sent",
         "detail": detail,
     });
@@ -986,14 +1046,15 @@ pub async fn record_last_send(
     // any later success and "did this customer ever get their password?" had no answer. Best-effort
     // like the write above: a bookkeeping failure must never change the send's own result.
     if let Err(e) = sqlx::query(
-        "INSERT INTO email_send_log (to_email, template, provider, status, detail) \
-         VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO email_send_log (to_email, template, provider, status, detail, subject) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(to)
     .bind(kind)
     .bind(provider)
     .bind(status)
     .bind(&detail)
+    .bind(subject)
     .execute(pool)
     .await
     {
@@ -1043,6 +1104,7 @@ async fn send_email_request(
             kind,
             to,
             "suppressed",
+            subject,
             &Err(format!(
                 "withheld: '{domain}' is a fleet-harness / reserved address, so nothing was sent"
             )),
@@ -1091,7 +1153,7 @@ async fn send_email_request(
         ),
     }
 
-    record_last_send(pool, kind, to, &cfg.provider, &outcome).await;
+    record_last_send(pool, kind, to, &cfg.provider, subject, &outcome).await;
     outcome.map(|_| ())
 }
 

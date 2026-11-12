@@ -1260,6 +1260,92 @@ pub(crate) async fn seat_plan_for_tenant(
     Ok(())
 }
 
+/// The plan slug a workspace currently sits on, or `None` when it holds no subscription row.
+///
+/// Read BEFORE a hand-move, so the customer is only told about a plan that actually moved. One row
+/// per tenant is the invariant (`tenant_plans_tenant_id_key`), so this cannot pick a stale sibling.
+async fn current_plan_slug(pool: &sqlx::PgPool, tenant_id: Uuid) -> Option<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT p.slug FROM tenant_plans tp JOIN plans p ON p.id = tp.plan_id \
+         WHERE tp.tenant_id = $1 LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None)
+}
+
+/// Tell the customer their workspace now sits on a different plan (2026-11-12).
+///
+/// WHY THIS EXISTS. Self-serve checkout needs a payment provider, and no install in this fleet has
+/// one (measured 2026-11-12), so every paid seat is given BY HAND from the operator console. That
+/// switch was silent: the tier changed and the customer's only clue was a screen whose allowances had
+/// moved. A customer deserves the same confirmation a card payment sends — which plan they are on,
+/// that nothing was charged, and where to see what it includes.
+///
+/// The mail goes through `email::send_plan_changed_email`, the app's one transactional funnel, so it
+/// inherits the workspace's own branding and the fleet's reserved-address gate (a probe/harness
+/// recipient is recorded `withheld` and never handed to a relay — no extra check needed here). Best
+/// effort by design: the plan is already written, so a mail failure is logged and never fails the
+/// assignment.
+///
+/// Returns `(emailed, reason)` with reason `emailed` | `unchanged` | `no_recipient` | `mail_failed`,
+/// so the operator's screen can say what happened instead of guessing.
+pub(crate) async fn notify_plan_change(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    plan_id: Uuid,
+    previous_slug: Option<&str>,
+) -> (bool, &'static str) {
+    let plan: Option<(String, String)> =
+        sqlx::query_as("SELECT slug, name FROM plans WHERE id = $1")
+            .bind(plan_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
+    let Some((slug, plan_name)) = plan else {
+        return (false, "unchanged");
+    };
+    // A second save of the SAME plan must not mail the customer again.
+    if previous_slug == Some(slug.as_str()) {
+        return (false, "unchanged");
+    }
+    // The workspace's own admin is the person to tell: the tier change is about their allowances.
+    let who: Option<(String, String)> = sqlx::query_as(
+        "SELECT email, COALESCE(NULLIF(btrim(name), ''), '') FROM users \
+          WHERE tenant_id = $1 AND btrim(email) <> '' \
+          ORDER BY (role = 'admin') DESC, created_at ASC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+    let Some((email, name)) = who else {
+        return (false, "no_recipient");
+    };
+    let to = email.trim();
+    if to.is_empty() {
+        return (false, "no_recipient");
+    }
+    match crate::email::send_plan_changed_email(pool, tenant_id, to, name.trim(), &plan_name).await
+    {
+        Ok(()) => {
+            tracing::info!(
+                tenant = %tenant_id, plan = %plan_name,
+                "plan change: the customer was told"
+            );
+            (true, "emailed")
+        }
+        Err(e) => {
+            tracing::warn!(
+                tenant = %tenant_id, plan = %plan_name, error = %e,
+                "plan change: the customer could not be told"
+            );
+            (false, "mail_failed")
+        }
+    }
+}
+
 pub async fn admin_assign_plan(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -1328,12 +1414,27 @@ pub async fn admin_assign_plan(
     // restores it). The statement itself lives in `seat_plan_for_tenant` so this panel action and the
     // paid-checkout seat (kanban t_3c97243d) cannot drift apart; the panel names the cycle, hence
     // `Some(billing_cycle)`.
+    // WHAT THE WORKSPACE IS LEAVING — read before the swap, so the customer is only told about a plan
+    // that actually moved (2026-11-12).
+    let previous_slug = current_plan_slug(&state.pool, tenant_id).await;
     seat_plan_for_tenant(&state, tenant_id, plan_id, Some(billing_cycle)).await?;
 
     // Credit the referring affiliate if this is a paid-plan assignment.
     attribute_plan_upgrade(&state, tenant_id, plan_id).await;
 
-    Ok(Json(json!({"message": "Plan assigned to account"})))
+    // TELL THE CUSTOMER THEY WERE MOVED (2026-11-12). With no payment provider on this install the
+    // operator's click IS the purchase, and it used to be silent. Best effort: the plan is written.
+    let (notified, notify_reason) =
+        notify_plan_change(&state.pool, tenant_id, plan_id, previous_slug.as_deref()).await;
+    // The plan the workspace now sits on, read back from the row rather than assumed from the request.
+    let new_slug = current_plan_slug(&state.pool, tenant_id).await;
+
+    Ok(Json(json!({
+        "message": "Plan assigned to account",
+        "plan_slug": new_slug,
+        "notified": notified,
+        "notify_reason": notify_reason,
+    })))
 }
 
 #[cfg(test)]

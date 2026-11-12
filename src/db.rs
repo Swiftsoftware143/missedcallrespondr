@@ -411,6 +411,13 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000048_public_support_intake",
             include_str!("../migrations/000048_public_support_intake.sql"),
         ),
+        // The sender's history now records the SUBJECT too (2026-11-12), so "the customer was told
+        // which plan" is answerable from `email_send_log` instead of only from the container log.
+        // Idempotent (ADD COLUMN IF NOT EXISTS) because this runner re-executes every file per boot.
+        (
+            "000049_email_send_log_subject",
+            include_str!("../migrations/000049_email_send_log_subject.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

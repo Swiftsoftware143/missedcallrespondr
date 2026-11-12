@@ -298,6 +298,7 @@ pub async fn test_email_config(
         "test",
         &to,
         &cfg.provider,
+        subject,
         &if withheld {
             Err(detail.clone())
         } else {
