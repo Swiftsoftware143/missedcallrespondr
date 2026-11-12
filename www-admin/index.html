@@ -29,6 +29,15 @@ window.appGuidePages = {
   "ops": { title: "Operator Console", desc: "Direct operator controls for the admin actions that have no screen of their own. Every control calls this app's own API with your session.", actions: ["Impersonate a workspace to see its data", "Run an admin action from the panel list"] },
   "plans": { title: "Plans & Features", desc: "The subscription plans this install sells and the features each one grants. A plan is a set of permissions that decides what a workspace can use.", actions: ["Create or edit a plan", "Turn a feature on or off per plan", "Assign a workspace to a plan"] },
   "provisioning": { title: "Provisioning", desc: "The switch that lets a tag in another SwiftSoftware app create a free account here. While it is off the incoming request is refused and no account is made.", actions: ["Turn tag-driven provisioning on or off", "Choose the free plan a provisioned account starts on"] },
+  // TEAM AND MY-PLAN HAD NO ENTRY (cron 2026-11-11) while the console's other screens do, so the
+  // guide's "?" simply disappeared on those two tabs. Measured three ways: the nav declares 26 view
+  // ids and `appGuidePages` listed 24; `renderApp()` already reports the open view to the widget
+  // (`window.inlineGuidePage(S.view)`), so the key is what was missing, not the wiring; and both
+  // screens are real (Your Team reads GET /team/members and posts /team/invite; Plan & Pricing reads
+  // /plans + /auth/me and posts /checkout/create). Text describes what the screens actually do,
+  // including that adding a teammate emails them their own password and reports whether it left.
+  "team": { title: "Your Team", desc: "Everyone who can sign in to this workspace, and how many seats your plan includes. The owner is the login the workspace was created with and cannot be removed here. Adding a teammate creates their own login and emails them a password, so nobody shares one; their role is Teammate, which means they answer calls and work the queue but cannot add or remove people. The message after you add someone says whether that password email actually left.", actions: ["See how many seats are used and what your plan allows", "Add a teammate with their name and email", "Remove someone's access"] },
+  "my-plan": { title: "Plan & Pricing", desc: "The plan this workspace is on, the plans you can move to, and the limits and features each one includes. Pressing a plan records the switch. When this install has no payment provider connected, nothing is charged: your press becomes a request in the operator's Plan Requests queue, and the operator switches the workspace over.", actions: ["See the plan this workspace is on", "Compare what each plan includes", "Press the plan you want to move to"] },
   "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data.", actions: ["Search for a workspace", "Select rows and delete the selected workspaces"] },
   "dashboard": { title: "Dashboard", desc: "The whole install at a glance: workspaces, people, calls received, and how many customers are waiting on a plan switch. The queue tile opens the plan requests already filtered; a workspace user sees that workspace's own figures instead. When nobody can be charged — no payment provider is connected and no plan carries its own payment page — a red Buyers cannot pay card sits at the top, with the button that opens Payment Providers so you can connect a Stripe or PayPal key.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list", "If Buyers cannot pay is showing, press Connect a payment provider"] },
   "portfolio": { title: "Portfolio Companies", desc: "The businesses and brands this workspace lists.", actions: ["Add or edit a portfolio company", "Open a company's record"] },
@@ -3981,6 +3990,11 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
     const [askErr, setAskErr] = useState(null);
+    // WHICH TERM THE BUYER IS SHOPPING (2026-11-12). The catalogue carries a yearly price on every
+    // paid tier and this table has always PRINTED it, but the only button posted the MONTHLY figure
+    // with no `billing_cycle`, so the yearly number a customer can see was the one number they could
+    // not buy. The term is chosen here and travels with the press.
+    const [term, setTerm] = useState('monthly');
 
     useEffect(() => {
       Promise.all([API.get('/plans'), API.get('/auth/me')])
@@ -4011,6 +4025,11 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
 
     const askFor = async (p) => {
       if (busy) return;
+      // The term decides BOTH figures that travel: `billing_cycle` and the amount. The server prices
+      // the sale from the plan row and refuses a mismatched amount by name, so this is the client
+      // half of a check the till already enforces — never a client-side price the server trusts.
+      const yearAsk = (term === 'yearly') && Number(p.price_yearly) > 0;
+      const amount = yearAsk ? Number(p.price_yearly) : (Number(p.price_monthly) || 0);
       setBusy(true); setMsg(null); setAskErr(null);
       try {
         const r = await fetch(window.location.origin + '/api/v1/checkout/create', {
@@ -4019,9 +4038,10 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
           body: JSON.stringify({
             purchasable_type: 'plan',
             purchasable_id: p.id,
-            amount: Number(p.price_monthly) || 0,
+            amount: amount,
+            billing_cycle: yearAsk ? 'year' : 'month',
             currency: 'USD',
-            description: (p.slug || 'plan') + ' plan (monthly)',
+            description: (p.slug || 'plan') + ' plan (' + (yearAsk ? 'yearly' : 'monthly') + ')',
             success_url: window.location.origin + '/admin/?checkout=success',
             cancel_url: window.location.origin + '/admin/?checkout=cancelled'
           })
@@ -4030,7 +4050,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
         const url = d && (d.url || d.checkout_url || d.session_url);
         if (r.ok && url) { window.location.href = url; return; }
         if (d && d.request_recorded) {
-          setMsg('Request filed for ' + p.name + '. Nothing has been charged \u2014 the team switches '
+          setMsg('Request filed for ' + p.name + (yearAsk ? ' on the yearly term (' + fmt(amount) + '/year)' : ' on the monthly term (' + fmt(amount) + '/month)') + '. Nothing has been charged \u2014 the team switches '
             + 'your workspace over and arranges billing with you directly.');
         } else if (r.ok) {
           setMsg((d && d.message) || 'The checkout session was created.');
@@ -4046,6 +4066,12 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     return html`<div>
       <div class="mb-4"><h2 class="text-xl font-bold">Plan & Pricing</h2>
         <p class="text-sm text-gray-500">The plan this workspace is on, and what the other plans cost.</p></div>
+      <div class="card" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" id="my-plan-term">
+        <span class="text-sm text-gray-600 font-medium">Pay:</span>
+        <button class="btn btn-sm ${term === 'monthly' ? '' : 'btn-outline'}" data-plan-term="monthly" disabled=${busy} onClick=${() => setTerm('monthly')}>Monthly</button>
+        <button class="btn btn-sm ${term === 'yearly' ? '' : 'btn-outline'}" data-plan-term="yearly" disabled=${busy} onClick=${() => setTerm('yearly')}>Yearly &mdash; 2 months free</button>
+        <span class="text-xs text-gray-500">${term === 'yearly' ? 'Prices below are for a whole year. A tier with no yearly price is sold monthly only.' : 'Prices below are per month.'}</span>
+      </div>
       ${err && html`<div class="card" style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca">The plan catalogue could not be loaded: ${err.message}</div>`}
       <div class="card">
         <table class="table" id="my-plan-table">
@@ -4059,7 +4085,9 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
               <td style="text-align:right">${isCurrent(p)
                 ? html`<span class="badge badge-green">Current</span>`
                 : (Number(p.price_monthly) > 0
-                    ? html`<button class="btn btn-sm" data-plan-choose=${p.slug || ''} disabled=${busy} onClick=${() => askFor(p)}>Choose ${p.name}</button>`
+                    ? (term === 'yearly' && !(Number(p.price_yearly) > 0)
+                      ? html`<button class="btn btn-sm" data-plan-choose=${p.slug || ''} disabled title="This tier has no yearly price — it is sold month to month.">Monthly only</button>`
+                      : html`<button class="btn btn-sm" data-plan-choose=${p.slug || ''} data-plan-term=${term} data-plan-amount=${term === 'yearly' ? fmt(p.price_yearly) : fmt(p.price_monthly)} disabled=${busy} onClick=${() => askFor(p)}>Choose ${p.name} ${term === 'yearly' ? fmt(p.price_yearly) + '/yr' : fmt(p.price_monthly) + '/mo'}</button>`)
                     : '')}</td>
             </tr>`)}
             ${plans.length === 0 && !err && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">Loading plans\u2026</td></tr>`}
