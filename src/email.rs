@@ -496,14 +496,128 @@ async fn send_inline(
             )
             .await
         }
-        _ => {
-            let body = format!("{} Notification:\n\n{}", app_name, vars);
+        // THE STORAGE RUNG REMINDER (t_c65920a0; parity with WorkflowSwift's 8d009c9 arm and
+        // CoreSwift's B206 arm). This app carries NO `storage_warning` row in `email_templates`, so
+        // without this branch the 50/75/99 mail that `evaluate_and_notify` claims each month reached
+        // the customer as the generic "MissedCall Respondr Notification: {json}" — for the one
+        // message whose entire value is its numbers. Plain sentences on purpose: the subject names
+        // the real percentage because a customer reads that first, and the body NEVER says mail will
+        // be deleted to make room, because keeping that promise is what the storage rule exists for.
+        "storage_warning" => {
+            let used = vars.get("used").and_then(|v| v.as_str()).unwrap_or("some");
+            let quota = vars
+                .get("quota")
+                .and_then(|v| v.as_str())
+                .unwrap_or("your plan allowance");
+            let percent = vars.get("percent").and_then(|v| v.as_i64()).unwrap_or(0);
+            let threshold = vars.get("threshold").and_then(|v| v.as_i64()).unwrap_or(50);
+            let inbox_url = vars
+                .get("inbox_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or(crate::branding::APP_URL_MAIL);
+            let plans_url = vars
+                .get("plans_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or(app_url);
+            let retention = vars.get("retention").and_then(|v| v.as_str()).unwrap_or("");
+            let subject = format!("Your mailbox is {percent}% full — {used} of {quota} used");
+            let action = if percent >= 100 {
+                "Your mailbox is full. Mail is still arriving and nothing has been deleted, but new \
+                 attachments and files are paused until you clear space or upgrade."
+            } else if threshold >= 99 {
+                "Your mailbox is almost full. Plain mail still arrives and nothing is deleted, but \
+                 once the allowance is reached new attachments and files are paused."
+            } else {
+                "You have room for now. Clearing out mail you no longer need (Trash and Spam count \
+                 too) keeps the meter down, and a bigger plan raises the allowance."
+            };
+            let body = format!(
+                "Hi {name},\n\nThis is a storage update for your mailbox: you are using {used} of \
+                 {quota} ({percent}%).\n\n{action}\n\nTwo things that are ALWAYS true here: mail sent \
+                 to you keeps arriving, and nothing is deleted to make room for new mail. The only \
+                 thing a full mailbox pauses is adding new attachments or files.\n\nOpen your mail and \
+                 clear some space:\n    {inbox_url}\n\nSee the plans with more storage:\n    \
+                 {plans_url}\n\n{retention}\n\nYou will get at most one of these messages per storage \
+                 level per month.\n\n- The {app_name} Team"
+            );
+            let esc = |s: &str| {
+                s.replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
+            };
+            let safe_name = esc(name);
+            let safe_action = esc(action);
+            let safe_retention = esc(retention);
+            let html_body = format!(
+                "<html><body style=\"font-family:Arial,sans-serif;line-height:1.6;color:#333\">\
+                 <p>Hi {safe_name},</p>\
+                 <p>This is a storage update for your mailbox: you are using <strong>{used} of {quota} ({percent}%)</strong>.</p>\
+                 <p>{safe_action}</p>\
+                 <p>Two things are <strong>always</strong> true here: mail sent to you keeps arriving, and <strong>nothing is deleted</strong> to make room for new mail. The only thing a full mailbox pauses is adding new attachments or files.</p>\
+                 <p><a href=\"{inbox_url}\" style=\"color:#4f46e5\">Open your mail and clear some space</a></p>\
+                 <p><a href=\"{plans_url}\" style=\"color:#4f46e5\">See the plans with more storage</a></p>\
+                 <p style=\"font-size:13px;color:#9ca3af\">{safe_retention}<br>You will get at most one of these messages per storage level per month.<br>- The {app_name} Team</p></body></html>"
+            );
             send_email_request(
                 pool,
                 tenant_id,
                 template_type,
                 to,
-                &format!("{} Notification", app_name),
+                &subject,
+                &body,
+                &html_body,
+            )
+            .await
+        }
+        // THE ANSWER TO A PUBLIC SUPPORT MESSAGE (audit, t_c65920a0). `tickets_handler` sends
+        // `support_reply` for a ticket filed from the public contact page — a visitor with no
+        // workspace. There is no inline arm for it, so on an install without the stored
+        // `support_reply` row the visitor received the catch-all: the operator's own words
+        // serialised as JSON. This arm says the same thing in a sentence, and deliberately does NOT
+        // send them to a dashboard they cannot open (the difference from `ticket_reply`).
+        "support_reply" => {
+            let subject_line = vars
+                .get("ticket_subject")
+                .and_then(|v| v.as_str())
+                .unwrap_or("your message");
+            let reply = vars
+                .get("reply_body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no message body)");
+            let body = format!(
+                "Hi {name},\n\nThank you for writing to us. Here is our answer to \"{subject_line}\":\n\n{reply}\n\nIf you have more to add, reply to this email and it comes straight back to us.\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("We answered your message: {subject_line}"),
+                &body,
+                "",
+            )
+            .await
+        }
+        _ => {
+            // AN UNKNOWN TYPE MUST NEVER MAIL THE SERIALISED VARIABLES (audit, t_c65920a0; the same
+            // class fixed on WorkflowSwift and ADASwift). `vars` holds whatever the caller passed —
+            // passwords, reset tokens, ticket bodies — and this arm used to ship exactly that as the
+            // body. Keep a readable notice and WARN with the type, so a missing branch is visible in
+            // the log instead of quietly mailing a variable dump.
+            tracing::warn!(
+                template_type = template_type,
+                "send_inline: no inline branch for this template_type — sending the generic \
+                 notification instead of a variable dump"
+            );
+            let body = format!(
+                "Hi {name},\n\nYou have a new notification from {app_name}.\n\nSign in to see it: {app_url}/dashboard\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("{app_name} Notification"),
                 &body,
                 "",
             )

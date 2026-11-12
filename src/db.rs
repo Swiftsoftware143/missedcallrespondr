@@ -440,6 +440,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000052_domain_api_key_id",
             include_str!("../migrations/000052_domain_api_key_id.sql"),
         ),
+        // THE UNIQUE GUARD THE 50/75/99 STORAGE REMINDER CLAIMS ON (kanban t_c65920a0). 000050
+        // ported `private_email_storage_notices` without `UNIQUE (tenant_id, threshold_pct, period)`,
+        // so every `ON CONFLICT (tenant_id, threshold_pct, period) DO NOTHING` claim raised 42P10 and
+        // the swallowed error read as "already sent for this month" — no storage reminder had ever
+        // been mailed. Idempotent (a dedupe DELETE that matches nothing once the index exists, plus
+        // CREATE UNIQUE INDEX IF NOT EXISTS), because this runner re-executes every file per boot.
+        (
+            "000053_storage_notice_rung_guard",
+            include_str!("../migrations/000053_storage_notice_rung_guard.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

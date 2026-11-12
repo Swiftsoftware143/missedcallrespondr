@@ -199,6 +199,14 @@
       <tr><td><code>welcome</code></td><td>New account created</td><td><code>{{name}}</code>, <code>{{email}}</code>, <code>{{password}}</code>, <code>{{app_url}}</code></td></tr>
       <tr><td><code>purchase_confirmed</code></td><td>Successful payment</td><td><code>{{name}}</code>, <code>{{plan_name}}</code>, <code>{{app_url}}</code></td></tr>
       <tr><td><code>password_reset</code></td><td>Password reset request</td><td><code>{{name}}</code>, <code>{{token}}</code>, <code>{{app_url}}</code></td></tr>
+      <tr><td><code>welcome_credentials</code></td><td>Signup/checkout that GENERATED the first password</td><td><code>{{name}}</code>, <code>{{email}}</code>, <code>{{password}}</code>, <code>{{app_url}}</code></td></tr>
+      <tr><td><code>email_change</code></td><td>Customer asked to change their sign-in address</td><td><code>{{name}}</code>, <code>{{new_email}}</code>, <code>{{link}}</code>, <code>{{token}}</code>, <code>{{app_url}}</code></td></tr>
+      <tr><td><code>ticket_reply</code></td><td>Operator answered a ticket filed from inside a workspace</td><td><code>{{name}}</code>, <code>{{ticket_subject}}</code>, <code>{{reply_body}}</code>, <code>{{dashboard_url}}</code></td></tr>
+      <tr><td><code>support_reply</code></td><td>Operator answered a ticket filed from the PUBLIC contact page (no workspace)</td><td><code>{{name}}</code>, <code>{{ticket_subject}}</code>, <code>{{reply_body}}</code>, <code>{{dashboard_url}}</code></td></tr>
+      <tr><td><code>billing_request_receipt</code></td><td>Customer filed a plan request (the buying path when no payment provider is configured)</td><td><code>{{name}}</code>, <code>{{request_subject}}</code>, <code>{{dashboard_url}}</code></td></tr>
+      <tr><td><code>plan_changed</code></td><td>An operator moved the workspace onto a plan by hand</td><td><code>{{name}}</code>, <code>{{plan_name}}</code></td></tr>
+      <tr><td><code>branding_preview</code></td><td>Operator sent themselves a sample of their email branding</td><td><code>{{name}}</code>, <code>{{email}}</code></td></tr>
+      <tr><td><code>storage_warning</code></td><td>Mailbox crossed 50% / 75% / 99% of its allowance (at most one per level per month)</td><td><code>{{name}}</code>, <code>{{email}}</code>, <code>{{threshold}}</code>, <code>{{percent}}</code>, <code>{{used}}</code>, <code>{{quota}}</code>, <code>{{mail_used}}</code>, <code>{{files_used}}</code>, <code>{{inbox_url}}</code>, <code>{{plans_url}}</code>, <code>{{retention}}</code>, <code>{{retention_days}}</code></td></tr>
     </tbody>
   </table>
   <h3>API Endpoints</h3>
