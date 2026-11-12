@@ -482,6 +482,21 @@
     provider's own answer.
   </p>
 
+  <h3>Testing a Rule Before a Caller Rings</h3>
+  <p>
+    Above the rule list there is a <strong>Test a caller</strong> box. Type a phone number, press
+    <strong>Test this number</strong>, and the screen answers the two questions you cannot otherwise
+    check without waiting for a real missed call: <em>would any of my rules answer this caller right
+    now</em>, and <em>what would the caller actually receive</em>. It reads your rules exactly the way
+    an inbound call does — the same priority order, the same triggers, the same current time — and
+    reports the first rule that matches, together with the text it would send (for a Callback rule it
+    tells you a callback would be queued instead). Testing writes nothing: no call appears in the Call
+    Log, no message is queued, no text leaves the platform, so you can press it as often as you like.
+    A number that no rule answers is worth knowing about too — the box says so in plain words, and
+    tells you whether that is because you have no enabled rules yet or because every rule you have is
+    a time-of-day or day-of-week rule sitting outside its window.
+  </p>
+
   <h3>Managing Rules</h3>
   <ul>
     <li><strong>Edit</strong> — click <strong>Edit</strong> on any rule row.</li>
