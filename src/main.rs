@@ -9,6 +9,7 @@ mod email_provider;
 mod error;
 mod feature_registry;
 mod features;
+mod feedback;
 mod handlers;
 mod image_store;
 mod login_throttle;

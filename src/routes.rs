@@ -198,6 +198,10 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/private-email",
             crate::private_email::router(state.clone()),
         )
+        // Customer feedback (kanban B209, t_2b4e36f9): any signed-in user may POST an idea / bug /
+        // complaint; the GET arm is platform-operator only (enforced in the handler, same as the
+        // sibling apps). Carries the same auth middleware the workspaces router uses.
+        .nest("/api/v1/feedback", crate::feedback::router(state.clone()))
         .route("/api/v1/auth/me", get(auth_handlers::me))
         .route("/api/v1/me/usage", get(auth_handlers::get_usage))
         // The TENANT-facing plan catalogue (kanban t_a57ae7db). The console could see its own

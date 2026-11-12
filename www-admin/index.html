@@ -3117,6 +3117,9 @@ const App = () => {
     // actually left — the route had no screen (2026-10-14) and the ops catalogue only showed raw JSON.
     { id: 'email-provider', label: 'Email Provider', icon: '📧', adminOnly: true },
     { id: 'payment-providers', label: 'Payment Providers', icon: '💳', adminOnly: true },
+    // Customer feedback queue (kanban B209, t_2b4e36f9): idea / bug / complaint from any signed-in
+    // user, read here by the platform operator. adminOnly: platform-only — tenants never see it.
+    { id: 'feedback', label: 'Feedback', icon: '💬', adminOnly: true },
     // The customer's own plan ladder (2026-11-08): GET /api/v1/plans + POST /api/v1/checkout/create
     // existed with no console screen, so the sidebar printed the tier's name and offered no way to
     // see or change it. Sits beside My Account because that is where a workspace admin looks for it.
@@ -4123,7 +4126,41 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders };
+  // ---- FEEDBACK QUEUE (kanban B209, t_2b4e36f9) ----
+  // The team-side read of the Submit Feedback button: idea / bug / complaint from any signed-in
+  // user, each row carrying WHO, WHICH ACCOUNT, WHICH APP and WHICH SCREEN it came from. Platform
+  // operator only — the nav entry is adminOnly and the GET handler refuses anyone else.
+  const Feedback = () => {
+    const st = viewState('feedback', { _loaded: false, items: [], err: null });
+    const load = async () => {
+      try {
+        const d = await API.get('/feedback');
+        st.items = Array.isArray(d.feedback) ? d.feedback : [];
+        st.err = null;
+      } catch (e) { st.err = (e && e.message) || 'request failed'; }
+      renderApp();
+    };
+    if (!st._loaded) { st._loaded = true; load(); }
+    return html`<div>
+      <div class="mb-4"><h2 class="text-xl font-bold">Feedback</h2>
+        <p class="text-sm text-gray-500">What customers told us — idea, bug or complaint, with the account, person, app and screen it came from.</p></div>
+      ${st.err ? html`<div class="card" style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca">Failed to load feedback: ${st.err}</div>` : null}
+      ${!st.err && st.items.length === 0 ? html`<div class="card" style="text-align:center;padding:40px;color:#64748b">No feedback yet.</div>` : null}
+      ${st.items.map(f => {
+        const who = [f.name, f.email].filter(Boolean).join(' \u00b7 ') || 'unknown';
+        return html`<div class="card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:6px;flex-wrap:wrap">
+            <strong>${f.kind}</strong>
+            <span style="color:#64748b;font-size:12px">${f.app} \u00b7 ${f.screen} \u00b7 ${f.created_at}</span>
+          </div>
+          <p style="margin:0 0 6px;white-space:pre-wrap">${f.message}</p>
+          <div style="color:#64748b;font-size:12px">${who}</div>
+        </div>`;
+      })}
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
@@ -4159,6 +4196,13 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       <a class="nav-item" id="admin-guide-link" href="/admin-guide.html" target="_blank" rel="noopener">
         <span>📖</span><span class="nav-text">Admin Guide</span>
       </a>
+      <!-- Updates + Roadmap (kanban B209, t_2b4e36f9): the ONE canonical fleet-wide URL each. -->
+      <a class="nav-item" id="updates-link" href="https://swiftsoftware.net/updates" target="_blank" rel="noopener">
+        <span>🆕</span><span class="nav-text">Updates</span>
+      </a>
+      <a class="nav-item" id="roadmap-link" href="https://swiftsoftware.net/roadmap" target="_blank" rel="noopener">
+        <span>🗺️</span><span class="nav-text">Roadmap</span>
+      </a>
       <button type="button" class="nav-item text-red-500 mt-auto" onClick=${() => { API.logout(); S.view = 'dashboard'; renderApp(); }} aria-label="Logout">
         <span>🚪</span><span class="nav-text">Logout</span>
       </button>
@@ -4172,6 +4216,88 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>
   </div>`;
 };
+
+// ── Submit Feedback (kanban B209, t_2b4e36f9) ─────────────────────────────────────────────
+// A floating "Submit Feedback" button visible on every screen. It captures WHO (the signed-in
+// session), WHICH ACCOUNT (the session's aid), WHICH APP (MissedCall Respondr, recorded
+// server-side) and WHICH SCREEN (S.view) — so nothing arrives anonymous or untraceable. The team
+// reads it on the platform-only Feedback tab. Linked Updates + Roadmap open the one canonical URL.
+let __feedbackKind = 'idea';
+function feedbackToast(msg, ok) {
+  const t = document.createElement('div');
+  t.setAttribute('role', 'status');
+  t.style.cssText = 'position:fixed;bottom:84px;right:20px;z-index:11000;background:' + (ok ? '#059669' : '#dc2626') + ';color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:340px;font-family:Inter,system-ui,sans-serif';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 4500);
+}
+function openFeedbackModal() {
+  if (!API.token) { feedbackToast('Sign in to send feedback', false); return; }
+  const existing = document.getElementById('feedbackModal');
+  if (existing) existing.remove();
+  const screen = String(S.view || '');
+  const overlay = document.createElement('div');
+  overlay.id = 'feedbackModal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10000';
+  const kindBtn = function (k, label) {
+    return '<button type="button" class="btn btn-sm ' + (k === 'idea' ? '' : 'btn-outline') + '" data-fbk="' + k + '">' + label + '</button>';
+  };
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;font-family:Inter,system-ui,sans-serif">'
+    + '<h2 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Submit Feedback</h2>'
+    + '<p style="color:#64748b;font-size:13px;margin:0 0 12px">Tell us what is on your mind — an idea, a bug, or a complaint. It is sent with your account and the screen you are on, so we can follow up.</p>'
+    + '<div id="feedbackKinds" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+    + kindBtn('idea', '💡 Idea')
+    + kindBtn('bug', '🐞 Bug')
+    + kindBtn('complaint', '⚠️ Complaint')
+    + '</div>'
+    + '<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">Screen: ' + screen + '</div>'
+    + '<textarea id="feedbackMsg" rows="5" class="input" style="resize:vertical;box-sizing:border-box" placeholder="What happened, or what should we build?"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
+    + '<button type="button" class="btn btn-outline" id="feedbackCancel">Cancel</button>'
+    + '<button type="button" class="btn" id="feedbackSend">Send feedback</button>'
+    + '</div>'
+    + '</div>';
+  document.body.appendChild(overlay);
+  __feedbackKind = 'idea';
+  overlay.querySelectorAll('[data-fbk]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      __feedbackKind = b.getAttribute('data-fbk');
+      overlay.querySelectorAll('[data-fbk]').forEach(function (x) {
+        x.className = 'btn btn-sm ' + (x === b ? '' : 'btn-outline');
+      });
+    });
+  });
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#feedbackCancel').addEventListener('click', function () { overlay.remove(); });
+  overlay.querySelector('#feedbackSend').addEventListener('click', function () {
+    const msg = document.getElementById('feedbackMsg');
+    const sendBtn = document.getElementById('feedbackSend');
+    if (!msg || !msg.value.trim()) { feedbackToast('Please write a message', false); return; }
+    sendBtn.disabled = true; sendBtn.textContent = 'Sending...';
+    API.post('/feedback', { kind: __feedbackKind, screen: String(S.view || ''), message: msg.value.trim() })
+      .then(function () {
+        overlay.remove();
+        feedbackToast('Thanks — your feedback was sent', true);
+      })
+      .catch(function (e) {
+        sendBtn.disabled = false; sendBtn.textContent = 'Send feedback';
+        feedbackToast('Could not send: ' + ((e && e.message) || 'please try again'), false);
+      });
+  });
+  const ta = document.getElementById('feedbackMsg');
+  if (ta) ta.focus();
+}
+(function () {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'feedbackFab';
+  btn.setAttribute('aria-label', 'Submit feedback');
+  btn.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9000;display:flex;align-items:center;gap:8px;background:#2563eb;color:#fff;border:none;border-radius:28px;padding:12px 18px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.25);font-family:Inter,system-ui,sans-serif';
+  btn.innerHTML = '💬 Feedback';
+  btn.addEventListener('click', openFeedbackModal);
+  document.body.appendChild(btn);
+})();
 
 const renderApp = () => { render(html`<${App} />`, document.getElementById('app')); if (window.inlineGuidePage) window.inlineGuidePage(API.token ? S.view : ''); };
 renderApp();

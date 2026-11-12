@@ -450,6 +450,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000053_storage_notice_rung_guard",
             include_str!("../migrations/000053_storage_notice_rung_guard.sql"),
         ),
+        // Customer feedback (kanban B209, t_2b4e36f9): the `feedback` table behind the
+        // Submit Feedback button + operator queue. Fully idempotent (CREATE TABLE IF NOT EXISTS +
+        // CREATE INDEX IF NOT EXISTS) because this runner re-executes every entry on every boot,
+        // and `include_str!` of a brand-new file is not a dependency of the previous build, so this
+        // entry is also what forces the rebuild to embed the new .sql.
+        (
+            "000054_feedback",
+            include_str!("../migrations/000054_feedback.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
