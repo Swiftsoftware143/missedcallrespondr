@@ -479,6 +479,18 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000056_api_keys_one_live_per_tenant",
             include_str!("../migrations/000056_api_keys_one_live_per_tenant.sql"),
         ),
+        // One PENDING call-back per inbound call. The Respond route and the rules' `callback` arm
+        // both insert a call_back follow-up; nothing stopped a second press from filing the same
+        // caller again (measured live 2026-11-13: three presses -> three pending rows for one
+        // missed call). A PARTIAL unique index over (call_id) WHERE follow_type='call_back' AND
+        // status='pending' is the store-level backstop; the handler answers `already_scheduled`.
+        // Fully idempotent (fixed-point de-duplication + CREATE UNIQUE INDEX IF NOT EXISTS)
+        // because this runner re-executes every file per boot, and `include_str!` of a brand-new
+        // file is also what forces the rebuild to embed the new .sql.
+        (
+            "000057_follow_ups_one_pending_call_back",
+            include_str!("../migrations/000057_follow_ups_one_pending_call_back.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

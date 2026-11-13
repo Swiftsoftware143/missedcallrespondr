@@ -186,24 +186,69 @@ pub async fn respond_to_call(
     .await?
     .ok_or_else(|| AppError::NotFound("Call not found".into()))?;
 
-    // Create follow-up for missed calls
-    if call.disposition == "missed" {
-        let follow_id = Uuid::new_v4();
-        let now = chrono::Utc::now().naive_utc();
-        sqlx::query(
-            "INSERT INTO follow_ups (id, call_id, follow_type, scheduled_at, status, tenant_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-        )
-        .bind(follow_id)
-        .bind(id)
-        .bind("call_back")
-        .bind(now + chrono::Duration::hours(1))
-        .bind("pending")
-        .bind(claims.aid)
-        .bind(now)
-        .bind(now)
-        .execute(&state.pool)
-        .await?;
+    // A call that was ANSWERED needs no call-back. Before this the route answered "Response
+    // queued" for every disposition while writing a follow-up only for `missed`, so the screen
+    // told a tenant a response was queued for a call it had already handled. Refusing it by name
+    // is the honest answer, and it writes nothing.
+    if call.disposition != "missed" {
+        return Ok(Json(serde_json::json!({
+            "status": "nothing_to_do",
+            "message": "Only a missed call gets a call-back — this call was answered.",
+        })));
     }
 
-    Ok(Json(serde_json::json!({"message": "Response queued"})))
+    // ONE pending call-back per call. Every press used to INSERT a fresh row, so a reload and a
+    // second press filed the same caller again (measured live 2026-11-13: three presses of one
+    // missed call produced three 'pending' call_back rows, and the Follow-ups list showed the
+    // caller three times). Answer `already_scheduled` instead of writing a duplicate, and let the
+    // partial unique index from migration 000057 settle a race between two requests.
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM follow_ups WHERE call_id = $1 AND tenant_id = $2 \
+         AND follow_type = 'call_back' AND status = 'pending' ORDER BY created_at LIMIT 1",
+    )
+    .bind(id)
+    .bind(claims.aid)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some(follow_up_id) = existing {
+        return Ok(Json(serde_json::json!({
+            "status": "already_scheduled",
+            "follow_up_id": follow_up_id,
+            "message": "A call-back for this call is already scheduled",
+        })));
+    }
+
+    let follow_id = Uuid::new_v4();
+    let now = chrono::Utc::now().naive_utc();
+    let inserted = sqlx::query(
+        "INSERT INTO follow_ups (id, call_id, follow_type, scheduled_at, status, tenant_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+    )
+    .bind(follow_id)
+    .bind(id)
+    .bind("call_back")
+    .bind(now + chrono::Duration::hours(1))
+    .bind("pending")
+    .bind(claims.aid)
+    .bind(now)
+    .bind(now)
+    .execute(&state.pool)
+    .await;
+
+    match inserted {
+        Ok(_) => Ok(Json(serde_json::json!({
+            "status": "scheduled",
+            "follow_up_id": follow_id,
+            "message": "Response queued",
+        }))),
+        // A concurrent press won the race and the index refused the duplicate: the store holds
+        // the one pending call-back, which is exactly what this press wanted.
+        Err(sqlx::Error::Database(db)) if db.code().as_deref() == Some("23505") => {
+            Ok(Json(serde_json::json!({
+                "status": "already_scheduled",
+                "message": "A call-back for this call is already scheduled",
+            })))
+        }
+        Err(e) => Err(e.into()),
+    }
 }
