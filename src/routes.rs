@@ -229,6 +229,15 @@ pub fn create_router(state: AppState) -> Router {
         // and answers a fresh token so the device that pressed it stays signed in. NOT in
         // `auth::route_policy::PUBLIC_ROUTES` — an anonymous caller answers 401 at the boundary.
         .route("/api/v1/auth/logout-all", post(auth_handlers::logout_all))
+        // A customer's own exit door (2026-11-13). Three of the fleet's apps already had it; here the
+        // only way out was asking support to DELETE the user row, and every foreign key from the
+        // workspace CASCADEs — so a privacy request took the calls, contacts and history with it. The
+        // server records a closure as a STATE (password + the word CLOSE re-checked in the handler).
+        // NOT in `auth::route_policy::PUBLIC_ROUTES`: an anonymous caller is refused at the boundary.
+        .route(
+            "/api/v1/auth/close-account",
+            post(auth_handlers::close_account),
+        )
         // The door for a customer whose first password never arrived: `register` mints it and mails
         // it, and when that send fails the account is otherwise unreachable (a reset code would fail
         // the same way). Authenticated by the token `register` returned, and accepted ONLY while that

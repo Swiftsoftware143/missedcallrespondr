@@ -57,6 +57,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:linear-g
   var em=(q.get('email')||'').trim();
   if(em){document.getElementById('e').value=em;var p=document.getElementById('p');if(p)p.focus();}
   if(q.get('from')==='admin'){var n=document.getElementById('why');if(n)n.style.display='block';}
+  // A customer who has just closed their own account (2026-11-13) arrives here with ?closed=1. The
+  // closure is a state, not a delete, so the sentence says what happened and what to do next.
+  if(q.get('closed')==='1'){var cm=document.getElementById('m');cm.className='msg i';cm.style.textAlign='left';cm.textContent='Your account is closed. Your data is still on record, so contact support if you want it reopened.';}
 }catch(err){}})();
 function L(){
 var e=document.getElementById("e").value.trim(),p=document.getElementById("p").value,m=document.getElementById("m"),b=document.getElementById("b");

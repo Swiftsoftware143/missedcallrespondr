@@ -615,7 +615,10 @@ const Profile = () => {
     ecNew: '', ecMsg: null, ecErr: null, ecBusy: false,
     // The "sign out every other device" card (2026-11-01): its own busy flag and its own sentence,
     // so a revocation cannot be mistaken for a failed profile save.
-    soMsg: null, soErr: null, soBusy: false
+    soMsg: null, soErr: null, soBusy: false,
+    // The exit door (2026-11-13): whether the form is revealed, the typed password and the word, and
+    // its own sentence, so a refusal is never mistaken for a failed profile save.
+    caArm: false, caPw: '', caWord: '', caMsg: null, caErr: null, caBusy: false
   });
   // Seed the drafts ONCE from the account row (never on every render — that is what wiped typed
   // values in the sibling consoles).
@@ -763,6 +766,35 @@ const Profile = () => {
     st.soBusy = false; renderApp();
   };
 
+  // ── CLOSE MY ACCOUNT (2026-11-13) ────────────────────────────────────────────────────────────
+  // The exit door. Until now the only way out of this app was asking support to DELETE the user row,
+  // and every foreign key from the workspace CASCADEs — so a privacy request destroyed the calls,
+  // contacts and history with it. The server records a closure as a STATE
+  // (POST /auth/close-account re-checks the password and the word CLOSE itself). Two deliberate
+  // steps: the first only REVEALS the form, the second is the red button, and its refusals land in
+  // the card's own sentence rather than as a failed save.
+  const closeAcct = async () => {
+    st.caMsg = null; st.caErr = null;
+    if (!st.caPw) { st.caErr = 'Enter your password.'; renderApp(); return; }
+    if ((st.caWord || '').trim().toUpperCase() !== 'CLOSE') { st.caErr = 'Type CLOSE in the box to confirm.'; renderApp(); return; }
+    if (!window.confirm('Close this account? You will be signed out and will not be able to sign in again.')) return;
+    st.caBusy = true; renderApp();
+    try {
+      const d = await API.post('/auth/close-account', { password: st.caPw, confirm: (st.caWord || '').trim() });
+      st.caBusy = false;
+      // The server has already moved the session line, so this tab's token is dead: drop it here
+      // rather than let the next call bounce the customer with an "expired session".
+      API.logout();
+      st.caMsg = (d && d.message) || 'Your account is closed.';
+      renderApp();
+      setTimeout(() => { location.href = '/login.html?closed=1'; }, 1400);
+    } catch (e) {
+      st.caBusy = false;
+      st.caErr = (e && e.message) || 'Could not close the account.';
+      renderApp();
+    }
+  };
+
   const pic = pictureUrl();
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Profile</h2>
@@ -835,6 +867,26 @@ const Profile = () => {
         ${st.soErr && html`<p class="text-sm text-red-700" id="signout-others-msg" role="status" aria-live="polite">${st.soErr}</p>`}
         ${!st.soErr && st.soMsg && html`<p class="text-sm" style="color:#15803d" id="signout-others-msg" role="status" aria-live="polite">${st.soMsg}</p>`}
         <button id="signout-others" class="btn btn-sm btn-outline" disabled=${st.soBusy} onClick=${signOutOthers}>Sign out other devices</button>
+      </div>
+    </div>
+    <!-- CLOSE MY ACCOUNT (2026-11-13). The exit door: a STATE, never a delete — the workspace, its
+         calls and its contacts stay on record for the operator. Two deliberate steps: the first only
+         reveals the form; the red button is last on the screen on purpose. -->
+    <div class="card" id="close-account-card">
+      <h3 class="font-semibold mb-3">🚪 Close my account</h3>
+      <div class="space-y-3" style="max-width:520px">
+        <p class="text-sm text-gray-600">This ends your sign-in and every API key on the workspace, and you will not be able to sign in again. Your calls, contacts, follow-ups, templates and settings are kept for our records and are not deleted, so support can reopen the account if you close it by mistake.</p>
+        ${st.caErr && html`<p class="text-sm text-red-700" id="close-account-msg" role="status" aria-live="polite">${st.caErr}</p>`}
+        ${!st.caErr && st.caMsg && html`<p class="text-sm" style="color:#15803d" id="close-account-msg" role="status" aria-live="polite">${st.caMsg}</p>`}
+        ${!st.caArm
+          ? html`<button id="close-account-arm" class="btn btn-sm btn-outline" style="color:#b91c1c;border-color:#fca5a5" onClick=${() => { st.caArm = true; renderApp(); }}>Close my account</button>`
+          : html`<div id="close-account-form" class="space-y-3">
+              <div><label class="text-sm font-medium block mb-1" for="ca-pw">Your password (proves it is you)</label>
+                <input id="ca-pw" class="input" type="password" autocomplete="current-password" value=${st.caPw} onInput=${e => { st.caPw = e.target.value; }} /></div>
+              <div><label class="text-sm font-medium block mb-1" for="ca-word">Type CLOSE to confirm</label>
+                <input id="ca-word" class="input" autocomplete="off" placeholder="CLOSE" value=${st.caWord} onInput=${e => { st.caWord = e.target.value; }} /></div>
+              <button id="close-account-do" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:#b91c1c" disabled=${st.caBusy} onClick=${closeAcct}>Close my account permanently</button>
+            </div>`}
       </div>
     </div>
   </div>`;

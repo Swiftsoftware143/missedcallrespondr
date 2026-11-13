@@ -491,6 +491,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000057_follow_ups_one_pending_call_back",
             include_str!("../migrations/000057_follow_ups_one_pending_call_back.sql"),
         ),
+        // A customer can close their own account (2026-11-13). `closed_at` records a closure as a
+        // STATE instead of deleting the row, because every foreign key from the workspace CASCADEs
+        // and a privacy request would otherwise destroy the calls, contacts and history with it.
+        // Idempotent (ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS) because this runner
+        // re-executes every file per boot, and `include_str!` of a brand-new file is also what
+        // forces this rebuild to embed the new .sql.
+        (
+            "000058_users_closed_at",
+            include_str!("../migrations/000058_users_closed_at.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

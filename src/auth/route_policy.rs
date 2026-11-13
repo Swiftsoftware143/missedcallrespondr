@@ -372,6 +372,8 @@ mod tests {
             "/api/v1/me/usage",
             "/api/v1/auth/profile",
             "/api/v1/auth/password",
+            // closing one's own account is an authenticated act on the caller's own row
+            "/api/v1/auth/close-account",
             "/api/v1/auth/avatar",
             "/api/v1/settings/branding",
             "/api/v1/settings/branding/logo",
