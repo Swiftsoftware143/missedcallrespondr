@@ -3125,6 +3125,8 @@ const App = () => {
     // see or change it. Sits beside My Account because that is where a workspace admin looks for it.
     { id: 'my-plan', label: 'Plan & Pricing', icon: '💳' },
     { id: 'team', label: 'Your Team', icon: '👥' },
+    // MCP: fleet slot directly above the account/settings entry (docs/fleet-mcp-nav-convention.md).
+    { id: 'mcp', label: 'MCP', icon: '🤖' },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
 
@@ -3993,6 +3995,138 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
+  // ===== MCP (fleet slot directly above the account/settings entry; docs/fleet-mcp-nav-convention.md)
+  // One entry, one panel, same slot relative to the account screen in every app. The token is THIS
+  // account's own API key — minted with the account — and Reveal / Regenerate call the same
+  // tenant-scoped routes the backend already serves, so this screen and the key can never disagree.
+  const MCP_ENDPOINT = 'https://hooks.swiftsoftware.net/mcp';
+  const MCP_TOOLS = [
+    ['missedcallrespondr_summary / _search', 'leads: the missed-call record (name, phone, status)'],
+    ['missedcallrespondr_contacts_summary / _search', 'contacts: your address book'],
+    ['missedcallrespondr_tickets_summary / _search', 'tickets: subject, status'],
+    ['missedcallrespondr_ticket_messages_summary / _search', 'ticket messages: author, body'],
+    ['missedcallrespondr_workspaces_summary / _search', 'workspaces: name, description'],
+    ['missedcallrespondr_activity_summary / _search', 'activity: action, entity type'],
+    ['missedcallrespondr_plans_summary / _search', 'your plan: status, plan, start date'],
+  ];
+
+  const Mcp = () => {
+    const [keys, setKeys] = useState(null);
+    const [shown, setShown] = useState(null);
+    const [msg, setMsg] = useState(null);
+    const [busy, setBusy] = useState(false);
+
+    const load = () => API.get('/api-keys')
+      .then(d => { setKeys((d && d.api_keys) || []); })
+      .catch(e => setMsg({ ok: false, text: 'Could not load your key: ' + e.message }));
+
+    useEffect(() => { load(); }, []);
+
+    const active = (keys || []).filter(k => !k.revoked_at)[0] || null;
+
+    const reveal = async (id) => {
+      const pw = window.prompt('Enter YOUR account password to show this key. Every view is recorded.');
+      if (!pw) return;
+      setBusy(true);
+      try {
+        const r = await API.post('/api-keys/' + id + '/reveal', { password: pw });
+        setShown({ id, key: r.token || '' });
+        setMsg(null);
+      } catch (e) { setMsg({ ok: false, text: 'Could not show the key: ' + e.message }); }
+      setBusy(false);
+    };
+
+    const regenerate = async (id) => {
+      if (!window.confirm('Regenerate this key? The current key stops working immediately — any AI client or API call already using it stops until you paste the new key in.')) return;
+      setBusy(true);
+      try {
+        const r = await API.post('/api-keys/' + id + '/regenerate', {});
+        setShown({ id: r.id, key: r.token || '' });
+        setMsg({ ok: true, text: 'New key created — copy it and paste it into your client.' });
+        await load();
+      } catch (e) { setMsg({ ok: false, text: 'Could not regenerate the key: ' + e.message }); }
+      setBusy(false);
+    };
+
+    const copy = async (text, elId) => {
+      if (!text) { setMsg({ ok: false, text: 'Reveal the key first, then copy.' }); return; }
+      try { await navigator.clipboard.writeText(text); setMsg({ ok: true, text: 'Copied to clipboard.' }); return; } catch (e) {}
+      const el = elId ? document.getElementById(elId) : null;
+      if (!el) { setMsg({ ok: false, text: 'Select the text and copy it manually.' }); return; }
+      const r = document.createRange(); r.selectNodeContents(el);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      try { document.execCommand('copy'); setMsg({ ok: true, text: 'Copied to clipboard.' }); }
+      catch (_) { setMsg({ ok: false, text: 'Select the text and copy it manually.' }); }
+    };
+
+    const connect = JSON.stringify({ mcpServers: { swiftsoftware: { url: MCP_ENDPOINT, headers: { Authorization: 'Bearer YOUR_API_KEY' } } } }, null, 2);
+    const shownHere = shown && active && shown.id === active.id ? shown.key : (shown ? shown.key : '');
+
+    return html`
+      <div>
+        <header class="mb-5"><h1 class="text-xl font-extrabold text-gray-900">MCP</h1>
+          <p class="text-sm text-gray-500 mt-1">Connect an AI tool (Claude, Cursor, or your own agent) to read this account. Read-only: it can look things up, never change them.</p></header>
+
+        ${msg ? html`<div class="card" style="border-left:4px solid ${msg.ok ? '#16a34a' : '#dc2626'}"><p class="text-sm" style="color:${msg.ok ? '#047857' : '#b91c1c'}">${msg.text}</p></div>` : ''}
+
+        <div class="card" style="margin-bottom:18px">
+          <h3 class="font-semibold text-gray-800 mb-2">Endpoint</h3>
+          <div class="flex gap-2 items-center flex-wrap">
+            <code id="mcp-endpoint" style="flex:1;min-width:260px;word-break:break-all;background:#0f172a;color:#7dd3fc;padding:10px 14px;border-radius:10px;font-size:13px">${MCP_ENDPOINT}</code>
+            <button class="btn btn-sm" onClick=${() => copy(MCP_ENDPOINT, 'mcp-endpoint')}>Copy</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px">
+          <h3 class="font-semibold text-gray-800 mb-1">Your token</h3>
+          <p class="text-sm text-gray-500 mb-3">The server accepts this account's API key as a Bearer token — the key this app created with your account. Treat it like a password: anyone holding it can read this account.</p>
+          ${keys === null ? html`<p class="text-sm text-gray-500">Loading your key…</p>`
+            : !active ? html`<div class="empty">No active key on this account. Use <b>Create my key</b> to make one.</div>
+                <div style="margin-top:10px"><button class="btn btn-sm" disabled=${busy} onClick=${async () => {
+                  setBusy(true);
+                  try { const r = await API.post('/api-keys', { name: 'MCP client' }); setShown({ id: r.id, key: r.token || '' }); await load(); }
+                  catch (e) { setMsg({ ok: false, text: 'Could not create the key: ' + e.message }); }
+                  setBusy(false);
+                }}>Create my key</button></div>`
+            : html`
+              <div class="flex items-center gap-2 flex-wrap mb-3">
+                <code style="background:#f1f5f9;color:#334155;padding:8px 12px;border-radius:8px;font-size:13px">${active.key_prefix || '—'}…</code>
+                <span class="text-xs text-gray-500">${active.name || 'default'}</span>
+                <button class="btn btn-sm btn-outline" disabled=${busy} onClick=${() => reveal(active.id)}>Reveal</button>
+                <button class="btn btn-sm btn-outline" onClick=${() => copy(shownHere, 'mcp-revealed-key')}>Copy</button>
+                <button class="btn btn-sm btn-outline" disabled=${busy} onClick=${() => regenerate(active.id)}>Regenerate</button>
+              </div>
+              ${shown && shown.key ? html`
+                <div style="border:2px solid #16a34a;border-radius:10px;padding:12px 14px;margin-top:12px">
+                  <p class="text-sm text-gray-500 mb-2">Your key — copy it now; anyone with it can read this account:</p>
+                  <div class="flex gap-2 flex-wrap items-center">
+                    <code id="mcp-revealed-key" style="flex:1;min-width:260px;word-break:break-all;background:#0f172a;color:#7dd3fc;padding:10px 14px;border-radius:10px;font-size:13px">${shown.key}</code>
+                    <button class="btn btn-sm" onClick=${() => copy(shown.key, 'mcp-revealed-key')}>Copy</button>
+                    <button class="btn btn-sm btn-outline" onClick=${() => setShown(null)}>Hide</button>
+                  </div>
+                </div>` : ''}
+            `}
+        </div>
+
+        <div class="card" style="margin-bottom:18px">
+          <h3 class="font-semibold text-gray-800 mb-2">What it can read</h3>
+          <ul class="text-sm text-gray-700 list-disc pl-5" style="line-height:1.7">
+            ${MCP_TOOLS.map(t => html`<li><code style="font-size:12px">${t[0]}</code> — ${t[1]}</li>`)}
+          </ul>
+          <p class="text-xs text-gray-500 mt-4">Every tool is read-only and limited to your own account. There is no write tool and no free-form SQL door.</p>
+        </div>
+
+        <div class="card">
+          <h3 class="font-semibold text-gray-800 mb-2">Connect</h3>
+          <p class="text-sm text-gray-500 mb-2">Paste this into your client's config (Claude Desktop <code>claude_desktop_config.json</code>, Cursor <code>.cursor/mcp.json</code>) and replace <code>YOUR_API_KEY</code> with the key above.</p>
+          <div class="flex gap-2 items-start flex-wrap">
+            <pre id="mcp-connect-config" style="flex:1;min-width:260px;margin:0;background:#0f172a;color:#7dd3fc;padding:12px 14px;border-radius:10px;font-size:12px;overflow:auto">${connect}</pre>
+            <button class="btn btn-sm" onClick=${() => copy(connect, 'mcp-connect-config')}>Copy</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
   // ── PLAN & PRICING (2026-11-08) ────────────────────────────────────────────────────────────────
   // The tenant plan catalogue (`GET /api/v1/plans`, ACTIVE tiers only) and the checkout door
   // (`POST /api/v1/checkout/create`) both shipped, and NO console screen read them: the sidebar
@@ -4160,7 +4294,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback };
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, mcp: Mcp, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">

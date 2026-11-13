@@ -937,7 +937,30 @@
     enforces the same rule, so a member can never rename or delete a workspace.
   </p>
 
-  <!-- Plan and Billing -->
+  <!-- MCP -->
+  <h2 id="mcp">MCP — connect an AI tool</h2>
+  <p>
+    <strong>MCP</strong> in the console navigation (directly above <strong>My Account</strong>) connects
+    an AI assistant &mdash; Claude, Cursor, or your own agent &mdash; to this account. It can
+    <em>read</em> only: there is no tool that changes, deletes or sends anything, and every answer is
+    limited to your own workspace.
+  </p>
+  <p>
+    The screen shows the endpoint (<code>https://hooks.swiftsoftware.net/mcp</code>) and your
+    account&rsquo;s API key, which is created together with your account. <strong>Reveal</strong> asks
+    for your password before it shows the key, and every reveal is recorded. <strong>Copy</strong>
+    puts the key on your clipboard, and <strong>Regenerate</strong> replaces it &mdash; the old key
+    stops working the moment the new one is issued, so any AI client still using it must be given the
+    new key.
+  </p>
+  <p>
+    The <strong>Connect</strong> block shows the exact config to paste into Claude Desktop
+    (<code>claude_desktop_config.json</code>) or Cursor (<code>.cursor/mcp.json</code>). Treat the key
+    like a password: anyone holding it can read your account, so regenerate it if you think it has
+    been shared by mistake.
+  </p>
+
+  <!-- Plan & Billing -->
   <h2 id="plan-billing">💳 Plan &amp; Billing</h2>
   <p>
     The <strong>Plan &amp; Billing</strong> tab shows the plan this workspace is on right now (the
