@@ -71,14 +71,18 @@ fn presents_internal_key(state: &AppState, req: &Request) -> bool {
 
 /// Arm for every other guarded path: a credential this app already recognises.
 ///
-/// This app has exactly one session credential — the app JWT. `auth::models::validate_token` is the
-/// SAME verifier `auth_middleware` uses on the protected router, so a token that passes here cannot
-/// fail there. There is deliberately no issued-API-key shape: `migrations/000027_retire_api_keys.sql`
-/// retired that feature (`api_keys` is dropped and no auth path ever read a key — see
-/// `route_policy`'s module docs).
+/// Two shapes are admitted: the app JWT (validated here, the same verifier `auth_middleware` uses,
+/// so a token that passes cannot fail there) and — since the API-key surface was re-introduced
+/// (kanban t_b6d650d6, migration 000055) — any bearer of this app's `mcr_` key SHAPE. A key is
+/// only a *candidate* here: the boundary's job is "does this caller present a credential", not
+/// "is it valid", so a key-shaped token proceeds to `auth_middleware`, which does the real hash
+/// lookup and refuses anything invalid. Nothing here widens a caller's reach.
 fn presents_session_credential(state: &AppState, req: &Request) -> bool {
     match bearer(req) {
-        Some(token) => crate::auth::models::validate_token(token, &state.config.jwt_secret).is_ok(),
+        Some(token) => {
+            crate::auth::models::validate_token(token, &state.config.jwt_secret).is_ok()
+                || crate::handlers::api_key_handler::is_api_key(token)
+        }
         None => false,
     }
 }

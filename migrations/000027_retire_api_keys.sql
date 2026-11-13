@@ -52,5 +52,8 @@
 -- 1. the plan DATA row (the last place the capability was still "sold").
 DELETE FROM feature_limits WHERE feature_key IN ('max_api_keys', 'api_keys');
 
--- 2. the store itself (its two indexes go with it). No inbound FK — measured above.
-DROP TABLE IF EXISTS api_keys;
+-- 2. the store itself: NOT dropped any more. `api_keys` was REINTRODUCED by 000055 (this app now
+--    issues a durable bearer API key to every account — ADASwift shape: key_hash for auth +
+--    key_sealed for display). This runner re-executes every file on every boot, so a DROP here
+--    would wipe every minted key on each start. The plan residue above is still retired; only the
+--    table DROP is withdrawn.

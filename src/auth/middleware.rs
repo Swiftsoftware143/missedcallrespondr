@@ -150,12 +150,25 @@ pub async fn auth_middleware(
         )
     })?;
 
-    let claims = validate_token(token, &state.config.jwt_secret).map_err(|_| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid or expired token"})),
-        )
-    })?;
+    // A session token verifies; anything else may be one of this app's API keys (kanban t_b6d650d6).
+    // The key is resolved from its SHA-256 against `api_keys`, and its authority is the OWNING
+    // user's live role (handlers::api_key_handler::resolve_api_key) — the boundary checks below then
+    // apply to it unchanged: a deleted owner 401s, a demoted owner is refused, a suspended
+    // workspace 403s.
+    let claims = match validate_token(token, &state.config.jwt_secret) {
+        Ok(claims) => claims,
+        Err(_) => {
+            match crate::handlers::api_key_handler::resolve_api_key(&state.pool, token).await {
+                Some(claims) => claims,
+                None => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error": "Invalid or expired token"})),
+                    ));
+                }
+            }
+        }
+    };
 
     // The class gate (kanban t_92ec2f21): authenticated is not authorised. Everything under
     // `/api/v1/admin/*` (and the payment-provider config) is platform-admin only, decided HERE —

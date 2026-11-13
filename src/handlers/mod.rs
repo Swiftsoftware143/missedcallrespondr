@@ -1,4 +1,5 @@
 pub mod admin_handler;
+pub mod api_key_handler;
 pub mod branding_handler;
 pub mod calendar_events_handler;
 pub mod call_handler;

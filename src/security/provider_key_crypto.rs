@@ -172,6 +172,28 @@ pub async fn encrypt_for_storage(db: &PgPool, plaintext: &str) -> Result<String,
     Ok(format!("{}{}", ENC_PREFIX, b64))
 }
 
+/// Seal a plaintext on a SPECIFIC connection, so a caller that holds a transaction (the API-key
+/// mint) can seal and INSERT on the same connection. Mirrors [`encrypt_for_storage`]: same
+/// `enc:v1:` envelope, same master key, same fail-closed rule — only the executor differs.
+pub async fn seal_in(
+    conn: &mut sqlx::PgConnection,
+    plaintext: &str,
+) -> Result<String, CryptoError> {
+    let key = master_key().ok_or(CryptoError::NotConfigured)?;
+    if plaintext.is_empty() {
+        return Ok(String::new());
+    }
+    let b64: String = sqlx::query_scalar(
+        "SELECT replace(encode(pgp_sym_encrypt($1::text, $2::text, $3), 'base64'), chr(10), '')",
+    )
+    .bind(plaintext)
+    .bind(key)
+    .bind(PGP_OPTIONS)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(format!("{}{}", ENC_PREFIX, b64))
+}
+
 /// Decrypt a stored provider credential.
 ///
 /// A value without [`ENC_PREFIX`] is a legacy plaintext row and is returned unchanged.

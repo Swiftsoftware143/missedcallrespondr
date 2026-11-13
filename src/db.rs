@@ -459,6 +459,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000054_feedback",
             include_str!("../migrations/000054_feedback.sql"),
         ),
+        // API keys: the durable bearer credential every account auto-mints (kanban t_b6d650d6,
+        // re-introduced after the 000027 retirement). `CREATE TABLE IF NOT EXISTS` + indexes, fully
+        // idempotent because this runner re-executes every file per boot; `include_str!` of a
+        // brand-new file is not a dependency of the previous build, so this entry is also what
+        // forces the rebuild to embed the new .sql.
+        (
+            "000055_api_keys",
+            include_str!("../migrations/000055_api_keys.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

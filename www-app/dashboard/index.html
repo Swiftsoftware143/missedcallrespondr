@@ -79,6 +79,7 @@ window.appGuidePages = {
   // four things, so the entry names them: the logo, the display name, the colour, and the preview
   // that mails the sample to the customer's own address.
   branding:     { title: "Email Branding", desc: "Your logo, business name and colour, as they appear at the top of every email this account sends \u2014 welcome, password reset and receipts. Anything left blank keeps the MissedCall Respondr header.", actions: ["Upload your logo", "Save your brand name and colour", "Press Send me a preview email to see the real header in your own inbox"] },
+  apikeys:      { title: "API Keys", desc: "The key other software uses to reach this workspace on your behalf. Every account starts with one, and it stays viewable \u2014 press View, enter your account password, and you can copy it again any time.", actions: ["Press + Create key to add another", "Press View / Copy to see a key again", "Press Regenerate to replace a key you think leaked", "Press Revoke to turn a key off"] },
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
@@ -3118,6 +3119,137 @@ const WsSwitcher = () => {
   </div>`;
 };
 
+// ===== API KEYS (kanban t_b6d650d6 re-introduction) =====
+// The durable bearer credential every account auto-mints, and the customer can view / copy /
+// regenerate / revoke from here. The key is never "shown once": View asks for the account
+// password and the server decrypts the SEALED copy, so it can be shown again any time.
+const ApiKeys = () => {
+  const st = viewState('apikeys', {
+    loaded: false, keys: [], notice: null, error: null, busy: false,
+    revealId: null, revealPassword: '', revealResult: null, revealBusy: false, revealError: null,
+    regenError: null, newName: ''
+  });
+  const reload = () => {
+    API.get('/api-keys').then(d => {
+      st.keys = (d && d.api_keys) || [];
+      renderApp();
+    }).catch(e => {
+      st.error = 'Could not load API keys: ' + e.message;
+      renderApp();
+    });
+  };
+  if (!st.loaded) { st.loaded = true; reload(); }
+
+  const create = async () => {
+    st.busy = true; st.notice = null; st.error = null; renderApp();
+    try {
+      const d = await API.post('/api-keys', { name: st.newName || undefined });
+      st.newName = '';
+      st.revealResult = { id: d.id, key_prefix: d.key_prefix, token: d.token, name: d.name, isNew: true };
+      st.revealId = d.id;
+      reload();
+    } catch (e) { st.error = 'Create failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+
+  const openReveal = (k) => { st.revealId = k.id; st.revealPassword = ''; st.revealResult = null; st.revealError = null; renderApp(); };
+  const closeReveal = () => { st.revealId = null; st.revealResult = null; st.revealError = null; renderApp(); };
+  const doReveal = async () => {
+    st.revealBusy = true; st.revealError = null; renderApp();
+    try {
+      const d = await API.post('/api-keys/' + st.revealId + '/reveal', { password: st.revealPassword });
+      st.revealResult = { id: d.id, key_prefix: d.key_prefix, token: d.token };
+      st.revealPassword = '';
+    } catch (e) { st.revealError = e.message; }
+    st.revealBusy = false; renderApp();
+  };
+
+  const doRegenerate = async (k) => {
+    if (!confirm('Regenerate this key? Anything using the old key stops working immediately.')) return;
+    st.busy = true; st.regenError = null; st.notice = null; renderApp();
+    try {
+      const d = await API.post('/api-keys/' + k.id + '/regenerate', {});
+      st.revealResult = { id: d.id, key_prefix: d.key_prefix, token: d.token, name: d.name, isNew: true };
+      st.revealId = d.id;
+      reload();
+    } catch (e) { st.regenError = e.message; }
+    st.busy = false; renderApp();
+  };
+
+  const doRevoke = async (k) => {
+    if (!confirm('Revoke this key? Anything using it stops working immediately.')) return;
+    st.busy = true; st.error = null; st.notice = null; renderApp();
+    try {
+      await API.del('/api-keys/' + k.id);
+      st.notice = 'Key revoked';
+      reload();
+    } catch (e) { st.error = 'Revoke failed: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+
+  const copy = (tok) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(tok).then(() => { st.notice = 'Copied to clipboard'; renderApp(); }).catch(() => {});
+    }
+  };
+
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">API Keys</h2>
+    <p class="text-sm text-gray-500 mb-4">A key lets other software (or our AI assistant) reach this workspace on your behalf. It stays viewable — press View and enter your account password to see it again any time.</p>
+    ${st.error && html`<div class="imp-banner"><span>${st.error}</span></div>`}
+    ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:#059669;color:#065f46"><span>${st.notice}</span></div>`}
+    ${st.regenError && html`<div class="imp-banner"><span>Regenerate failed: ${st.regenError}</span></div>`}
+    <div class="card">
+      <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap">
+        <input class="input" style="max-width:260px" placeholder="New key name (optional)" value=${st.newName} onInput=${(e) => { st.newName = e.target.value; }} />
+        <button class="btn btn-sm" disabled=${st.busy} onClick=${create}>+ Create key</button>
+      </div>
+      ${st.keys.length === 0
+        ? html`<p class="text-sm text-gray-400">No keys yet. Every new account starts with one — press “+ Create key” to add another.</p>`
+        : html`<table class="table">
+          <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${st.keys.map(k => html`<tr>
+              <td>${k.name}</td>
+              <td><code>${k.key_prefix}…</code></td>
+              <td>${(k.created_at || '').slice(0, 10)}</td>
+              <td>${k.last_used_at ? k.last_used_at.slice(0, 10) : 'never'}</td>
+              <td>${k.revoked_at ? html`<span class="badge badge-red">Revoked</span>` : html`<span class="badge badge-green">Active</span>`}</td>
+              <td style="white-space:nowrap">
+                ${!k.revoked_at && html`<button class="btn btn-sm btn-outline" onClick=${() => openReveal(k)}>View / Copy</button>`}
+                ${!k.revoked_at && html`<button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${() => doRegenerate(k)}>Regenerate</button>`}
+                ${!k.revoked_at && html`<button class="btn btn-sm btn-red" disabled=${st.busy} onClick=${() => doRevoke(k)}>Revoke</button>`}
+              </td>
+            </tr>`)}
+          </tbody>
+        </table>`}
+    </div>
+    ${st.revealId !== null && html`<div class="modal">
+      <div class="modal-content">
+        <h3 class="text-lg font-bold mb-3">API key</h3>
+        ${st.revealResult
+          ? html`<div>
+              <div class="badge badge-blue mb-2">${st.revealResult.key_prefix}…</div>
+              <textarea class="input mb-2" rows="2" readonly>${st.revealResult.token}</textarea>
+              <div class="flex gap-2 justify-end">
+                <button class="btn btn-sm" onClick=${() => copy(st.revealResult.token)}>Copy</button>
+                <button class="btn btn-sm btn-outline" onClick=${closeReveal}>Done</button>
+              </div>
+            </div>`
+          : html`<div>
+              <p class="text-sm text-gray-500 mb-3">Enter your account password to see this key.</p>
+              ${st.revealError && html`<div class="imp-banner"><span>${st.revealError}</span></div>`}
+              <input class="input mb-3" type="password" placeholder="Your password" value=${st.revealPassword} onInput=${(e) => { st.revealPassword = e.target.value; }} />
+              <div class="flex gap-2 justify-end">
+                <button class="btn btn-sm btn-outline" onClick=${closeReveal}>Cancel</button>
+                <button class="btn btn-sm" disabled=${st.revealBusy} onClick=${doReveal}>Show key</button>
+              </div>
+            </div>`}
+      </div>
+    </div>`}
+  </div>`;
+};
+
 // ===== APP SHELL =====
 const App = () => {
   if (!API.token) return html`<${LoginView} />`;
@@ -3150,10 +3282,11 @@ const App = () => {
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'team', label: 'Your team', icon: '🤝' },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    { id: 'apikeys', label: 'API Keys', icon: '🔑' },
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, inbox: Inbox, workspaces: Workspaces, integrations: Integrations, team: Team, branding: Branding, billing: Billing, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, inbox: Inbox, workspaces: Workspaces, integrations: Integrations, team: Team, branding: Branding, apikeys: ApiKeys, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">

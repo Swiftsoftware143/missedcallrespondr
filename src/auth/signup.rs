@@ -289,9 +289,18 @@ pub async fn create_account(
         .await?;
     }
 
-    // The workspace, its owner and its plan row now exist as ONE unit of work. Commit BEFORE the
-    // mail: the mail paths below read the account back through the pool, and a notification is a
-    // published outcome, never part of the account's own transaction (kanban t_6f88820a).
+    // Auto-mint the account's API key on the SAME transaction (re-introduction of kanban
+    // t_b6d650d6). Every door — public signup, tag provision, paid checkout — funnels through
+    // create_account, so this is the ONE place the "every account gets a retrievable key"
+    // invariant holds. Fail closed: if the key cannot be sealed (no PROVIDER_KEY_ENC_SECRET), the
+    // whole account rolls back rather than be minted without a key.
+    crate::handlers::api_key_handler::mint_on(&mut tx, account_id, Some(user_id), "default")
+        .await?;
+
+    // The workspace, its owner, its plan row and its API key now exist as ONE unit of work. Commit
+    // BEFORE the mail: the mail paths below read the account back through the pool, and a
+    // notification is a published outcome, never part of the account's own transaction
+    // (kanban t_6f88820a).
     tx.commit().await?;
 
     // ── The welcome / credentials mail ───────────────────────────────────────────────────────────

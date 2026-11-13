@@ -8,11 +8,11 @@ use tower_http::cors::CorsLayer;
 use crate::{
     auth::{handlers as auth_handlers, middleware::auth_middleware},
     handlers::{
-        call_handler, call_log_handler, checkout_handler, contact_custom_field_handler,
-        contact_handler, coreswift_integration_handler, dashboard_handler, follow_up_handler,
-        integration_handler, integration_target_handler, lists_handler, message_handler,
-        message_template_handler, portfolio_handler, provider_keys_handler, response_rule_handler,
-        telnyx_handler,
+        api_key_handler, call_handler, call_log_handler, checkout_handler,
+        contact_custom_field_handler, contact_handler, coreswift_integration_handler,
+        dashboard_handler, follow_up_handler, integration_handler, integration_target_handler,
+        lists_handler, message_handler, message_template_handler, portfolio_handler,
+        provider_keys_handler, response_rule_handler, telnyx_handler,
     },
     state::AppState,
 };
@@ -518,6 +518,26 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/provider-keys/:provider/test",
             post(coreswift_integration_handler::test_provider_key),
+        )
+        // API keys (kanban t_b6d650d6 re-introduction): the durable bearer credential every
+        // account auto-mints and the customer manages from their settings screen. Tenant-scoped —
+        // no admin gate; `claims.aid` is the workspace. Reveal requires the caller's current
+        // password; regenerate is one atomic revoke-then-mint.
+        .route(
+            "/api/v1/api-keys",
+            get(api_key_handler::list_api_keys).post(api_key_handler::create_api_key),
+        )
+        .route(
+            "/api/v1/api-keys/:id/reveal",
+            post(api_key_handler::reveal_api_key),
+        )
+        .route(
+            "/api/v1/api-keys/:id/regenerate",
+            post(api_key_handler::regenerate_api_key),
+        )
+        .route(
+            "/api/v1/api-keys/:id",
+            axum::routing::delete(api_key_handler::revoke_api_key),
         )
         // Lists (each campaign owns its own fresh list)
         .route(
