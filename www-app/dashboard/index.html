@@ -80,6 +80,11 @@ window.appGuidePages = {
   // that mails the sample to the customer's own address.
   branding:     { title: "Email Branding", desc: "Your logo, business name and colour, as they appear at the top of every email this account sends \u2014 welcome, password reset and receipts. Anything left blank keeps the MissedCall Respondr header.", actions: ["Upload your logo", "Save your brand name and colour", "Press Send me a preview email to see the real header in your own inbox"] },
   apikeys:      { title: "API Keys", desc: "The key other software uses to reach this workspace on your behalf. Every account starts with one, and it stays viewable \u2014 press View, enter your account password, and you can copy it again any time.", actions: ["Press + Create key to add another", "Press View / Copy to see a key again", "Press Regenerate to replace a key you think leaked", "Press Revoke to turn a key off"] },
+  // MCP HAD NO ENTRY (cron 2026-11-13): appGuidePages carried a key for every customer view
+  // except this one, so the guide's round "?" silently disappeared on the MCP tab \u2014 the same
+  // defect earlier passes fixed for lists, calendar, team and branding. Measured live in Chromium
+  // on app.missedcallrespondr.com: MCP -> #ig-toggle display:none while API Keys/Calendar -> flex.
+  mcp:          { title: "MCP", desc: "Connects an AI tool \u2014 Claude Code, Cursor or your own agent \u2014 to read this workspace. Read-only: the tool can look, not change. The server accepts this workspace's API key as its token, so the key here is the same one the API Keys screen shows; the secret stays hidden until you press Reveal and enter your account password.", actions: ["Copy the endpoint into your AI tool's MCP settings", "Press Reveal and enter your account password to see the key", "Press Copy to put the key on the clipboard", "Press Regenerate to replace a key you think leaked \u2014 any client still using the old one stops"] },
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
