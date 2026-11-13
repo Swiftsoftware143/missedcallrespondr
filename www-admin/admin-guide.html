@@ -597,6 +597,31 @@ the MissedCall Respondr deploy script --verify   # parity + health only</code></
     <li><strong>The route:</strong> <code>POST /api/v1/auth/close-account</code>, signed in, body <code>{password, confirm}</code>. It is not public: an anonymous caller is refused before it reaches the handler.</li>
   </ul>
 
+  <h2 id="mcp-connect-your-ai-tools">MCP &mdash; connect your AI tools</h2>
+  <p>Every workspace can hand its own data to an AI client (Claude Code, Cursor, Hermes or your own agent) over the
+  Model Context Protocol. The <strong>MCP</strong> entry sits directly above <strong>Profile</strong> in the workspace
+  console, and that screen carries four blocks: the endpoint, this workspace's key, the tools the key reaches, and a
+  copy-paste client config.</p>
+  <ul>
+    <li><strong>Endpoint</strong> &mdash; <code>https://hooks.swiftsoftware.net/mcp</code>. One address for the whole
+    fleet; the key you present decides which workspace is read.</li>
+    <li><strong>Your token</strong> &mdash; this workspace's own API key, listed by prefix only. <strong>Reveal</strong>
+    asks for your sign-in password before it shows the key, and <strong>Regenerate</strong> retires the old key and mints
+    a replacement in one step, so a client already wired to the old one stops at once.</li>
+    <li><strong>Tools</strong> &mdash; read-only, tenant-scoped: <code>missedcallrespondr_summary</code> and
+    <code>missedcallrespondr_search</code> for the workspace's own rows, and the same pair per entity for
+    <code>contacts</code>, <code>tickets</code>, <code>ticket_messages</code>, <code>workspaces</code>,
+    <code>activity</code> and <code>plans</code>. Search takes a text filter, returns newest first and stops at 200
+    rows. <code>&lt;key&gt;_list_tenants</code> exists too and is refused for a workspace key: only the platform operator
+    can call it.</li>
+    <li><strong>Connect</strong> &mdash; a JSON snippet for the client's config, with <code>YOUR_API_KEY</code> standing
+    in for the key above.</li>
+  </ul>
+  <p>There is no write tool and no free-form SQL door: a client can read one workspace and nothing else. A tool listing
+  arrives in pages, so an agent that shows only its first page is showing itself part of the catalogue. The screen has
+  no audit block on purpose &mdash; the MCP service keeps its own audit log and exposes no route to read it, and a guide
+  should never describe a panel that cannot be backed.</p>
+
   <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid #e5e7eb;">
   <p style="text-align:center; color:#9ca3af; font-size:.82rem;">
     MissedCall Respondr &mdash; Admin Guide &mdash; Built by SwiftSoftware<br>
