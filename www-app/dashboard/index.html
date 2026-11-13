@@ -558,8 +558,18 @@ const Calls = () => {
     st.busy = c.id; st.notice = null; st.error = null; renderApp();
     try {
       const r = await API.post('/calls/' + c.id + '/respond', {});
-      st.responded = Object.assign({}, st.responded, { [c.id]: true });
-      st.notice = (r.message || 'Response queued') + ' — a call-back follow-up was created (see Follow-ups).';
+      // The route answers one of three truths (2026-11-13): `scheduled` (a call-back was created
+      // by this press), `already_scheduled` (this call already has a pending one, so nothing was
+      // written) or `nothing_to_do` (the call was answered, so there is no call-back to queue).
+      // This screen used to print "a call-back follow-up was created" for every answer, and a
+      // second press filed the same caller again — one pending call-back per call now.
+      const status = (r && r.status) || 'scheduled';
+      if (status !== 'nothing_to_do') st.responded = Object.assign({}, st.responded, { [c.id]: true });
+      st.notice = status === 'already_scheduled'
+        ? 'A call-back for this call is already scheduled — see Follow-ups.'
+        : (status === 'nothing_to_do'
+          ? ((r && r.message) || 'Nothing was scheduled.')
+          : ((r && r.message) || 'Response queued') + ' — a call-back follow-up was created (see Follow-ups).');
     } catch (e) { st.error = 'Respond failed: ' + e.message; }
     st.busy = null; renderApp();
   };
