@@ -948,6 +948,16 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/checkout/sessions",
             get(checkout_handler::list_checkout_sessions),
         )
+        // The CoreSwift visual field mapper's SOURCE describe endpoint (spec
+        // /opt/swift/docs/coreswift-data-mapping-spec-2026-11-13.md §2). Generic module
+        // `src/integration_schema.rs` (fleet-canonical); the app-specific config is `pub const
+        // SCHEMA` at crate root. ADMIN ONLY — a plain `require_auth` mount (not under
+        // /api/v1/admin/), so the handler owns the role check with `auth.is_admin`; a missing
+        // credential is refused 401 by the boundary first.
+        .route(
+            "/api/v1/integration/schema",
+            get(crate::integration_schema::integration_schema),
+        )
         // Body-read deadline INNERMOST: `route_layer` applies to the routes in THIS router and never
         // to its fallback, so the first one applied is the layer CLOSEST to the handler, and
         // `auth_middleware` — applied next — stays OUTSIDE it. That ordering is the contract, and it

@@ -592,7 +592,11 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        // 147 entries / 147 distinct paths (recounted 2026-11-13: SIX PROTECTED mounts landed
+        // 148 entries / 148 distinct paths: the CoreSwift field-mapper SOURCE describe
+        // `GET /api/v1/integration/schema` joined on 2026-11-13 — a plain `require_auth` mount, so
+        // PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing became reachable without a
+        // credential. Before it, 147 entries / 147 distinct paths (recounted 2026-11-13: SIX
+        // PROTECTED mounts landed
         // since the 2026-11-08 pin — the API-keys surface (`GET|POST /api/v1/api-keys`,
         // `DELETE /api/v1/api-keys/:id`, `:id/regenerate`, `:id/reveal`), the customer's
         // `POST /api/v1/auth/close-account`, the console's `GET|POST /api/v1/feedback`, and
@@ -612,11 +616,11 @@ mod tests {
         // `POST /api/v1/admin/tenants/:id/suspension` joined on 2026-11-01 — a PROTECTED
         // `/api/v1/admin/*` mount like the rest of that block, so both anonymous lists are
         // untouched; before it, 135 entries / 135 distinct paths).
-        assert_eq!(lits.len(), 147, "mounted .route entries");
+        assert_eq!(lits.len(), 148, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 147, "distinct mounted paths");
+        assert_eq!(uniq.len(), 148, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

@@ -1,3 +1,8 @@
+// The fleet-canonical `integration_schema` module carries a `SCHEMA_MODULE_VERSION` const that is
+// the byte-identity marker, not a value this crate reads at runtime (the parity guard hashes the
+// file). Same crate-level lint posture as the sibling apps that already carry the module.
+#![allow(dead_code)]
+
 mod activity;
 mod auth;
 mod body_deadline;
@@ -12,6 +17,7 @@ mod features;
 mod feedback;
 mod handlers;
 mod image_store;
+mod integration_schema;
 mod login_throttle;
 mod models;
 // Attribution for a workspace a test harness mints through the public signup
@@ -28,6 +34,19 @@ mod security;
 mod state;
 mod validation;
 mod workspaces;
+
+/// The ONE app-specific datum for `src/integration_schema.rs` (fleet-canonical generic module).
+/// Entity shape is `{key, label, table}` — the generic code introspects `information_schema.columns`
+/// for the real column list, so a new column appears automatically with no code change here.
+pub const SCHEMA: &integration_schema::AppSchema = &integration_schema::AppSchema {
+    app: "missedcallrespondr",
+    version: 1,
+    entities: &[integration_schema::EntityConfig {
+        key: "leads",
+        label: "Leads",
+        table: "leads",
+    }],
+};
 
 use std::net::SocketAddr;
 #[tokio::main]

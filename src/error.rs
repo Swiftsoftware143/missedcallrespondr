@@ -83,6 +83,10 @@ pub enum AppError {
 /// written against it.
 pub type ApiResult<T> = Result<T, AppError>;
 
+/// The fleet-canonical `integration_schema` module's spelling of the same result type. The alias
+/// exists because that module names `AppResult` directly (byte-identical across apps).
+pub type AppResult<T> = Result<T, AppError>;
+
 /// A one-line rendering of the refusal, for logs only (kanban t_44028656).
 ///
 /// It is deliberately the same sentence the client is given and NEVER a wrapped driver error: a

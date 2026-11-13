@@ -345,6 +345,43 @@ pub fn session_predates_password_change(jwt_iat: Option<i64>, valid_from: Option
     }
 }
 
+/// The authenticated principal behind a request, extracted AFTER [`auth_middleware`] has run and
+/// inserted the verified [`Claims`](crate::config::Claims) into the request extensions.
+///
+/// This is the extractor shape the fleet-canonical `integration_schema` module's handler reads
+/// (`auth.is_admin`). `is_admin` reuses the SAME platform-admin decision as the class gate above
+/// ([`is_platform_admin`]), so an admin session and an admin's API key answer alike — both arrive
+/// here as a `Claims` carrying the owner's live role — and a non-admin answers 403 in the handler.
+pub struct AuthUser {
+    pub is_admin: bool,
+}
+
+#[async_trait::async_trait]
+impl<S> axum::extract::FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let claims = parts
+            .extensions
+            .get::<crate::config::Claims>()
+            .ok_or_else(|| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({ "error": "Missing authorization header" })),
+                )
+            })?;
+        Ok(AuthUser {
+            is_admin: is_platform_admin(&claims.role),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
