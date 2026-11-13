@@ -468,6 +468,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000055_api_keys",
             include_str!("../migrations/000055_api_keys.sql"),
         ),
+        // The one-live-key-per-workspace guarantee (CoreSwift API-key contract parity): a
+        // PARTIAL unique index over (tenant_id) WHERE revoked_at IS NULL. The handler's 409 on
+        // a second mint is the customer-facing refusal; this index is the store-level backstop
+        // that makes the rule hold under concurrency. Idempotent (CREATE UNIQUE INDEX IF NOT
+        // EXISTS) because this runner re-executes every file per boot; `include_str!` of a
+        // brand-new file is not a dependency of the previous build, so this entry is also what
+        // forces the rebuild to embed the new .sql.
+        (
+            "000056_api_keys_one_live_per_tenant",
+            include_str!("../migrations/000056_api_keys_one_live_per_tenant.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

@@ -20,10 +20,11 @@
 //!
 //! Routes (tenant-scoped — every signed-in user manages THEIR workspace's keys, no admin gate):
 //!   GET    /api/v1/api-keys             list this tenant's keys (never the plaintext)
-//!   POST   /api/v1/api-keys             mint one — returns the plaintext (still viewable later)
+//!   POST   /api/v1/api-keys             mint one — returns the plaintext (still viewable later);
+//!                                       409 when a live key already exists (one per workspace)
 //!   POST   /api/v1/api-keys/:id/reveal  show a key again — requires the caller's CURRENT password
 //!   DELETE /api/v1/api-keys/:id         revoke one (soft: sets `revoked_at`)
-//!   POST   /api/v1/api-keys/:id/regenerate  one atomic revoke + mint; the old key 401s at once
+//!   POST   /api/v1/api-keys/:id/regenerate  one atomic retire-then-mint; the old key 401s at once
 
 use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
@@ -217,6 +218,10 @@ pub async fn list_api_keys(
 
 /// `POST /api/v1/api-keys` — mint a key. The plaintext is returned here AND stays viewable via
 /// `reveal`, so "shown once" is never the customer's only chance.
+///
+/// One live key per workspace: a second mint is refused with 409 up front (the customer is told
+/// to Regenerate instead), and the partial unique index `api_keys_one_live_per_tenant` is the
+/// store-level backstop that makes the same rule hold under concurrency.
 pub async fn create_api_key(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -230,6 +235,18 @@ pub async fn create_api_key(
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "API key".to_string());
+
+    let already: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM api_keys WHERE tenant_id = $1 AND revoked_at IS NULL)",
+    )
+    .bind(tenant_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if already {
+        return Err(AppError::Conflict(
+            "you already have a key — use Regenerate".to_string(),
+        ));
+    }
 
     let mut tx = state.pool.begin().await?;
     let minted = mint_on(&mut tx, tenant_id, Some(created_by), &name).await?;
@@ -376,10 +393,12 @@ pub async fn revoke_api_key(
     Ok(Json(json!({ "message": "API key revoked", "id": id })))
 }
 
-/// `POST /api/v1/api-keys/:id/regenerate` — one atomic revoke-and-issue: the replacement is
-/// inserted and the old row revoked in ONE transaction, so a failure at either step leaves the
-/// customer with the key they already had, and a committed regenerate makes the old key 401 on the
-/// very next request.
+/// `POST /api/v1/api-keys/:id/regenerate` — one atomic retire-then-issue: the old row is
+/// revoked FIRST, then the replacement is minted, both in ONE transaction, so a failure at either
+/// step leaves the customer with the key they already had, and a committed regenerate makes the
+/// old key 401 on the very next request. Retire-before-mint is also what the partial unique index
+/// `api_keys_one_live_per_tenant` requires: minting first would collide with the still-live old
+/// key on (tenant_id) WHERE revoked_at IS NULL.
 pub async fn regenerate_api_key(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -398,12 +417,12 @@ pub async fn regenerate_api_key(
     .ok_or_else(|| AppError::NotFound("API key not found".to_string()))?;
 
     let mut tx = state.pool.begin().await?;
-    let minted = mint_on(&mut tx, tenant_id, Some(created_by), &name).await?;
     sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND tenant_id = $2")
         .bind(id)
         .bind(tenant_id)
         .execute(&mut *tx)
         .await?;
+    let minted = mint_on(&mut tx, tenant_id, Some(created_by), &name).await?;
     tx.commit().await?;
 
     tracing::info!(
