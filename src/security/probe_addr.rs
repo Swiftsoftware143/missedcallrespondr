@@ -218,6 +218,20 @@ pub fn synthetic_requester(email: &str, name: &str) -> Option<&'static str> {
     if let Some((local, domain)) = addr.rsplit_once('@') {
         let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
         if !domain.is_empty() {
+            // THE FLEET'S DISPOSABLE INBOX IS A PROBE BY CONSTRUCTION (2026-11-13). `maxxspace.com`
+            // is served by the harness's own throwaway inbox, so no customer can own an address
+            // there — it is the harness class even though it is deliberately NOT mail-suppressed
+            // (the credential-delivery proof reads the generated password out of that inbox, so
+            // suppressing mail there would delete the only end-to-end proof that a new customer's
+            // password arrives). That asymmetry is why the ALERT predicate has to name it
+            // separately: measured 2026-11-13 on the sibling FunnelSwift, two audit signups
+            // addressed into it delivered "A customer asked to buy …" and "New workspace: …" to the
+            // operator's real inbox.
+            if let Some(d) = ATTRIBUTION_ONLY_DOMAINS.iter().copied().find(|d| {
+                domain == *d || (domain.len() > d.len() + 1 && domain.ends_with(&format!(".{d}")))
+            }) {
+                return Some(d);
+            }
             if let Some(d) = SYNTHETIC_REQUESTER_DOMAINS.iter().copied().find(|d| {
                 domain == *d || (domain.len() > d.len() + 1 && domain.ends_with(&format!(".{d}")))
             }) {
@@ -298,5 +312,25 @@ mod synthetic_requester_tests {
         assert_eq!(synthetic_requester("x@notx.com", ""), None);
         assert_eq!(synthetic_requester("", ""), None);
         assert_eq!(synthetic_requester("no-at-sign", "Real Co"), None);
+    }
+
+    /// The fleet's throwaway inbox domain is a probe BY CONSTRUCTION, and the operator alert is
+    /// the door that has to know it: the mail layer deliberately keeps delivering there (the
+    /// credential-delivery proof reads its own password out of that inbox), so only this predicate
+    /// can stop an audit signup from paging a human (measured 2026-11-13 on the sibling app: two
+    /// such alerts landed in the operator's real inbox).
+    #[test]
+    fn the_fleet_disposable_inbox_never_pages_the_operator() {
+        assert_eq!(
+            synthetic_requester("albert.tire144341@maxxspace.com", "Albert Tire 144341"),
+            Some("maxxspace.com")
+        );
+        // Sub-domains count (the same label-boundary rule as every other domain arm)...
+        assert_eq!(
+            synthetic_requester("inbox@mail.maxxspace.com", ""),
+            Some("maxxspace.com")
+        );
+        // ...but a lookalike is a real customer, never a match.
+        assert_eq!(synthetic_requester("x@notmaxxspace.com", ""), None);
     }
 }
