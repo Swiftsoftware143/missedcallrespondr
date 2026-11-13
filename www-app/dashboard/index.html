@@ -2837,6 +2837,22 @@ const Inbox = () => {
     domName: '', domKey: '', boxLocal: '', records: null, error: null, notice: null
   });
   const MAIL_HOST = 'https://inbox.missedcallrespondr.com';
+  // SEARCH (kanban t_843293af). The server's list route has always accepted `q` (subject, sender and
+  // the opening text, case-insensitive) and this list never sent it. Type-and-pause re-queries 350 ms
+  // after typing stops, or at once on Enter; the clear button lives in BOTH places (header and the
+  // "no mail matches" row) and each carries this same handler.
+  const inboxMessagesUrl = () => '/private-email/messages?limit=20'
+    + (String(st.q || '').trim() ? '&q=' + encodeURIComponent(String(st.q).trim()) : '');
+  let searchTimer = null;
+  const searchInbox = async () => {
+    try {
+      const r = await API.get(inboxMessagesUrl());
+      st.messages = (r && r.messages) || [];
+    } catch (e) { st.error = 'Could not search your mail: ' + e.message; }
+    renderApp();
+  };
+  const runSearch = () => { clearTimeout(searchTimer); searchInbox(); };
+  const clearSearch = () => { st.q = ''; renderApp(); runSearch(); };
   const load = async () => {
     try {
       const d = await API.get('/private-email/domains');
@@ -2847,7 +2863,7 @@ const Inbox = () => {
       st.boxes = Array.isArray(b) ? b : ((b && b.boxes) || []);
     } catch (e) { st.error = st.error || ('Could not load your addresses: ' + e.message); }
     try {
-      const m = await API.get('/private-email/messages?limit=20');
+      const m = await API.get(inboxMessagesUrl());
       st.messages = (m && m.messages) || [];
     } catch (e) { /* an empty inbox is not an error worth a banner */ }
     renderApp();
@@ -2971,10 +2987,16 @@ const Inbox = () => {
 
     <div class="card p-0 overflow-hidden">
       <div style="padding:16px 16px 4px"><h3 class="text-base font-bold">Recent mail</h3>
-        <p class="text-sm text-gray-500" style="margin:4px 0 0">The newest messages that arrived at any of your addresses. Reading the whole thread happens in the mail client.</p></div>
+        <p class="text-sm text-gray-500" style="margin:4px 0 0">The newest messages that arrived at any of your addresses. Reading the whole thread happens in the mail client.</p>
+        <div class="flex gap-2 items-center flex-wrap" style="margin-top:10px">
+          <input id="inbox-search" class="input" type="search" value=${st.q || ''} placeholder="Search subject, sender or text" aria-label="Search mail" autocomplete="off" style="flex:1;min-width:200px" onInput=${e => { st.q = e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(searchInbox, 350); }} onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } }} />
+          ${st.q ? html`<button type="button" class="btn btn-sm btn-outline" id="inbox-search-clear" onClick=${clearSearch}>Clear search</button>` : null}
+        </div></div>
       <table class="table"><thead><tr><th>Subject</th><th>From</th><th>To</th><th>Received</th></tr></thead>
         <tbody>
-          ${st.messages.length === 0 && html`<tr><td colspan="4" class="text-gray-500">Nothing has arrived yet. Mail to any address above appears here.</td></tr>`}
+          ${st.messages.length === 0 && (st.q
+            ? html`<tr><td colspan="4" class="text-gray-500">No mail matches &ldquo;${st.q}&rdquo;. The search looks at the subject, the sender and the opening text of every message in this view. <button type="button" class="btn btn-sm btn-outline" id="inbox-search-clear2" onClick=${clearSearch}>Clear the search</button></td></tr>`
+            : html`<tr><td colspan="4" class="text-gray-500">Nothing has arrived yet. Mail to any address above appears here.</td></tr>`)}
           ${st.messages.map(m => html`<tr>
             <td class="font-medium">${m.subject || '(no subject)'}</td>
             <td class="text-gray-600">${m.from_address || ''}</td>
