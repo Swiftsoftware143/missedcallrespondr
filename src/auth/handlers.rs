@@ -968,13 +968,11 @@ pub async fn close_account(
         ));
     }
 
-    let row = sqlx::query(
-        "SELECT password_hash, role, closed_at FROM users WHERE id = $1 AND is_active = true",
-    )
-    .bind(claims.sub)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+    let row = sqlx::query("SELECT password_hash, role, closed_at FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
 
     let already: Option<chrono::DateTime<chrono::Utc>> = row.try_get("closed_at").unwrap_or(None);
     if let Some(t) = already {
