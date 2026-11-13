@@ -290,6 +290,8 @@
     <li><strong>Where it renders:</strong> the ONE send funnel in <code>src/email.rs</code> (<code>send_template_email</code>) prepends the brand header, so every template send for that tenant — <code>welcome</code>, <code>welcome_credentials</code>, <code>purchase_confirmed</code>, <code>password_reset</code> — carries it.</li>
     <li><strong>Additive by construction:</strong> a tenant with no name and no logo gets byte-identical mail to before the feature existed — nothing is added until branding is actually set, so this is safe for every existing account.</li>
   </ul>
+  <p><strong>Searching the list.</strong> The customer's console Inbox screen lists the newest mail and carries a search box (<strong>Search subject, sender or text</strong>) above <strong>Recent mail</strong>. It queries the same list route with <code>q</code>, which matches the subject, the sender and the opening text case-insensitively, and a search that finds nothing says &ldquo;No mail matches &hellip;&rdquo; rather than &ldquo;nothing has arrived&rdquo;, so a customer can tell a filtered list from an empty one. The mail client's own search sends the same parameter.</p>
+
   <h2 id="your-team">Your Team (who can sign in)</h2>
   <p>The <strong>&#128101; Your Team</strong> tab lists everyone who can sign in to this workspace, and it is where the owner gives a colleague their own login. Until this screen the backend was complete and unreachable: <code>GET|POST /api/v1/team/*</code> shipped on 2026-10-31 and no console called any of it, so a customer who wanted a receptionist on the queue had to ask the platform operator to create the login by hand. A backend route with no UI is a defect.</p>
   <ul>
