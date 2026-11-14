@@ -85,12 +85,21 @@ p{color:#64748b;font-size:15px;line-height:1.6;margin-bottom:20px}
     det.style.display = 'block';
   }
 
-  if (!sessionId) {
-    set('❓', 'No checkout to show',
-        'This is the confirmation step that follows a purchase. Nothing has been confirmed here.',
-        'Open your dashboard to see your current plan and its status.', 'warn');
-    return;
+  // A payment provider sends the buyer back here carrying its OWN session token, not this app's
+  // checkout id: Stripe appends nothing to a success_url that carries no template, and PayPal
+  // appends `?token=…&PayerID=…`. None of those can be looked up as a checkout, and telling a
+  // customer who has just paid "No checkout to show … nothing has been confirmed here" reads as a
+  // failure. Measured 2026-11-14: this page also 404'd entirely on the app host, so the checkout
+  // fallback URL landed on a dead end (kanban missedcall thank-you landing). A non-uuid token gets
+  // the honest return-from-checkout state instead; only a real checkout uuid is looked up.
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function thanksBack() {
+    set('\u{1F389}', "Thanks \u2014 you're back from checkout",
+        "Your payment page sent you back to us. Nothing on this page is a receipt: your payment provider's receipt is the authoritative record of any charge.",
+        'What happens next: our team switches the plan on your workspace and emails you the moment it is on. Nothing further is needed from you.', 'ok');
   }
+  if (!sessionId) { thanksBack(); return; }
+  if (!UUID_RE.test(sessionId)) { thanksBack(); return; }
 
   fetch('/api/v1/checkout/session/' + encodeURIComponent(sessionId), {headers: {'Accept': 'application/json'}})
     .then(function(res){
