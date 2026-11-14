@@ -16,8 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pin the toolchain to this box's rustc 1.97.1, not @stable: a newer stable
+      # clippy flags lints (e.g. double_must_use) that the pinned rustc cannot
+      # reproduce locally, so CI goes red for no code reason. Keep in step with
+      # rust-toolchain.toml.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy
 

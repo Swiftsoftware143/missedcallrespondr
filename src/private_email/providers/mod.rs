@@ -101,7 +101,6 @@ pub struct InlineImage {
 
 /// The unified email provider trait. All providers implement this.
 #[async_trait]
-#[async_trait::async_trait]
 pub trait EmailProvider: Send + Sync {
     /// Human-readable name for logging/debugging.
     fn name(&self) -> &'static str;

@@ -129,8 +129,6 @@ pub async fn contact_created(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// The preview is capped so a long SMS body cannot bloat the feed payload.
     #[test]
     fn preview_is_capped_at_120_chars() {
