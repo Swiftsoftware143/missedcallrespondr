@@ -527,10 +527,18 @@ pub async fn list_all_tenants(
 /// `handover_password` is returned ONLY when nothing left — a reserved/harness address (withheld
 /// at the sender) or a provider refusal — because otherwise the operator would have nothing to
 /// hand the customer. The password itself is never logged.
+///
+/// SINCE 2026-11-14 it also REPAIRS a workspace with no login at all: when the workspace holds not
+/// one `users` row, the request's optional `{ "email": … }` names its first owner, that row is
+/// minted here (role `account_owner`, latch set) and the same re-issue and mail run for it. Before
+/// this the route answered `404 "no user to send a password to"` on a workspace that was otherwise
+/// complete — the one state where the operator's only repair was SQL — and the console's badge for
+/// it points at exactly this action.
 pub async fn resend_owner_credentials(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Path(tenant_id_str): Path<String>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<Value>, AppError> {
     // The same admin gate `list_all_tenants` applies. This route also sits under
     // `/api/v1/admin/`, so the middleware covers it; the handler refuses on its own as well so the
@@ -565,16 +573,111 @@ pub async fn resend_owner_credentials(
     )
     .bind(tenant_id)
     .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| {
-        AppError::NotFound("This workspace has no user to send a password to".into())
-    })?;
+    .await?;
 
-    let user_id: Uuid = row
-        .try_get("id")
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    let email: String = row.try_get("email").unwrap_or_default();
-    let name: String = row.try_get("name").unwrap_or_else(|_| email.clone());
+    // A workspace that never got its FIRST login is the same stuck customer this action exists for
+    // (measured live 2026-11-14: 'Xride Drivers' was active with 0 users, so the console's "Send
+    // login" and the People panel had nothing to act on and the only repair was SQL). Mint the
+    // first owner here instead of answering a dead end. The workspace row carries no email of its
+    // own, so the address comes from the request's optional body; everything after this point —
+    // generated password, `welcome_credentials` mail, the handover when nothing left — is the
+    // SAME path an existing owner takes.
+    let (user_id, email, name) = match row {
+        Some(r) => (
+            r.try_get("id")
+                .map_err(|e| AppError::Internal(e.to_string()))?,
+            r.try_get("email").unwrap_or_default(),
+            r.try_get("name").unwrap_or_else(|_| String::new()),
+        ),
+        None => {
+            let req = body.map(|Json(v)| v).unwrap_or(Value::Null);
+            let asked = req
+                .get("email")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AppError::Unprocessable(
+                        "This workspace has no login yet. Give it the owner's email address — \
+                         nobody can sign in without one."
+                            .into(),
+                    )
+                })?;
+            let parts: Vec<&str> = asked.split('@').collect();
+            let shaped = parts.len() == 2
+                && !parts[0].is_empty()
+                && parts[1].contains('.')
+                && !parts[1].starts_with('.')
+                && !asked.chars().any(char::is_whitespace);
+            if !shaped {
+                return Err(AppError::Unprocessable(
+                    "email: that value is not a valid email address.".into(),
+                ));
+            }
+            let taken: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE lower(email) = $1")
+                    .bind(&asked)
+                    .fetch_one(&state.pool)
+                    .await?;
+            if taken > 0 {
+                return Err(AppError::Conflict(format!(
+                    "An account already exists for '{asked}', so it cannot own a second workspace."
+                )));
+            }
+            let tenant_name: String = sqlx::query_scalar("SELECT name FROM tenants WHERE id = $1")
+                .bind(tenant_id)
+                .fetch_optional(&state.pool)
+                .await?
+                .unwrap_or_default();
+            let name = req
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    let n = tenant_name.trim();
+                    if n.is_empty() {
+                        asked.split('@').next().unwrap_or("Owner").to_string()
+                    } else {
+                        n.to_string()
+                    }
+                });
+            // A throwaway hash: the re-issue below mints the password that is actually mailed and
+            // overwrites this value, so there is exactly ONE credential in play.
+            let placeholder =
+                crate::auth::models::hash_password(&crate::auth::signup::generate_temp_password())
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+            let uid = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO users (id, email, password_hash, name, tenant_id, role, \
+                 password_undelivered, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, 'account_owner', TRUE, NOW(), NOW())",
+            )
+            .bind(uid)
+            .bind(&asked)
+            .bind(&placeholder)
+            .bind(&name)
+            .bind(tenant_id)
+            .execute(&state.pool)
+            .await
+            .map_err(|e| {
+                if let sqlx::Error::Database(db) = &e {
+                    if db.constraint() == Some("users_email_key") {
+                        return AppError::Conflict(format!(
+                            "An account already exists for '{asked}'."
+                        ));
+                    }
+                }
+                AppError::from(e)
+            })?;
+            tracing::info!(
+                tenant = %tenant_id,
+                user = %uid,
+                "operator created the FIRST login for a workspace that had none"
+            );
+            (uid, asked, name)
+        }
+    };
 
     let password = crate::auth::signup::generate_temp_password();
     let password_hash = crate::auth::models::hash_password(&password)
