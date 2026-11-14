@@ -2630,19 +2630,19 @@ function isProbeAddress(addr) {
 // counted `probe_harness` alone while the badge also fired on a reserved/fleet-probe owner address,
 // so the button's number and the badges on screen could disagree — which is how a sweep
 // under-counts. Both now read this function.
-// Third arm (2026-11-01): a workspace with NO user at all. The server now holds those back from
-// the default listing (`ownerless`, published only under `?include_probe=1`) for the same reason it
-// holds back the address arm: nobody can sign in, so it cannot be a customer. Read here as well so
-// the row the switch reveals carries the badge and the picker's count includes it.
+// An ownerless workspace is NOT a probe (corrected 2026-11-14). The server used to hold those
+// back and this predicate agreed with it; measured live, that hid `Xride Drivers` — a real paid
+// workspace whose signup never minted a login. Such rows are now served in the default list and
+// carry the `no login yet` badge instead, so the sweep must not treat them as machinery: badging
+// a customer "probe" is one careless click away from deleting them.
 const isProbeRow = (t) => !!String((t && t.probe_harness) || '').trim()
   || !!(t && t.reserved_owner)
-  || !!(t && t.ownerless)
   || isProbeAddress(String((t && (t.owner_email || t.email)) || '').trim());
 const ownerCell = (t) => {
   const oe = String((t && (t.owner_email || t.email)) || '').trim();
   const tag = String((t && t.probe_harness) || '').trim();
   const ownerless = Boolean(t && t.ownerless);
-  const probe = Boolean(tag) || isProbeAddress(oe) || ownerless;
+  const probe = Boolean(tag) || isProbeAddress(oe);
   // The tooltip names the harness the COLUMN recorded (fleet shape, kanban t_c13803ad): the column
   // is authoritative and the address arms are only the fallback for rows minted before it existed.
   const badge = probe
