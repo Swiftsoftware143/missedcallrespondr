@@ -22,6 +22,7 @@ mod login_throttle;
 mod models;
 // Attribution for a workspace a test harness mints through the public signup
 // (`X-Swift-Harness`, kanban t_4a744754) — see `probe_harness`.
+mod plan_seating;
 mod probe_harness;
 mod probe_sweep;
 // The workspace model and the multi-address private inbox, ported from ADASwift/CoreSwift
@@ -214,6 +215,12 @@ async fn main() -> anyhow::Result<()> {
     // this sweeper and this app did not, so harness rows accumulated here for ever; the marker was
     // being stamped at signup with no retention behind it.
     crate::probe_sweep::spawn_probe_sweeper(pool.clone());
+
+    // Name the plan on a workspace that has none (cron 2026-11-14, measured: three rows in this
+    // database carried no `tenant_plans` row). Every surface that shows a level reads that join, so
+    // a bare workspace showed no plan at all while its limits silently fell back to free. One
+    // indexed anti-join at boot; zero rows is the normal answer.
+    crate::plan_seating::spawn_plan_seater(pool.clone());
 
     let app_state = state::AppState {
         pool,
