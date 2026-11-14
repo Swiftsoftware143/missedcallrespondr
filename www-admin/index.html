@@ -2831,6 +2831,45 @@ const TenantsScreen = () => {
         onClick=${() => resendCreds(t)}>${busy ? '...' : 'send new password'}</button>`;
   };
 
+  // ── a workspace with NO login at all ──────────────────────────────────────────────────────────
+  // Measured live 2026-11-14: 'Xride Drivers' was active but held not one user row, so `send new
+  // password` and the People panel had nothing to act on and the only repair was SQL. The repair
+  // route mints the first owner when it is handed an address (the workspace row stores no email of
+  // its own), then mails that owner a generated password exactly as a re-issue does.
+  const noLogin = async (t) => {
+    const label = t.name || t.slug || t.id;
+    const email = prompt('This workspace has no login yet.\n\n'
+      + 'Give it the owner\'s email address. They are emailed a generated password and can sign in '
+      + 'straight away.', '');
+    if (email === null) return;
+    const addr = String(email).trim();
+    if (!addr) { st.ok = false; st.msg = 'No login created: an email address is required.'; renderApp(); return; }
+    st.busy = 'creds:' + t.id; st.msg = null; st.ok = true; renderApp();
+    try {
+      const r = await API.post('/admin/tenants/' + encodeURIComponent(t.id) + '/resend-credentials', { email: addr });
+      if (r && r.handover_password) {
+        st.ok = true;
+        st.msg = 'Created the login for ' + label + ' — password: ' + r.handover_password
+          + ' (no email left the system: ' + (r.withheld ? 'that address is a reserved test address'
+            : 'the mail provider refused it') + '), so give it to the owner directly.';
+      } else {
+        st.ok = true;
+        st.msg = 'Created the login for ' + label + ' and emailed ' + (r && r.email ? r.email : addr) + ' a password.';
+      }
+    } catch (e) { st.ok = false; st.msg = 'Could not create the login: ' + e.message; }
+    st.busy = null;
+    await load();
+  };
+  const noLoginCell = (t) => {
+    if (!(t && t.user_count === 0)) return '';
+    const busy = st.busy === 'creds:' + t.id;
+    return html`<span class="badge badge-yellow ml-1" data-tenants="no-login"
+        title="This workspace holds no user row, so nobody can sign in to it. This action gives it its first owner login.">no login yet</span>
+      <button class="btn btn-sm btn-blue ml-1" data-tenants="create-login" disabled=${busy}
+        title="Give this workspace its first owner login, with a generated password emailed to the address you enter."
+        onClick=${() => noLogin(t)}>${busy ? '...' : 'create login'}</button>`;
+  };
+
   // ── the PLAN cell (2026-10-19) ──
   // It used to be a static `plan_name || '—'`: a workspace with no subscription row showed a bare
   // dash, and the operator had no way to put it on a plan from the screen where the problem is
@@ -2882,7 +2921,7 @@ const TenantsScreen = () => {
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
         <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this workspace">suspended</span>` : null}</td>
-        <td>${ownerCell(t)}${credsCell(t)}</td>
+        <td>${ownerCell(t)}${credsCell(t)}${noLoginCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
         <td>${planCell(t)}</td>

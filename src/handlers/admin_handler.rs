@@ -412,15 +412,13 @@ pub async fn list_all_tenants(
     // with `reserved_owner: true` when `?include_probe=1` asks for it. Fleet canaries keep the
     // `^CNRY` exemption in SQL.
     //
-    // A WORKSPACE NOBODY CAN SIGN INTO IS NOT A CUSTOMER (measured live 2026-11-01). The address
-    // arm above can only judge a row that HAS an owner, so the one workspace on this install with
-    // no user row at all -- "TestSync", user_count 0 -- was served among three real customers in
-    // the operator's Tenants list. ADASwift closed the same hole on 2026-10-31 using the count this
-    // query already returns: a customer workspace always has at least the user its signup minted,
-    // so zero users means no login can ever reach it and no signup can be attributed to it. It is
-    // a leftover, not a customer. Held-back rows are published with `ownerless: true` under
-    // `?include_probe=1`, so nothing becomes invisible or undeletable and the console's
-    // "Select probes" control can still reach them.
+    // A WORKSPACE NOBODY CAN SIGN INTO *IS* PUBLISHED, with the badge that repairs it
+    // (corrected 2026-11-14). This arm used to hold a zero-user workspace back as a "leftover, not
+    // a customer", measured on a real leftover called "TestSync". That was wrong as a rule: the
+    // same count also matched `Xride Drivers`, a real paid workspace whose signup never minted a
+    // login, so the operator could not see the customer and could not reach the `create login`
+    // repair written for it. Zero-user rows are now served with `ownerless: true` and the console
+    // badges them; fleet machinery is still held back by its harness tag or reserved owner address.
     let rows: Vec<_> = rows
         .into_iter()
         .filter(|r| {
@@ -465,10 +463,10 @@ pub async fn list_all_tenants(
             "price_monthly": r.try_get::<Option<f64>,_>("price_monthly").ok().flatten(),
             "price_yearly": r.try_get::<Option<f64>,_>("price_yearly").ok().flatten(),
             "user_count": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0),
-            // true => this workspace has NO user at all, so nobody can sign in and no signup can
-            // be attributed to it: a leftover, not a customer. Held back from the default list
-            // (see the filter above) and only reachable with `?include_probe=1`, mirroring
-            // ADASwift's `ownerless` field, so the console can badge the row it reveals.
+            // true => this workspace has NO user at all, so nobody can sign in to it. Published so
+            // the console can badge the row and offer the `create login` repair; such rows are
+            // served in the default list since 2026-11-14 (they are stranded customers, not
+            // leftovers — see the filter above).
             "ownerless": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0) <= 0,
             "last_sign_in": r.try_get::<Option<chrono::DateTime<Utc>>,_>("last_sign_in").ok().flatten().map(|d| d.to_string()),
             "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
@@ -1090,13 +1088,12 @@ pub async fn bulk_delete_tenants(
 /// a pre-column NULL row is a customer, `^CNRY` canaries stay visible. The call counters need no
 /// change — a probe workspace produces no calls, and hiding its rows there would misstate volume.
 ///
-/// AND NEITHER IS A WORKSPACE NOBODY CAN SIGN INTO (measured live 2026-11-01). `list_all_tenants`
-/// now also holds back a workspace with zero users (nobody can sign in, so it cannot be a
-/// customer), so counting from a second spelling of the rules would re-create the very divergence
-/// the paragraph above was written to end. Measured live 2026-11-01: this function answered
-/// `workspaces: 6` while the list under it served 3 — the two nightly canaries (hidden by owner
-/// ADDRESS, a Rust predicate with no SQL twin) and one zero-user leftover. The figures are
-/// therefore counted from `is_hidden_workspace`, the SAME predicate the list filters with.
+/// AND NEITHER IS A WORKSPACE NOBODY CAN SIGN INTO — with one correction (2026-11-14). The list
+/// used to hold back a workspace with zero users on the theory that nobody can sign in, so it
+/// cannot be a customer; measured live that theory hid `Xride Drivers`, a real paid workspace whose
+/// signup never minted a login. Both surfaces still count from `is_hidden_workspace`, so the
+/// dashboard and the list agree — they now simply both show those workspaces, flagged
+/// `ownerless: true`, where the console's badge and repair button can reach them.
 ///
 /// `users` counts the people in the VISIBLE workspaces only, for the same reason: the canaries each
 /// carry a user row, and a landing screen that counts a probe workspace's user while refusing to
@@ -1243,13 +1240,22 @@ pub async fn platform_stats(
 /// The ONE predicate that decides whether a workspace is fleet machinery rather than a customer.
 /// `list_all_tenants` holds such rows back from its default answer and `platform_stats` counts
 /// without them, so the landing screen can never disagree with the Tenants screen underneath it.
-/// Three arms, each one measured: a harness tag the signup door stamped, an owner address on a
-/// reserved / fleet-harness domain, and a workspace with NO user at all (nobody can sign in, so no
-/// signup can be attributed to it). `^CNRY` canaries stay visible: they are the proof the nightly
+/// Two arms, each one measured: a harness tag the signup door stamped, and an owner address on a
+/// reserved / fleet-harness domain. `^CNRY` canaries stay visible: they are the proof the nightly
 /// sweep works.
-fn is_hidden_workspace(probe_harness: &str, owner_email: Option<&str>, user_count: i64) -> bool {
+///
+/// A THIRD ARM — "zero users" — was removed on 2026-11-14 because it hid the customer it was
+/// meant to protect. It assumed nobody can sign into a userless workspace, so it cannot be a
+/// customer; measured live, that is false: `Xride Drivers` is a real workspace on a paid tier with
+/// NO user row (a signup whose login never landed), and holding it back made the console's
+/// `no login yet` badge and its `create login` repair unreachable — the repair that was written
+/// for exactly that row (this file, `resend_owner_credentials`). The operator's list answered 5
+/// workspaces while `?include_probe=1` answered 10, and the 5 held back included that customer.
+/// Ownerless rows now show, carrying `ownerless: true`, so the badge and the button can act on
+/// them. `_user_count` is kept in the signature so both call sites stay one predicate.
+fn is_hidden_workspace(probe_harness: &str, owner_email: Option<&str>, _user_count: i64) -> bool {
     let tag = probe_harness.trim();
     let tagged = !tag.is_empty() && !tag.to_ascii_uppercase().starts_with("CNRY");
     let reserved = owner_email.map(owner_is_fleet_machinery).unwrap_or(false);
-    tagged || reserved || user_count <= 0
+    tagged || reserved
 }
