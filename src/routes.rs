@@ -819,6 +819,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/tenants/:id/credits",
             post(crate::handlers::admin_handler::add_credits),
         )
+        // Re-open every plan's stored payment page on demand (cron 2026-11-13). A link proven once
+        // at save time can die later; this asks again, writes nothing, and never calls a page dead
+        // on a robot refusal. Two segments deep, so `/plans/:id` cannot capture it.
+        .route(
+            "/api/v1/admin/plans/payment-pages/check",
+            post(crate::handlers::plans_handler::check_plan_payment_pages),
+        )
         // Admin plan management
         .route(
             "/api/v1/admin/plans",

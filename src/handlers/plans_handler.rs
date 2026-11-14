@@ -6,7 +6,7 @@ use axum::{
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, PgPool, Row};
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -286,6 +286,119 @@ fn unverified_note() -> String {
      provider often blocks automated visits). Open the link once in your own browser to be sure a \
      buyer lands somewhere live."
         .to_string()
+}
+
+/// POST /api/v1/admin/plans/payment-pages/check — re-open every plan's stored payment page NOW.
+///
+/// [`require_hosted_payment_url_resolves`] proves a link ONCE, when the operator pastes it. A page
+/// that answered then can answer 404 a month later — measured on a sibling app, where every paid
+/// plan's page died after the save gate had passed and buyers were handed to "No Data Found." while
+/// the plans still read sellable. This re-asks the question on demand: every plan carrying a link is
+/// probed, active or not (a retired plan is often the one an operator is about to re-enable). It sits
+/// under `/api/v1/admin/`, so the platform-admin middleware covers it, and it writes nothing.
+pub async fn check_plan_payment_pages(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let rows = sqlx::query(
+        "SELECT id, name, slug, purchase_url, is_active FROM plans \
+         WHERE purchase_url IS NOT NULL AND btrim(purchase_url) <> '' \
+         ORDER BY price_monthly ASC NULLS LAST, name ASC",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    // A BROWSER-shaped user agent on purpose: several payment providers answer 403 to a bot UA, and
+    // the operator would then see "could not check" on a page that opens fine for them.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::limited(6))
+        .user_agent(
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) \
+             Chrome/131.0.0.0 Safari/537.36",
+        )
+        .build()
+        .map_err(|e| {
+            tracing::error!("payment-page check: could not build the HTTP client: {e:?}");
+            AppError::Internal("Could not run the payment-page check just now".into())
+        })?;
+
+    let mut out: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
+    let mut dead = 0usize;
+    let mut ok = 0usize;
+    for row in rows.iter() {
+        let id = row
+            .try_get::<Uuid, _>("id")
+            .map(|u| u.to_string())
+            .unwrap_or_default();
+        let name = row.try_get::<String, _>("name").unwrap_or_default();
+        let slug = row.try_get::<String, _>("slug").unwrap_or_default();
+        let url = row.try_get::<String, _>("purchase_url").unwrap_or_default();
+        let is_active = row.try_get::<bool, _>("is_active").unwrap_or(true);
+        let (reason, status) = probe_payment_page(&client, url.trim()).await;
+        if reason == "dead" {
+            dead += 1;
+        }
+        if reason == "ok" {
+            ok += 1;
+        }
+        out.push(json!({
+            "id": id,
+            "name": name,
+            "slug": slug,
+            "active": is_active,
+            "url": url,
+            "reason": reason,
+            "status": status,
+        }));
+    }
+
+    let checked = out.len();
+    let message = if checked == 0 {
+        "No plan carries a payment page, so there is nothing to check.".to_string()
+    } else if dead == 0 && ok == checked {
+        format!("Every one of the {checked} plan payment page(s) opened.")
+    } else if dead > 0 {
+        format!(
+            "{dead} of {checked} plan payment page(s) answered a dead link. Those plans are on \
+             sale and a buyer pressing Upgrade would land on a page that does not exist."
+        )
+    } else {
+        format!(
+            "{ok} of {checked} page(s) opened; the rest could not be judged from here. Open those \
+             in your own browser before relying on them."
+        )
+    };
+
+    Ok(Json(json!({
+        "plans": out,
+        "checked": checked,
+        "opened": ok,
+        "dead": dead,
+        "message": message,
+    })))
+}
+
+/// Open one stored payment page. `dead` is reserved for a page that definitively does not exist — a
+/// robot refusal (401/403/405/429) is `needs_browser`, never `dead`, so a working Stripe or PayPal
+/// page is not called broken because it would not talk to this box.
+async fn probe_payment_page(client: &reqwest::Client, url: &str) -> (&'static str, Option<u16>) {
+    if !crate::handlers::checkout_handler::is_hosted_payment_url(url) {
+        return ("not_https", None);
+    }
+    match client.get(url).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            if status == 404 || status == 410 {
+                return ("dead", Some(status));
+            }
+            if (200..400).contains(&status) {
+                return ("ok", Some(status));
+            }
+            ("needs_browser", Some(status))
+        }
+        Err(e) if e.is_connect() => ("unreachable", None),
+        Err(_) => ("needs_browser", None),
+    }
 }
 
 pub async fn create_plan(
