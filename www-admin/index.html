@@ -3124,6 +3124,11 @@ const App = () => {
     // existed with no console screen, so the sidebar printed the tier's name and offered no way to
     // see or change it. Sits beside My Account because that is where a workspace admin looks for it.
     { id: 'my-plan', label: 'Plan & Pricing', icon: '💳' },
+    // The account's OWN API key — GET|POST /api/v1/api-keys and its reveal/regenerate/delete
+    // twins existed with NO screen in this console (2026-11-13). Every workspace auto-mints a
+    // key at signup (api_key_handler::mint_on), so without this screen the plaintext could only
+    // be recovered with a psql session. David's standing rule: View / Copy / Regenerate, on screen.
+    { id: 'api-keys', label: 'API Keys', icon: '🔑' },
     { id: 'team', label: 'Your Team', icon: '👥' },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
@@ -3233,6 +3238,9 @@ const App = () => {
     const [err, setErr] = useState(null);
     const [busy, setBusy] = useState(false);
     const [note, setNote] = useState(null);
+    // The on-demand payment-page verdict (cron 2026-11-13): a link proven once at save time can die
+    // later, so the operator can re-ask. Keyed by plan id, plus the one-line summary the server wrote.
+    const [paycheck, setPaycheck] = useState(null);
     const [modal, setModal] = useState(null); // null | {mode:'create'|'edit', id?, form:{...}}
     const [assign, setAssign] = useState({ tenant_id: '', plan_id: '', billing_cycle: 'monthly' });
 
@@ -3300,6 +3308,36 @@ const App = () => {
       catch(e) { alert('Not granted: ' + e.message); }
       setBusy(false);
     };
+    // Re-open every plan's stored payment page NOW (2026-11-13). The save-time gate proves a link
+    // once; a page can die afterwards, and a plan that reads "on sale" while its link answers 404
+    // hands a buyer to nothing. The server does the probing (a browser cannot read another site's
+    // status), and it never calls a page dead on a provider's robot refusal.
+    const checkPages = async () => {
+      setBusy(true);
+      try {
+        const r = await API.post('/admin/plans/payment-pages/check', {});
+        const byId = {};
+        (r.plans || []).forEach(x => { byId[x.id] = x; });
+        setPaycheck({ byId, message: r.message });
+        flash(r.message);
+      } catch(e) { alert('Could not check the payment pages: ' + e.message); }
+      setBusy(false);
+    };
+    const payVerdict = (id) => {
+      if (!paycheck) return null;
+      const v = paycheck.byId[id];
+      if (!v) return null;
+      const s = v.status ? (' HTTP ' + v.status) : '';
+      const map = {
+        ok: ['badge-green', 'opens' + s],
+        dead: ['badge-red', 'dead page — a buyer lands on nothing' + s],
+        not_https: ['badge-yellow', 'not an https link'],
+        needs_browser: ['badge-yellow', 'could not judge from here' + s],
+        unreachable: ['badge-yellow', 'no such site'],
+      };
+      const [cls, text] = map[v.reason] || ['badge-yellow', v.reason];
+      return html`<span class="badge ${cls}" title=${v.url || ''} style="margin-left:6px">${text}</span>`;
+    };
 
     if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Plans & Features</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
     if (!reg) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Plans & Features</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
@@ -3313,6 +3351,8 @@ const App = () => {
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-xl font-bold">Plans & Features</h2>
         <div class="flex gap-2">
+          <button class="btn btn-sm btn-outline" disabled=${busy} onClick=${checkPages}
+            title="Open every plan's payment page now and print what each one answered">Check payment pages</button>
           <button class="btn btn-sm btn-outline" disabled=${busy}
             onClick=${() => setModal({ mode: 'create', form: { name: '', slug: '', description: '', price_monthly: '', price_yearly: '', purchase_url: '', is_active: true } })}>+ New Plan</button>
           <button class="btn btn-sm" disabled=${busy} onClick=${grantTop}>Grant top tier every feature</button>
@@ -3380,7 +3420,7 @@ const App = () => {
             <td class="font-medium">${p.name} ${p.is_top ? html`<span class="badge badge-purple">top</span>` : ''}</td>
             <td class="text-gray-500 font-mono">${p.slug}</td>
             <td>$${p.price_monthly != null ? Number(p.price_monthly).toFixed(2) : '0.00'}</td>
-            <td>${p.purchase_url ? html`<span class="badge badge-green" title=${p.purchase_url}>payment link</span>` : html`<span class="text-gray-400 text-xs">—</span>`}</td>
+            <td>${p.purchase_url ? html`<span class="badge badge-green" title=${p.purchase_url}>payment link</span>` : html`<span class="text-gray-400 text-xs">—</span>`}${payVerdict(p.id)}</td>
             <td>${p.is_active ? html`<span class="badge badge-green">active</span>` : html`<span class="badge badge-yellow">inactive</span>`}</td>
             <td>
               <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: (p.price_yearly != null ? p.price_yearly : ''), purchase_url: (p.purchase_url || ''), is_active: p.is_active } })}>Edit</button>
@@ -4160,7 +4200,116 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback };
+  // ---- API KEYS (2026-11-13) ----------------------------------------------------------------
+  // The durable bearer credential every workspace auto-mints at signup, and until this screen the
+  // only way to read or rotate it was a psql session: `GET|POST /api/v1/api-keys` plus
+  // `/:id/reveal`, `/:id/regenerate` and `DELETE /:id` were served with no caller in this console.
+  // Response shapes (measured from src/handlers/api_key_handler.rs):
+  //   GET    /api-keys                      -> { api_keys: [{id,name,key_prefix,created_at,
+  //                                              last_used_at,revoked_at,recoverable}] }
+  //   POST   /api-keys                      -> 201 CreatedApiKey{token} | 409 when a live one exists
+  //   POST   /api-keys/:id/reveal {password}-> { token, key_prefix }  (CURRENT password required)
+  //   POST   /api-keys/:id/regenerate       -> CreatedApiKey{token}
+  //   DELETE /api-keys/:id                  -> { message }
+  // The server records every reveal, rotate and revoke itself, so this screen never claims an
+  // audit it did not perform.
+  const ApiKeys = () => {
+    const st = viewState('apikeys', { list: null, err: null, token: null, tokenPrefix: '', busy: false });
+    const load = async () => {
+      try {
+        const r = await API.get('/api-keys');
+        st.list = Array.isArray(r) ? r : ((r && r.api_keys) || []);
+        st.err = null;
+      } catch (e) { st.list = []; st.err = e.message || 'Could not load your keys.'; }
+      renderApp();
+    };
+    if (!st._loaded) { st._loaded = true; load(); }
+    const live = (st.list || []).filter(k => !k.revoked_at);
+    const showToken = (token, prefix) => { st.token = token; st.tokenPrefix = prefix || ''; renderApp(); };
+    const view = async (k) => {
+      const pw = prompt('Enter YOUR account password to show this key. Every view is recorded.');
+      if (!pw) return;
+      st.busy = true;
+      try {
+        const r = await API.post('/api-keys/' + k.id + '/reveal', { password: pw });
+        showToken(r.token, r.key_prefix || k.key_prefix);
+      } catch (e) { alert('Could not show the key: ' + (e.message || 'unknown error')); }
+      st.busy = false; renderApp();
+    };
+    const regen = async (k) => {
+      if (!confirm('Regenerate this key? The current key stops working immediately, so anything already wired up with it stops until you paste the new one in.')) return;
+      st.busy = true;
+      try {
+        const r = await API.post('/api-keys/' + k.id + '/regenerate', {});
+        showToken(r.token, r.key_prefix || k.key_prefix);
+        await load();
+      } catch (e) { alert('Could not regenerate the key: ' + (e.message || 'unknown error')); }
+      st.busy = false; renderApp();
+    };
+    const remove = async (k) => {
+      if (!confirm('Revoke this key? Anything using it stops working at once. A workspace can then mint a fresh one.')) return;
+      st.busy = true;
+      try { await API.del('/api-keys/' + k.id); await load(); }
+      catch (e) { alert('Could not revoke the key: ' + (e.message || 'unknown error')); }
+      st.busy = false; renderApp();
+    };
+    const mint = async () => {
+      st.busy = true;
+      try { const r = await API.post('/api-keys', { name: 'API key' }); showToken(r.token, r.key_prefix); await load(); }
+      catch (e) { alert(e.message || 'Could not create a key.'); }
+      st.busy = false; renderApp();
+    };
+    const copyToken = () => {
+      if (!st.token) return;
+      try {
+        if (navigator.clipboard) { navigator.clipboard.writeText(st.token); alert('Key copied to the clipboard.'); return; }
+      } catch (e) { /* fall through to the select-and-copy path */ }
+      alert('Select the key and copy it.');
+    };
+    const cell = { fontSize: '12px', color: 'var(--muted)' };
+    return html`<div>
+      <h2 class="text-xl font-bold mb-1">API Keys</h2>
+      <p class="text-sm text-gray-500 mb-4">This workspace's key for the MissedCall Respondr API and MCP server. It is created with your account, it never expires, and you can view it again at any time — each view asks for your password and is recorded.</p>
+      ${st.err ? html`<div class="text-sm mb-3" style="color:#991b1b">${st.err}</div>` : null}
+      ${st.list === null ? html`<div class="text-sm text-gray-400 py-4">Loading…</div>` : null}
+      ${st.list && !st.list.length ? html`<div class="card p-4">
+        <div class="text-sm text-gray-600 mb-3">This workspace has no key yet — minting one makes the API usable from your own tools.</div>
+        <button class="btn btn-sm" disabled=${st.busy} onClick=${mint}>Create an API key</button>
+      </div>` : null}
+      ${(st.list || []).map(k => html`<div class="card p-3 mb-2" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:600;font-size:14px">${k.name || 'API key'}
+            ${k.revoked_at ? html`<span class="badge badge-yellow" style="margin-left:8px">revoked</span>` : null}
+            ${k.recoverable === false ? html`<span class="badge badge-yellow" style="margin-left:8px" title="This key was stored before keys were recoverable, so it cannot be displayed. Regenerate it to get one you can copy.">cannot be displayed</span>` : null}
+          </div>
+          <div class="font-mono" style="font-size:12px;color:var(--muted)">${k.key_prefix || ''}…</div>
+          <div style="font-size:12px;color:var(--muted)">
+            Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : '—'}
+            · Last used ${k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'never'}
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          ${!k.revoked_at ? html`<button class="btn btn-ghost btn-sm" disabled=${st.busy} onClick=${() => view(k)}>View</button>` : null}
+          ${!k.revoked_at ? html`<button class="btn btn-ghost btn-sm" disabled=${st.busy} onClick=${() => regen(k)}>Regenerate</button>` : null}
+          ${!k.revoked_at ? html`<button class="btn btn-ghost btn-sm" disabled=${st.busy} onClick=${() => remove(k)}>Revoke</button>` : null}
+        </div>
+      </div>`)}
+      ${live.length ? html`<p class="text-xs text-gray-400">One live key per workspace. To replace it, press Regenerate — the old key stops working at the same moment the new one starts.</p>` : null}
+      ${st.token ? html`<div class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50" onClick=${() => { st.token = null; renderApp(); }}>
+        <div class="bg-white rounded-xl p-6 w-[34rem] shadow-xl" onClick=${e => e.stopPropagation()}>
+          <h3 class="font-bold mb-2">Your API key</h3>
+          <p class="text-xs text-gray-500 mb-3">Prefix ${st.tokenPrefix || ''}. You can view and copy this key again at any time — every view is recorded.</p>
+          <input class="border rounded px-3 py-2 w-full text-xs font-mono" readonly value=${st.token} onFocus=${e => e.target.select()} />
+          <div class="flex justify-end gap-2 mt-4">
+            <button class="px-4 py-1.5 text-sm rounded border" onClick=${() => { st.token = null; renderApp(); }}>Close</button>
+            <button class="px-4 py-1.5 text-sm rounded bg-blue-600 text-white" onClick=${copyToken}>Copy key</button>
+          </div>
+        </div>
+      </div>` : null}
+    </div>`;
+  };
+
+  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback, 'api-keys': ApiKeys };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
