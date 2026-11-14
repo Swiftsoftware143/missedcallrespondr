@@ -501,6 +501,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000058_users_closed_at",
             include_str!("../migrations/000058_users_closed_at.sql"),
         ),
+        // The files that travel with a message (2026-11-14). Both receivers used to count a
+        // delivery's file parts, add their bytes to the message and then throw the bytes away, so
+        // the inbox said "has attachments" and had nothing to open. Fully idempotent
+        // (IF NOT EXISTS everywhere) because this runner re-executes every file per boot, and
+        // `include_str!` of a brand-new file is also what forces the rebuild to embed it.
+        (
+            "000059_private_email_attachments",
+            include_str!("../migrations/000059_private_email_attachments.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

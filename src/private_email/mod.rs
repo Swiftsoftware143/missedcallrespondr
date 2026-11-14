@@ -29,6 +29,7 @@ use crate::state::AppState;
 use axum::{middleware, Router};
 
 pub mod api_keys_handler;
+pub mod attachments;
 pub mod domain_handler;
 pub mod encryption;
 pub mod feature_gate;
@@ -106,6 +107,12 @@ pub fn router(state: AppState) -> Router<AppState> {
             axum::routing::get(messages_handler::get_message)
                 .patch(messages_handler::update_message)
                 .delete(messages_handler::delete_message),
+        )
+        // The files a message carried: `?inline=1` draws one in place, the default downloads it.
+        // Resolved through (account, message, attachment) so a guessed id finds nothing.
+        .route(
+            "/messages/:id/attachments/:attachment_id",
+            axum::routing::get(messages_handler::download_attachment),
         )
         .route(
             "/messages/:id/reply",

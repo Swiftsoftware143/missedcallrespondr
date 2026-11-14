@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use super::attachments;
 use super::feature_gate;
 use super::messages_handler::{self, InboundMessage};
 use super::providers::{self, InboundEmail};
@@ -99,6 +100,10 @@ struct Delivery {
     /// figure (the meter is what pauses new attachments at 100%) and then dropped: this receiver
     /// stores the MESSAGE, not the files.
     attachment_bytes: usize,
+    /// The file parts themselves, written against the message row the delivery creates. Before
+    /// this, the bytes were counted and thrown away: the inbox said "has attachments" and had
+    /// nothing to open.
+    files: Vec<attachments::InboundFile>,
     provider: &'static str,
     from_display_name: Option<String>,
 }
@@ -260,6 +265,7 @@ pub async fn inbound_webhook(
                 .unwrap_or(false)
                 || delivery.attachment_parts > 0,
             attachment_bytes: delivery.attachment_bytes,
+            files: delivery.files,
             provider: "mailgun",
             from_display_name: delivery
                 .mailgun
@@ -360,6 +366,7 @@ pub async fn sendgrid_inbound(
     }
 
     // ── The multipart body ─────────────────────────────────────────────────────────────────────
+    let mut files: Vec<attachments::InboundFile> = Vec::new();
     // Text fields are kept; a file part is COUNTED and its bytes are dropped (the inbox renders the
     // message, and buffering an attachment we never store is how a receiver runs out of memory).
     let mut fields: Vec<(String, String)> = Vec::new();
@@ -382,11 +389,32 @@ pub async fn sendgrid_inbound(
         };
         let name = field.name().unwrap_or_default().to_string();
         if field.file_name().is_some() || is_numbered_attachment_part(&name) {
-            // Counted AND measured: the bytes count toward the account's storage figure even though
-            // the file itself is not stored (kanban t_237e3005, same rule as the Mailgun receiver).
+            // Counted, measured AND KEPT: the bytes count toward the account's storage figure and
+            // the part itself becomes a row the reader can draw or download.
             attachment_parts += 1;
+            let declared_name = field.file_name().unwrap_or_default().to_string();
+            let declared_type = field.content_type().map(str::to_string);
+            let content_id = field.headers().get("content-id").and_then(|v| {
+                v.to_str()
+                    .ok()
+                    .map(|c| c.trim().trim_matches(['<', '>']).to_string())
+                    .filter(|c| !c.is_empty())
+            });
             if let Ok(data) = field.bytes().await {
                 attachment_bytes += data.len();
+                let label = if declared_name.is_empty() {
+                    name.as_str()
+                } else {
+                    declared_name.as_str()
+                };
+                files.push(attachments::InboundFile {
+                    filename: attachments::safe_filename(label, attachment_parts as usize),
+                    content_type: declared_type
+                        .unwrap_or_else(|| "application/octet-stream".into()),
+                    is_inline: content_id.is_some(),
+                    content_id,
+                    bytes: data.to_vec(),
+                });
             }
             continue;
         }
@@ -447,6 +475,7 @@ pub async fn sendgrid_inbound(
             is_spam: payload.is_spam(),
             has_attachments: payload.has_attachments(),
             attachment_bytes,
+            files,
             inbound,
             provider: "sendgrid",
         },
@@ -545,6 +574,7 @@ async fn ingest(state: &AppState, d: Delivery) -> ApiResult<Json<serde_json::Val
         is_spam,
         has_attachments,
         attachment_bytes,
+        files,
         provider,
         from_display_name,
     } = d;
@@ -582,6 +612,7 @@ async fn ingest(state: &AppState, d: Delivery) -> ApiResult<Json<serde_json::Val
             is_spam,
             has_attachments,
             attachment_bytes,
+            files: &files,
         },
     )
     .await?;
@@ -841,6 +872,8 @@ struct ParsedDelivery {
     /// File parts the parser actually counted, and the bytes they carried.
     attachment_parts: u32,
     attachment_bytes: usize,
+    /// The parts themselves, so a multipart delivery's files survive into the message row.
+    files: Vec<attachments::InboundFile>,
 }
 
 /// Read the request into a [`ParsedDelivery`], choosing the parser by CONTENT TYPE.
@@ -857,7 +890,8 @@ async fn read_delivery(request: Request) -> Result<ParsedDelivery, AppError> {
         .unwrap_or(false);
 
     if is_multipart {
-        let (fields, attachment_parts, attachment_bytes) = multipart_text_fields(request).await?;
+        let (fields, files, attachment_parts, attachment_bytes) =
+            multipart_text_fields(request).await?;
         // Re-encode the TEXT fields as the urlencoded form that `accept_inbound` already speaks, so
         // signature validation and field parsing stay in ONE place (`providers::mailgun`) instead of
         // growing a second, weaker copy for the multipart shape.
@@ -882,6 +916,7 @@ async fn read_delivery(request: Request) -> Result<ParsedDelivery, AppError> {
             mailgun,
             attachment_parts,
             attachment_bytes,
+            files,
         });
     }
 
@@ -909,6 +944,7 @@ async fn read_delivery(request: Request) -> Result<ParsedDelivery, AppError> {
         mailgun,
         attachment_parts: 0,
         attachment_bytes: 0,
+        files: Vec::new(),
     })
 }
 
@@ -917,7 +953,15 @@ async fn read_delivery(request: Request) -> Result<ParsedDelivery, AppError> {
 /// which is how the SendGrid receiver behaves too.
 async fn multipart_text_fields(
     request: Request,
-) -> Result<(Vec<(String, String)>, u32, usize), AppError> {
+) -> Result<
+    (
+        Vec<(String, String)>,
+        Vec<attachments::InboundFile>,
+        u32,
+        usize,
+    ),
+    AppError,
+> {
     // `()` is the extractor state: neither extractor reads it (both take their body limit from the
     // request's own `DefaultBodyLimit` extension), and naming the empty state is what lets this
     // parser be unit-tested without an `AppState`.
@@ -935,6 +979,7 @@ async fn multipart_text_fields(
         })?;
 
     let mut fields: Vec<(String, String)> = Vec::new();
+    let mut files: Vec<attachments::InboundFile> = Vec::new();
     let mut attachment_parts: u32 = 0;
     let mut attachment_bytes: usize = 0;
     loop {
@@ -958,11 +1003,33 @@ async fn multipart_text_fields(
         // matter: `attachment-count` is a TEXT field and counting it as a file would report one
         // attachment too many on every delivery (caught by the unit test below).
         let is_file = field.file_name().is_some() || is_numbered_attachment_part(&name);
+        let declared_name = field.file_name().unwrap_or_default().to_string();
+        let declared_type = field.content_type().map(str::to_string);
+        let content_id = field.headers().get("content-id").and_then(|v| {
+            v.to_str()
+                .ok()
+                .map(|c| c.trim().trim_matches(['<', '>']).to_string())
+                .filter(|c| !c.is_empty())
+        });
         match field.bytes().await {
             Ok(data) => {
                 if is_file {
                     attachment_parts += 1;
                     attachment_bytes += data.len();
+                    let label = if declared_name.is_empty() {
+                        name.as_str()
+                    } else {
+                        declared_name.as_str()
+                    };
+                    files.push(attachments::InboundFile {
+                        filename: attachments::safe_filename(label, attachment_parts as usize),
+                        content_type: declared_type
+                            .clone()
+                            .unwrap_or_else(|| "application/octet-stream".into()),
+                        is_inline: content_id.is_some(),
+                        content_id,
+                        bytes: data.to_vec(),
+                    });
                 } else if !name.is_empty() {
                     fields.push((name, String::from_utf8_lossy(&data).into_owned()));
                 }
@@ -976,7 +1043,7 @@ async fn multipart_text_fields(
             }
         }
     }
-    Ok((fields, attachment_parts, attachment_bytes))
+    Ok((fields, files, attachment_parts, attachment_bytes))
 }
 
 /// Attempt to parse the inbound webhook body from the JSON shapes other providers use.
