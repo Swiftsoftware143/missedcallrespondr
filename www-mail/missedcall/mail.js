@@ -177,6 +177,39 @@
 
   // Setup page: readable signed out (B205), and the place a signed-in account without mailboxes
   // finishes its setup.
+  /* Create a mailbox from the screen that tells you to create one.
+   *
+   * kanban 2026-11-13: until now this page said "Mailboxes are created on your mail screen" and the
+   * mail screen could not create one either — the picker's empty card pointed back at the setup page,
+   * so an account with a verified domain and no mailbox had NO reachable door. The route has always
+   * existed (POST /private-email/boxes). The server refuses a mailbox on a domain that is not
+   * receiving mail yet and its sentence is shown here unchanged, because it names the step to take.
+   */
+  function newBoxFormHtml() {
+    var opts = S.domains.map(function (d) {
+      return '<option value="' + esc(d.id) + '">' + esc(d.domain)
+        + (d.verified ? '' : ' — waiting for its records') + '</option>';
+    }).join('');
+    var pick = S.domains.length > 1
+      ? '<label class="f">Your domain</label><select id="smBoxDomain">' + opts + '</select>'
+      : '<input type="hidden" id="smBoxDomain" value="' + esc(S.domains[0].id) + '">'
+        + '<div class="rec"><strong>' + esc(S.domains[0].domain) + '</strong><span>'
+        + (S.domains[0].verified ? 'Active — receiving mail' : 'Waiting for its records')
+        + '</span><span></span></div>';
+    return '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">'
+      + pick
+      + '<label class="f">The address people will write to</label>'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+      + '<input id="smBoxLocal" placeholder="support" style="flex:1" autocapitalize="none" spellcheck="false">'
+      + '<span style="color:var(--muted);white-space:nowrap">@' + esc(S.domains[0].domain) + '</span>'
+      + '</div>'
+      + '<div style="margin-top:10px"><button class="btn btn-primary" id="smAddBox">Create this mailbox</button>'
+      + ' <span id="smBoxMsg" class="ok"></span></div>'
+      + '<p style="color:var(--muted);font-size:12px;margin:8px 0 0">Letters, digits, dot, dash and '
+      + 'underscore only. Your 30 free days start with the first mailbox you create.</p>'
+      + '</div>';
+  }
+
   function setupPage() {
     var signedIn = !!S.token;
     var domain = S.domains[0] || null;
@@ -265,7 +298,8 @@
         ? '<div>' + S.boxes.map(function (b) {
           return '<div class="rec"><strong>' + esc(b.email_address) + '</strong><span>' + (b.creates_ticket ? 'also opens a ticket' : 'inbox only') + '</span><span></span></div>';
         }).join('') + '</div>'
-        : '<p style="margin:0;color:var(--muted)">Mailboxes are created on your mail screen, once your domain is Active.</p>')
+        : '<p style="margin:0;color:var(--muted)">Mailboxes are created here, once your domain is Active.</p>')
+      + ((signedIn && S.domains.length) ? newBoxFormHtml() : '')
       + '</div>'
       + '<div class="card"><h3>6. Turn on catch-all if you want one inbox to receive every address</h3>'
       + '<p style="margin:0;color:var(--muted)">With catch-all on, mail to any address at your domain that you have not created still arrives — and it is shown under <strong>Everything else</strong> in the address filter so you can see it.</p>'
@@ -306,6 +340,29 @@
 
   function bindSetup() {
     if (typeof window.csmChoicesChanged === 'function') window.csmChoicesChanged();
+    var ab = $('smAddBox');
+    if (ab) ab.onclick = async function () {
+      var local = (($('smBoxLocal') || {}).value || '').trim().toLowerCase();
+      var domId = (($('smBoxDomain') || {}).value || '');
+      var msg = $('smBoxMsg');
+      if (!local) { if (msg) { msg.className = 'err'; msg.textContent = 'Type the name in front of the @ first.'; } return; }
+      ab.disabled = true;
+      if (msg) { msg.className = 'ok'; msg.textContent = 'Creating…'; }
+      try {
+        var r = await api('POST', '/private-email/boxes', { domain_id: domId, local_part: local });
+        var addr = (r && (r.email_address || (r.box && r.box.email_address))) || (local + '@' + ((S.domains[0] || {}).domain || ''));
+        var boxes = await api('GET', '/private-email/boxes').catch(function () { return null; });
+        if (boxes) S.boxes = Array.isArray(boxes) ? boxes : (boxes.boxes || []);
+        var st = $('smOpen');
+        if (st) st.style.display = '';
+        render();
+        var again = $('smBoxMsg');
+        if (again) { again.className = 'ok'; again.textContent = addr + ' is ready — open it from "Open my mail".'; }
+      } catch (e) {
+        if (msg) { msg.className = 'err'; msg.textContent = fail(e); }
+        ab.disabled = false;
+      }
+    };
     var lg = $('smLogin');
     if (lg) lg.onclick = loginModal;
     var so = $('smSignOut');
