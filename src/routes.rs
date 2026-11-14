@@ -153,6 +153,15 @@ pub fn create_router(state: AppState) -> Router {
                 post(crate::private_email::webhook_handler::inbound_webhook);
             with_limit.layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024))
         })
+        // SendGrid Inbound Parse — the OTHER receiver a domain can pick. Measured 2026-11-14: the
+        // handler and its named router existed, the console handed a SendGrid-hosted customer a
+        // `…/api/v1/webhooks/sendgrid/inbound/<token>` URL, and nothing mounted the router, so that
+        // URL answered a router 404 and the inbox could receive nothing. SendGrid signs nothing —
+        // the unguessable per-domain token IN THE PATH is the credential, hence PUBLIC_ROUTES.
+        .nest(
+            "/api/v1/webhooks/sendgrid",
+            crate::private_email::webhook_handler::sendgrid_router(body_read_deadline),
+        )
         // Thank-you page lookup (public, id-scoped, non-sensitive summary)
         .route(
             "/api/v1/checkout/session/:id",

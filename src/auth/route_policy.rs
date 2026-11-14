@@ -182,6 +182,11 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // It reads a raw body before it can verify anything, which is why it is also mounted with the
     // body-read deadline (the public router's own `route_layer`).
     "/api/v1/webhooks/mailgun/inbound",
+    // The OTHER receiver a domain can choose (measured live 2026-11-14: the console hands a
+    // SendGrid-hosted customer this URL, and the router existed but was never mounted, so it
+    // answered 404). SendGrid signs nothing — the unguessable per-domain `inbound_token` in the
+    // path IS the credential, and a token that names no domain writes nothing.
+    "/api/v1/webhooks/sendgrid/inbound/:token",
     // --- public checkout-session polling -------------------------------------------------------
     // `get_checkout_session_public` reads one session by its UUID (unguessable) and returns the
     // status summary the post-checkout page shows. Read-only, and no tenant scope is decided here.
