@@ -1089,5 +1089,20 @@ pub async fn record_signup_plan_request(
             "plan request at signup for tenant {tenant_id}: operator alert not sent: {e}"
         );
     }
+    // ACKNOWLEDGE THE BUYER (2026-11-14). The Tickets screen and the console's Upgrade button both
+    // mail the customer a receipt (`send_billing_request_receipt`); THIS door — the pricing page's
+    // own route into the app — wrote the row and told only the operator. Measured live: a signup
+    // asking for Pro Monthly filed the request and sent the buyer nothing but the welcome mail.
+    // Best effort, exactly as the alert above: the ticket is already written, and the helper answers
+    // false rather than erroring when the mail layer refuses.
+    let receipt = send_billing_request_receipt(
+        db,
+        tenant_id,
+        &format!("Plan request at signup: {name} plan"),
+    )
+    .await;
+    if !receipt {
+        tracing::warn!("plan request at signup for tenant {tenant_id}: receipt not sent");
+    }
     Ok(Some(name))
 }
