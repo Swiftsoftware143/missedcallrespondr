@@ -212,16 +212,13 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
   </div>
 </section>
 
-<!-- Plans — REAL PRICES, read from this installation's own `plans` rows (2026-11-13).
-     Measured before writing: free 0.00 (50 credits, 1 number), pro-monthly 49.00 / 490.00 a year
-     (5,000 credits + 1,500 bonus every month, 5 numbers), enterprise 199.00 / 2,388.00 a year
-     (unlimited leads, white label, priority support). The retired `pro` row is is_active=false and
-     is deliberately NOT shown. Every card's button carries ?plan=<slug>, which is the door
-     www-app/register/index.html already reads (PLAN_LABELS) — it notes the pick with the new
-     account and files a plan request, and nothing is charged at signup. So the phone numbers here
-     are quoted from rows, and the sentence under the grid says exactly how payment happens.
-     If a price changes in the database, this block must be re-read — the page states the figures
-     it was written from so the two cannot silently drift. -->
+<!-- Plans — NO prices on the marketing site (fleet rule, David 2026-11-11; MissedCall brought back
+     in line 2026-11-14 after a later lane re-added amounts here). Quoting a monthly figure promises
+     a checkout this installation cannot take: nothing is charged at signup, and the buyer's own
+     Plan & Billing screen is the one place that reads the live plan records. So this grid says what
+     each plan includes and the sentence under it says how payment happens — no amount appears.
+     Every card's button carries ?plan=<slug>, which is the door www-app/register/index.html already
+     reads (PLAN_LABELS): it notes the pick with the new account and files a plan request. -->
 <div id="pricing" style="scroll-margin-top:76px">
 <section id="plans" class="py-20 px-6 bg-[#111827]">
   <div class="max-w-5xl mx-auto text-center">
@@ -231,7 +228,6 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
 
       <div data-plan-card="free" style="background:#0b1220;border:1px solid #1f2937;border-radius:16px;padding:26px;display:flex;flex-direction:column">
         <h3 style="color:#f9fafb;font-size:1.15rem;font-weight:700;margin:0 0 6px">Free</h3>
-        <div style="color:#f9fafb;font-size:2rem;font-weight:800;line-height:1.1" data-plan-price="0.00">$0<span style="font-size:.85rem;font-weight:500;color:#9ca3af"> forever</span></div>
         <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">Enough to get every missed call answered while you find out how much you were losing.</p>
         <ul style="color:#d1d5db;font-size:.9rem;line-height:1.9;margin:0 0 22px;padding-left:18px;flex:1">
           <li>50 call credits to start</li>
@@ -244,8 +240,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
       <div data-plan-card="pro-monthly" style="background:#0f1a2e;border:2px solid #2563eb;border-radius:16px;padding:26px;display:flex;flex-direction:column;position:relative">
         <span style="position:absolute;top:-12px;left:26px;background:#2563eb;color:#fff;font-size:.7rem;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px">MOST POPULAR</span>
         <h3 style="color:#f9fafb;font-size:1.15rem;font-weight:700;margin:0 0 6px">Pro Monthly</h3>
-        <div style="color:#f9fafb;font-size:2rem;font-weight:800;line-height:1.1" data-plan-price="49.00">$49<span style="font-size:.85rem;font-weight:500;color:#9ca3af"> /month</span></div>
-        <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">Or $490 a year — two months free.</p>
+        <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">The plan most customers run on, once their call volume grows.</p>
         <ul style="color:#d1d5db;font-size:.9rem;line-height:1.9;margin:0 0 22px;padding-left:18px;flex:1">
           <li>5,000 credits every month</li>
           <li>+ 1,500 bonus credits, every month</li>
@@ -256,8 +251,7 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
 
       <div data-plan-card="enterprise" style="background:#0b1220;border:1px solid #1f2937;border-radius:16px;padding:26px;display:flex;flex-direction:column">
         <h3 style="color:#f9fafb;font-size:1.15rem;font-weight:700;margin:0 0 6px">Enterprise</h3>
-        <div style="color:#f9fafb;font-size:2rem;font-weight:800;line-height:1.1" data-plan-price="199.00">$199<span style="font-size:.85rem;font-weight:500;color:#9ca3af"> /month</span></div>
-        <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">Or $2,388 a year, for teams running several locations.</p>
+        <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">For teams running several locations.</p>
         <ul style="color:#d1d5db;font-size:.9rem;line-height:1.9;margin:0 0 22px;padding-left:18px;flex:1">
           <li>Unlimited leads</li>
           <li>Dual routing</li>
