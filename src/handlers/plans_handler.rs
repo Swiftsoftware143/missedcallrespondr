@@ -619,6 +619,35 @@ pub async fn delete_plan(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // A PLAN IN USE IS REFUSED, NOT CASCADED (cron 2026-11-15). `tenant_plans.plan_id` and
+    // `feature_limits.plan_id` are both ON DELETE CASCADE, so this handler used to answer 200 to a
+    // delete that quietly took the plan away from every workspace seated on it: the workspace row
+    // survives with no plan and its limits rows were deleted with it, and the console said only
+    // "Plan deleted". Measured on this install before the fix: plans = 4, tenant_plans = 11 —
+    // deleting Enterprise (6 workspaces) or Free (5) would have stripped all of them in one click
+    // with nothing on screen to say so. The operator's console already has the non-destructive
+    // alternative: the Edit Plan dialog carries an `Active` tick that hides the plan from the
+    // catalogue without touching a single workspace. So the pre-flight below runs BEFORE any write,
+    // names the plan and the count, and changes nothing.
+    let holders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tenant_plans WHERE plan_id = $1")
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await?;
+    if holders > 0 {
+        let name: String = sqlx::query_scalar("SELECT name FROM plans WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?
+            .unwrap_or_else(|| "This plan".to_string());
+        return Err(AppError::Conflict(format!(
+            "{name} is the plan on {holders} workspace{}. Deleting it would leave {} with no plan \
+             at all, so nothing was changed. Move those workspaces to another plan first, or untick \
+             Active on this plan in Edit — that hides it from the catalogue without touching anyone.",
+            if holders == 1 { "" } else { "s" },
+            if holders == 1 { "that workspace" } else { "those workspaces" }
+        )));
+    }
+
     let result = sqlx::query("DELETE FROM plans WHERE id = $1")
         .bind(id)
         .execute(&state.pool)
