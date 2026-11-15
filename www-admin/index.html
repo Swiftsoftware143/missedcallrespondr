@@ -3328,10 +3328,15 @@ const App = () => {
       setBusy(false);
     };
     const delPlan = async (p) => {
-      if (!confirm('Delete plan "' + p.name + '"? Tenants on it are not reassigned.')) return;
+      // A PLAN IN USE IS REFUSED BY THE SERVER (cron 2026-11-15). The old sentence here — "Tenants
+      // on it are not reassigned." — read as if the workspaces kept a plan of some kind, while the
+      // delete actually CASCADED their `tenant_plans` row away and left them with none. Say what
+      // now happens: the server counts the workspaces first and refuses, and the console offers the
+      // non-destructive route (untick Active in Edit), which is the one an operator usually wants.
+      if (!confirm('Delete plan "' + p.name + '"? If any workspace is still on it the delete is refused and nothing changes. To stop offering a plan without touching anyone, untick Active in Edit instead.')) return;
       setBusy(true);
       try { await API.del('/admin/plans/' + p.id); flash('Plan deleted'); await load(); }
-      catch(e) { alert('Not deleted: ' + e.message); }
+      catch(e) { alert('Not deleted: ' + ((e && e.message) || 'request failed')); }
       setBusy(false);
     };
     const doAssign = async () => {
