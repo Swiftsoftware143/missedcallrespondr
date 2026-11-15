@@ -180,10 +180,10 @@ async fn provision_workspace(
                  VALUES ($1, $2, $3, $4, $5, 'account_owner', $6, $7)",
             )
             .bind(uid)
-            .bind(tenant_id)
             .bind(email)
             .bind(&hash)
             .bind(name)
+            .bind(tenant_id)
             .bind(now)
             .bind(now)
             .execute(&mut *tx)
@@ -207,9 +207,13 @@ async fn provision_workspace(
         None => {
             // `mint_on` is the ONE key writer: hash + sealed copy + prefix + audit row, all on this
             // connection so they commit or roll back with the account.
-            let minted =
-                crate::handlers::api_key_handler::mint_on(&mut *tx, tenant_id, Some(user_id), "auto-provisioned")
-                    .await?;
+            let minted = crate::handlers::api_key_handler::mint_on(
+                &mut *tx,
+                tenant_id,
+                Some(user_id),
+                "auto-provisioned",
+            )
+            .await?;
             (Some(minted.prefix), true)
         }
     };
@@ -243,7 +247,15 @@ async fn send_welcome(
         "password": password,
         "key_prefix": key_prefix,
     });
-    match crate::email::send_template_email(&state.pool, tenant_id, email, "welcome_credentials", &vars).await {
+    match crate::email::send_template_email(
+        &state.pool,
+        tenant_id,
+        email,
+        "welcome_credentials",
+        &vars,
+    )
+    .await
+    {
         Ok(()) => {
             tracing::info!(email = %email, tenant = %tenant_id, "portfolio sync: welcome email sent");
             true
