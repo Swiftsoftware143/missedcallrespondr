@@ -920,7 +920,9 @@ const Branding = () => {
     loaded: false, brand_name: '', brand_color: '', logo_url: '',
     notice: null, error: null, busy: false, bust: null,
     previewBusy: false, previewMsg: null,
-    mailSubject: '', mailHtml: '', mailHint: 'Loading the email your sender produces…'
+    mailSubject: '', mailHtml: '', mailHint: 'Loading the email your sender produces…',
+    sig: { full_name: '', job_title: '', company: '', phone: '', line: '' },
+    sigBusy: false, sigNotice: null, sigError: null
   });
   // Read the message the sender builds from the SAVED branding. Called on open, after Save, and
   // after a logo upload/removal — the three moments the message can change.
@@ -939,6 +941,20 @@ const Branding = () => {
     }
     renderApp();
   };
+  // The workspace signature — five plain fields printed under the logo on every message this
+  // workspace sends (kanban t_b671a0f7). The backend documents GET|PUT
+  // /private-email/signature/workspace as "for the Branding screen", but this tab never reached
+  // them: the inbox told users to set the workspace signature here and the control did not exist.
+  const loadSignature = () => {
+    API.get('/private-email/signature/workspace').then(d => {
+      const s = (d && d.signature) || {};
+      st.sig = {
+        full_name: s.full_name || '', job_title: s.job_title || '',
+        company: s.company || '', phone: s.phone || '', line: s.line || ''
+      };
+      renderApp();
+    }).catch(() => { /* the signature is optional — a refusal must never blank the branding tab */ });
+  };
   if (!st.loaded && !st.busy) {
     st.busy = true;
     API.get('/settings/branding').then(d => {
@@ -947,6 +963,7 @@ const Branding = () => {
       st.logo_url = d.logo_url || '';
       st.loaded = true; st.busy = false; renderApp();
       loadMailBody();
+      loadSignature();
     }).catch(e => {
       st.error = 'Could not load branding: ' + e.message;
       st.loaded = true; st.busy = false; renderApp();
@@ -1006,6 +1023,18 @@ const Branding = () => {
     } catch (e) { st.error = 'Remove failed: ' + e.message; }
     st.busy = false; renderApp();
     loadMailBody();
+  };
+
+  // The workspace signature save (kanban t_b671a0f7): PUT /private-email/signature/workspace is
+  // the ONLY writer of the tenant default the send path appends under the logo.
+  const saveSignature = async () => {
+    st.sigBusy = true; st.sigError = null; st.sigNotice = null; renderApp();
+    try {
+      const d = await API.put('/private-email/signature/workspace', st.sig);
+      if (d && d.signature) st.sig = d.signature;
+      st.sigNotice = (d && d.detail) || 'Signature saved';
+    } catch (e) { st.sigError = 'Save failed: ' + e.message; }
+    st.sigBusy = false; renderApp();
   };
 
   // "Send me a preview email" (2026-10-24): the app's OWN POST /api/v1/settings/branding/preview mails a
@@ -1074,6 +1103,20 @@ const Branding = () => {
           ${st.previewMsg && html`<p id="brand-preview-msg" class="text-xs" style="margin:8px 0 0;color:${st.previewMsg.ok ? '#047857' : '#dc2626'}">${st.previewMsg.text}</p>`}
         </div>
       </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 class="font-semibold mb-1">Company signature</h3>
+      <p class="text-xs text-gray-500 mb-3">Five plain fields that print under your logo on every message this workspace sends. Each mailbox can use this default, write its own, or send without one.</p>
+      ${st.sigError && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.sigError}</p></div>`}
+      ${st.sigNotice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.sigNotice}</p></div>`}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium block mb-1">Full name</label><input id="brand-sig-name" class="input" maxlength="120" value=${st.sig.full_name || ''} onInput=${e => { st.sig.full_name = e.target.value; }} placeholder="Dana Reed" /></div>
+        <div><label class="text-sm font-medium block mb-1">Job title</label><input id="brand-sig-title" class="input" maxlength="120" value=${st.sig.job_title || ''} onInput=${e => { st.sig.job_title = e.target.value; }} placeholder="Owner" /></div>
+        <div><label class="text-sm font-medium block mb-1">Company</label><input id="brand-sig-company" class="input" maxlength="120" value=${st.sig.company || ''} onInput=${e => { st.sig.company = e.target.value; }} placeholder="Your company" /></div>
+        <div><label class="text-sm font-medium block mb-1">Phone</label><input id="brand-sig-phone" class="input" maxlength="120" value=${st.sig.phone || ''} onInput=${e => { st.sig.phone = e.target.value; }} placeholder="+1 555 010 1234" /></div>
+        <div style="grid-column:1 / -1"><label class="text-sm font-medium block mb-1">A line</label><input id="brand-sig-line" class="input" maxlength="160" value=${st.sig.line || ''} onInput=${e => { st.sig.line = e.target.value; }} placeholder="Miami · Mon–Fri" /></div>
+      </div>
+      <button id="brand-signature-save" class="btn btn-sm" style="margin-top:12px" disabled=${st.sigBusy} onClick=${saveSignature}>${st.sigBusy ? 'Saving…' : 'Save signature'}</button>
     </div>
   </div>`;
 };
