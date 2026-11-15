@@ -52,7 +52,12 @@ fn may_manage(claims: &Claims) -> bool {
 /// The portfolio businesses (ZaarHub, SwiftImpact, Giraudy Capital, SwiftSoftware) always keep
 /// their account, whatever their workspace count (David's standing rule: the sister companies
 /// always keep their account). Matched on the account's own name and slug.
-fn protected_marker(name: &str, slug: &str) -> Option<&'static str> {
+///
+/// `pub(crate)` (2026-11-15) so the ADMIN TENANT LIST publishes the same verdict this door
+/// enforces: before this the operator's list could not say "Protected", and the tenant purge door
+/// carried its own shorter marker list — so the console, the workspace door and the purge door
+/// disagreed about the same row. One predicate, every door.
+pub(crate) fn protected_marker(name: &str, slug: &str) -> Option<&'static str> {
     const MARKERS: &[&str] = &[
         "missedcall",
         "swiftsoftware",

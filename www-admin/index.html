@@ -2748,10 +2748,16 @@ const TenantsScreen = () => {
   // showed it — so a leftover probe workspace read exactly like a customer's and clearing them out
   // meant guessing from the owner's domain. The badge and the picker below are the surface.
   const probes = list.filter(t => isProbeRow(t));
-  const allPicked = list.length > 0 && picked.length === list.length;
-  const pickProbes = () => { st.picked = {}; probes.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
+  // A PROTECTED row is a portfolio / sister-company account (ZaarHub, SwiftImpact, Giraudy Capital,
+  // SwiftSoftware). The API says so on the row (`protected`, 2026-11-15) because the delete doors
+  // refuse it; the screen must say it BEFORE the press — until now the pick-box could be ticked and
+  // the operator only learned the rule from a refusal. Protected rows are not pickable, not
+  // "select all", and carry a badge.
+  const pickable = list.filter(t => !t.protected);
+  const allPicked = pickable.length > 0 && pickable.every(t => st.picked[t.id]);
+  const toggleAll = (on) => { st.picked = {}; if (on) pickable.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
   const toggle = (id, on) => { if (on) st.picked[id] = true; else delete st.picked[id]; renderApp(); };
-  const toggleAll = (on) => { st.picked = {}; if (on) list.forEach(t => { st.picked[t.id] = true; }); renderApp(); };
+  const pickProbes = () => { st.picked = {}; probes.forEach(t => { if (!t.protected) st.picked[t.id] = true; }); renderApp(); };
   const del = async () => {
     const ids = list.filter(t => st.picked[t.id]).map(t => t.id);
     if (!ids.length) return;
@@ -2919,8 +2925,8 @@ const TenantsScreen = () => {
         <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Credits</th><th>Last sign-in</th><th>Created</th><th>Access</th>
       </tr></thead>
       <tbody>${list.map(t => html`<tr>
-        <td><input type="checkbox" class="tn-chk" value=${t.id || ''} checked=${st.picked[t.id] ? true : false} onChange=${e => toggle(t.id, e.target.checked)} /></td>
-        <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this workspace">suspended</span>` : null}</td>
+        <td><input type="checkbox" class="tn-chk" value=${t.id || ''} disabled=${!!t.protected} checked=${st.picked[t.id] ? true : false} title=${t.protected ? 'Protected — ' + (t.protected_reason || 'sister company') + ' account: it is never deleted from any panel' : ''} onChange=${e => toggle(t.id, e.target.checked)} /></td>
+        <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.protected ? html`<span class="badge badge-yellow ml-1" data-tenants="protected-badge" title=${'A sister company / operator account matched on "' + (t.protected_reason || '') + '". Every delete door refuses it, so it is not pickable here.'}>Protected</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this workspace">suspended</span>` : null}</td>
         <td>${ownerCell(t)}${credsCell(t)}${noLoginCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>

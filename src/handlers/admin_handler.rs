@@ -470,6 +470,19 @@ pub async fn list_all_tenants(
             "ownerless": r.try_get::<Option<i64>,_>("user_count").ok().flatten().unwrap_or(0) <= 0,
             "last_sign_in": r.try_get::<Option<chrono::DateTime<Utc>>,_>("last_sign_in").ok().flatten().map(|d| d.to_string()),
             "owner_email": r.try_get::<Option<String>,_>("owner_email").ok().flatten(),
+            // TRUE => this row is a portfolio / sister-company account (ZaarHub, SwiftImpact,
+            // Giraudy Capital, SwiftSoftware) and NO delete door will remove it (2026-11-15).
+            // Published so the console disables the pick-box and says so BEFORE the operator presses
+            // delete — until now the only way to learn it was to press and read the refusal, and the
+            // two delete doors disagreed about which rows were protected.
+            "protected": row_protected(
+                &r.try_get::<String,_>("name").unwrap_or_default(),
+                &r.try_get::<String,_>("slug").unwrap_or_default(),
+            ).is_some(),
+            "protected_reason": row_protected(
+                &r.try_get::<String,_>("name").unwrap_or_default(),
+                &r.try_get::<String,_>("slug").unwrap_or_default(),
+            ).unwrap_or_default(),
             // TRUE => the signup door minted this workspace's first password and the mail carrying
             // it never went out, so nobody has ever read that customer's password (2026-11-05).
             // Published so the Owner cell can badge the row and offer `resend-credentials`; a
@@ -828,17 +841,29 @@ pub async fn add_credits(
 /// David's sister companies (portfolio). Their accounts exist in every app and are kept by rule, so a
 /// delete must never be able to remove one.
 ///
-/// NOTE (measured live 2026-10-10): this app's `tenants` table has NO `is_portfolio` column — the
-/// markers below are the whole test here. Where the column DOES exist (CoreSwift-CRM, incentive
-/// siblings) it is checked first and a real `true` protects the row.
-const PORTFOLIO_TENANT_MARKERS: [&str; 3] = ["swiftimpact", "zaarhub", "giraudy"];
+/// NOTE (measured live 2026-10-10): this app's `tenants` table has NO `is_portfolio` column. Until
+/// 2026-11-15 the markers lived HERE as a three-word list, while the workspace-delete door used a
+/// wider five-word one — so the two doors disagreed. The predicate now lives once, in
+/// `workspaces::handlers::protected_marker`, and both doors plus the tenant list's `protected` flag
+/// read it.
+///
+/// The list's own read of the SAME rule `guard_protected` enforces — so the console can say
+/// "Protected" BEFORE the operator presses delete, instead of only learning it from a refusal
+/// after the fact (2026-11-15). One predicate, one answer: the workspace-delete door, the tenant
+/// purge door and the `protected` flag on this list all call `protected_marker`.
+fn row_protected(name: &str, slug: &str) -> Option<&'static str> {
+    crate::workspaces::handlers::protected_marker(name, slug)
+}
 
 /// Refuse to delete two things, on the SINGLE route and the BULK route alike — one helper, so the two
 /// doors can never drift apart (kanban t_31951eca).
 ///
 /// Refused: the workspace the caller is SIGNED IN AS (`claims.aid`) — that is a lockout, not a
-/// cleanup. Refused: a portfolio company, matched on the workspace's name/slug (`tenants.is_portfolio`
-/// where the column exists, plus the marker words).
+/// cleanup. Refused: a portfolio company, judged by `workspaces::handlers::protected_marker` — the
+/// SAME predicate the workspace-delete door and the tenant-list `protected` flag use (2026-11-15).
+/// This door used to carry its own THREE-word list, so a row the workspace door protected (for
+/// example `swiftsoftware`, the SwiftSoftware account) was deletable here: the two doors disagreed
+/// about the same customer.
 ///
 /// Everything else behaves as a plain `DELETE FROM tenants`, which retires the whole workspace: every
 /// other foreign key to `tenants` is ON DELETE CASCADE, and migration 000035 arms the one edge that
@@ -861,8 +886,7 @@ async fn guard_protected(
             .await?;
 
     if let Some((name, slug)) = row {
-        let hay = format!("{} {}", name, slug).to_lowercase();
-        if let Some(hit) = PORTFOLIO_TENANT_MARKERS.iter().find(|m| hay.contains(*m)) {
+        if let Some(hit) = row_protected(&name, &slug) {
             return Err(AppError::BadRequest(format!(
                 "refusing to delete a portfolio company ({})",
                 hit
