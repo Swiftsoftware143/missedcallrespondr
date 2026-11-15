@@ -62,7 +62,7 @@ window.appGuidePages = {
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it.", actions: ["Upload your logo", "Set your brand name and colour", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, the password-reset mail, the purchase receipt, the branded preview and the ticket mails. The form lists the merge fields the chosen type actually fills. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
-  "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on"] },
+  "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on. The last card on this screen closes the account: it ends every session and API key on it and refuses sign-in from then on, while keeping your data so the business can be reopened by support if you change your mind.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on", "Close the account — ends every session and API key, keeps the data"] },
   "email-provider": { title: "Email Provider", desc: "The mail provider every transactional message this install sends goes through \u2014 the welcome mail a new customer needs first, invitations and password resets. Choose the provider, then give its API URL, the API key, the sending domain and the From name and address. Two badges say whether it is ready: configured / not configured, and whether the STORED key is encrypted at rest \u2014 a key that arrived from a restored backup or a manual database write reads \u201cstored in the clear\u201d until the app seals it, and leaving the key field blank keeps the stored one instead of replacing it.", actions: ["Choose the provider and enter its API URL", "Paste the API key (leave it blank to keep the saved one)", "Set the sending domain and the From name and address", "Send a test email to prove the path end to end", "Save the provider"] },
 };
 </script>
@@ -3633,6 +3633,17 @@ const App = () => {
     // Sign-in address change (cron 2026-10-20): the route pair existed with NO console surface, so
     // the address printed under "Profile" was read-only here. The REQUEST arm mails the NEW address;
     // the account address only moves when that link is opened, which is what makes a typo harmless.
+    // Close my account (cron 2026-11-15). POST /api/v1/auth/close-account has been mounted and
+    // documented since migration 000058 - it re-verifies the password, demands the word CLOSE, and
+    // retires every session and API key in the same statement - but NO console screen called it.
+    // So in this app the only door out of a workspace was asking support to delete the row (which
+    // CASCADEs the business's history). The closure is a STATE: the data is kept, sign-in is refused.
+    // Nothing in this flow sends mail.
+    const [clPw, setClPw] = useState('');
+    const [clConfirm, setClConfirm] = useState('');
+    const [clMsg, setClMsg] = useState(null);
+    const [clBusy, setClBusy] = useState(false);
+    const [clDone, setClDone] = useState(false);
     const [ec, setEc] = useState('');
     const [ecMsg, setEcMsg] = useState(null);
 
@@ -3751,6 +3762,21 @@ const App = () => {
       setBusy(false);
     };
 
+    // The door out. The server re-checks the password and the word CLOSE, records `closed_at`, moves
+    // `sessions_valid_from` past this tab's token and revokes every live API key in one statement.
+    // Because that kills the credential this tab is holding, success signs the panel out here instead
+    // of leaving a shell that answers 401 on every screen.
+    const closeAccount = async () => {
+      if (!window.confirm('Close this account? Every session and API key on it ends, and signing in is refused from then on.')) return;
+      setClBusy(true); setClMsg(null);
+      try {
+        const d = await API.post('/auth/close-account', { password: clPw, confirm: (clConfirm || '').trim() });
+        setClDone(true);
+        setClMsg({ ok: true, text: (d && d.message) || 'Your account is closed.' });
+        setTimeout(() => { API.logout(); S.sessionEnded = true; renderApp(); }, 1400);
+      } catch (e) { setClMsg({ ok: false, text: (e && e.message) || 'Could not close the account' }); setClBusy(false); }
+    };
+
     if (err) return html`<div class="card"><h2 class="text-xl font-bold mb-2">My Account</h2><p class="text-red-500">Not available: ${String((err && err.message) || err)}</p></div>`;
     if (!me) return html`<div class="card"><h2 class="text-xl font-bold mb-2">My Account</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
 
@@ -3831,6 +3857,17 @@ const App = () => {
           <div><label class="text-sm font-medium text-gray-600 block mb-1">Role</label><div><span class="badge badge-blue">${roleLabel(me.role)}</span></div></div>
           <div><label class="text-sm font-medium text-gray-600 block mb-1">Plan</label><div><span class="badge badge-green">${me.plan_name || '\u2014'}</span></div></div>
         </div>
+      </div>
+      <div class="card" id="mc-close-account">
+        <div class="font-semibold mb-3">Close my account</div>
+        <p class="text-sm text-gray-600 mb-3">Closing ends every session and API key on this account, and signing in is refused from then on. Your data is kept so the business can be restored if you change your mind &mdash; nothing is deleted. This is the same door the customer dashboard offers, in the place an operator looks for it.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Your password (verifies it is you)</label>
+            <input class="input" id="mc-close-pw" type="password" autocomplete="current-password" value=${clPw} onInput=${e => setClPw(e.target.value)} /></div>
+          <div><label class="text-sm font-medium text-gray-600 block mb-1">Type CLOSE to confirm</label>
+            <input class="input" id="mc-close-confirm" value=${clConfirm} placeholder="CLOSE" onInput=${e => setClConfirm(e.target.value)} /></div>
+        </div>
+        <div class="mt-3"><button class="btn btn-red" id="mc-close-submit" disabled=${clBusy || clDone} onClick=${closeAccount}>${clBusy ? 'Closing...' : (clDone ? 'Account closed' : 'Close my account')}</button>${msg(clMsg)}</div>
       </div>
     </div>`;
   };
