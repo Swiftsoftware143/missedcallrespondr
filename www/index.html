@@ -230,8 +230,8 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <h3 style="color:#f9fafb;font-size:1.15rem;font-weight:700;margin:0 0 6px">Free</h3>
         <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">Enough to get every missed call answered while you find out how much you were losing.</p>
         <ul style="color:#d1d5db;font-size:.9rem;line-height:1.9;margin:0 0 22px;padding-left:18px;flex:1">
-          <li>50 call credits to start</li>
-          <li>1 phone number</li>
+          <li><span data-role="lim" data-limit="included_credits">50</span> call credits to start</li>
+          <li><span data-role="lim" data-limit="max_phone_numbers">1</span> phone number</li>
           <li>Missed-call text-back and lead capture</li>
         </ul>
         <a href="https://app.missedcallrespondr.com/register/?plan=free" style="display:block;text-align:center;padding:12px 18px;border-radius:10px;border:1px solid #374151;color:#e5e7eb;text-decoration:none;font-weight:600">Start free →</a>
@@ -242,9 +242,9 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         <h3 style="color:#f9fafb;font-size:1.15rem;font-weight:700;margin:0 0 6px">Pro Monthly</h3>
         <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 16px">The plan most customers run on, once their call volume grows.</p>
         <ul style="color:#d1d5db;font-size:.9rem;line-height:1.9;margin:0 0 22px;padding-left:18px;flex:1">
-          <li>5,000 credits every month</li>
-          <li>+ 1,500 bonus credits, every month</li>
-          <li>5 phone numbers</li>
+          <li><span data-role="lim" data-limit="included_credits">5,000</span> credits every month</li>
+          <li>+ <span data-role="lim" data-limit="bonus_credits">1,500</span> bonus credits, every month</li>
+          <li><span data-role="lim" data-limit="max_phone_numbers">5</span> phone numbers</li>
         </ul>
         <a href="https://app.missedcallrespondr.com/register/?plan=pro-monthly" style="display:block;text-align:center;padding:12px 18px;border-radius:10px;background:#2563eb;color:#fff;text-decoration:none;font-weight:700">Choose Pro Monthly →</a>
       </div>
@@ -364,5 +364,45 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
 </script>
 
 <section class="navx-rel" aria-labelledby="navx-rel-h"><h2 id="navx-rel-h">Keep exploring missedcallrespondr</h2><ul><li><a href="/guide.html">Guide</a></li><li><a href="/thank-you.html">Thank you</a></li><li><a href="/terms.html">Terms of Service</a></li><li><a href="/privacy.html">Privacy Policy</a></li></ul></section>
+<script>
+/* The allowance figures on the plan cards above are read LIVE from this install's own plan records
+   (GET /api/v1/public/plans — the anonymous, minimal price list; the marketing host proxies /api/ to
+   the app). An operator who changes a plan's allowance in the console changes this page too, instead
+   of leaving it advertising the number it shipped with. The authored text is the FALLBACK: if the
+   read fails the page keeps exactly what is written. A limit the plan does not declare (null) is left
+   as authored; a limit of -1 means unlimited and is painted as "Unlimited". Enterprise declares no
+   numeric limits (its features field is a list of capability sentences), so its card is untouched. */
+(function () {
+  'use strict';
+  function fmt(v) {
+    if (v === null || v === undefined) return null;
+    var n = Number(v);
+    if (!isFinite(n)) return null;
+    if (n < 0) return 'Unlimited';
+    return n.toLocaleString('en-US');
+  }
+  fetch('/api/v1/public/plans', { headers: { 'Accept': 'application/json' } })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (d) {
+      var plans = (d && Array.isArray(d.plans)) ? d.plans : [];
+      if (!plans.length) return;
+      var byslug = {};
+      plans.forEach(function (p) { byslug[p.slug] = p; });
+      var spans = document.querySelectorAll('span[data-role="lim"]');
+      for (var i = 0; i < spans.length; i++) {
+        var s = spans[i];
+        var card = s.closest('[data-plan-card]');
+        var slug = card ? card.getAttribute('data-plan-card') : '';
+        var plan = byslug[slug];
+        if (!plan || !plan.features || typeof plan.features !== 'object' || Array.isArray(plan.features)) continue;
+        var val = fmt(plan.features[s.getAttribute('data-limit')]);
+        if (val === null) continue;
+        s.textContent = val;
+      }
+    })
+    .catch(function () { /* the authored figures stand */ });
+})();
+</script>
+
 </body>
 </html>
