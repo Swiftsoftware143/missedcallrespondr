@@ -778,6 +778,30 @@ const Profile = () => {
   // (POST /auth/close-account re-checks the password and the word CLOSE itself). Two deliberate
   // steps: the first only REVEALS the form, the second is the red button, and its refusals land in
   // the card's own sentence rather than as a failed save.
+  // DOWNLOAD MY DATA (2026-11-16) — the whole-workspace copy, as a saved FILE rather than a value this
+  // screen renders: fetched directly so the JSON never has to be parsed here. The filename comes from
+  // the server's Content-Disposition when it sends one, and every refusal is printed in the card.
+  const downloadMyData = async () => {
+    st.dlBusy = true; st.dlErr = null; st.dlMsg = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/account/export', { headers: { 'Authorization': 'Bearer ' + API.token } });
+      if (!r.ok) {
+        let m = 'Could not build your copy (' + r.status + ')';
+        try { const j = await r.json(); m = j.error || j.message || m; } catch (e) { /* not JSON */ }
+        throw new Error(m);
+      }
+      const cd = r.headers.get('content-disposition') || '';
+      const hit = /filename="?([^";]+)"?/i.exec(cd);
+      const name = (hit && hit[1]) || ('missedcall-account-' + new Date().toISOString().slice(0, 10) + '.json');
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      st.dlMsg = 'Your copy has been downloaded.';
+    } catch (e) { st.dlErr = 'Could not download your data: ' + e.message; }
+    st.dlBusy = false; renderApp();
+  };
   const closeAcct = async () => {
     st.caMsg = null; st.caErr = null;
     if (!st.caPw) { st.caErr = 'Enter your password.'; renderApp(); return; }
@@ -872,6 +896,19 @@ const Profile = () => {
         ${st.soErr && html`<p class="text-sm text-red-700" id="signout-others-msg" role="status" aria-live="polite">${st.soErr}</p>`}
         ${!st.soErr && st.soMsg && html`<p class="text-sm" style="color:#15803d" id="signout-others-msg" role="status" aria-live="polite">${st.soMsg}</p>`}
         <button id="signout-others" class="btn btn-sm btn-outline" disabled=${st.soBusy} onClick=${signOutOthers}>Sign out other devices</button>
+      </div>
+    </div>
+    <!-- DOWNLOAD MY DATA (2026-11-16). GET /api/v1/account/export ships every collection this
+         workspace holds; only the OPERATOR console carried a press that reached it, so a customer
+         leaving had no way to take their own records from the console they sign in to. The server
+         takes the workspace from the session, so the file can only ever be this workspace's copy. -->
+    <div class="card" id="download-my-data-card">
+      <h3 class="font-semibold mb-3">📥 Download my data</h3>
+      <div class="space-y-3" style="max-width:520px">
+        <p class="text-sm text-gray-600">One file with everything this workspace holds — its calls and call log, contacts, leads, phone numbers, follow-ups, campaigns, messages, templates and plan — saved to your computer as JSON. It is built when you press the button, and it is only ever your own data.</p>
+        ${st.dlErr && html`<p class="text-sm text-red-700" id="download-my-data-msg" role="status" aria-live="polite">${st.dlErr}</p>`}
+        ${!st.dlErr && st.dlMsg && html`<p class="text-sm" style="color:#15803d" id="download-my-data-msg" role="status" aria-live="polite">${st.dlMsg}</p>`}
+        <button id="download-my-data" class="btn btn-sm" disabled=${st.dlBusy} onClick=${downloadMyData}>Download my data</button>
       </div>
     </div>
     <!-- CLOSE MY ACCOUNT (2026-11-13). The exit door: a STATE, never a delete — the workspace, its
