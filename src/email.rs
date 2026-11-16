@@ -1180,8 +1180,9 @@ pub async fn send_support_request_operator_alert(
 /// that workspace's own mail path is the broken thing.
 ///
 /// The SUBJECT carries the user id: that is the watch's "already reported" key, so a later pass does
-/// not page the operator twice for one account. It returns the status of the row this send wrote —
-/// `deliver` answers Ok for a recipient the transport WITHHOLDS, and Ok is not "the operator saw it".
+/// not page the operator twice for one account. It also names the customer in plain English — see
+/// the subject's own comment. It returns the status of the row this send wrote — `deliver` answers Ok
+/// for a recipient the transport WITHHOLDS, and Ok is not "the operator saw it".
 pub async fn send_undelivered_credential_operator_alert(
     pool: &PgPool,
     user_id: Uuid,
@@ -1209,7 +1210,19 @@ pub async fn send_undelivered_credential_operator_alert(
     } else {
         signed_up.trim()
     };
-    let subject = format!("A customer cannot sign in — no password was delivered ({user_id})");
+    // THE SUBJECT MUST NAME THE CUSTOMER IN PLAIN ENGLISH (2026-11-16, parity with FunnelSwift
+    // 2332b6c). It carried only the account's uuid — "A customer cannot sign in — no password was
+    // delivered (437870e2-…)" — so the operator could not tell from the notification list WHO was
+    // locked out without opening every message. `who` is the owner's name with their address (or the
+    // address alone when no name was given), which is what a person recognises.
+    //
+    // The uuid STAYS in the subject on purpose: `credential_watch`'s "already reported" test is
+    // `email_send_log.subject LIKE '%' || users.id || '%' AND to_email = operator AND status='sent'`
+    // (see credential_watch.rs), and this function's own read-back below matches the same way.
+    // Dropping the id would turn every pass into a fresh report of every account — the
+    // repeated-operator-mail failure mode this fleet has hit before. Keep both: the name to read,
+    // the id to de-duplicate on.
+    let subject = format!("A customer cannot sign in — {who} has no password ({user_id})");
     let text = format!(
         "{workspace} signed up, but the email carrying their first password never reached them, so \
          they cannot sign in.\n\n\
