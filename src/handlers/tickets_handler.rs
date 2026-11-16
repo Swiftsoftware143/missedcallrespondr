@@ -626,7 +626,13 @@ pub async fn create(
         {
             tracing::warn!(ticket = %item.id, "support request operator alert was not sent: {e}");
         }
-        false
+        // ACKNOWLEDGE THE CUSTOMER (2026-11-16). The arm above only covers a request to BUY; an
+        // ordinary help request ("I cannot sign in", "my calls are not logging") was written to the
+        // queue and acknowledged to nobody, so the person who wrote in could not tell whether it had
+        // reached anyone. Same writer shape as the billing receipt next door, and exclusive with it,
+        // so one filed ticket can never produce two receipts. Best effort by construction: the row is
+        // already the record, so a mail failure is logged and never fails a filed request.
+        send_support_request_receipt(&state.pool, claims.aid, &item.subject).await
     };
     let mut out = serde_json::to_value(&item).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(obj) = out.as_object_mut() {
@@ -726,6 +732,67 @@ pub(crate) async fn send_billing_request_receipt(
         Ok(()) => true,
         Err(e) => {
             tracing::warn!("plan-request receipt to {email} failed (tenant {tenant_id}): {e}");
+            false
+        }
+    }
+}
+
+/// Tell the CUSTOMER that an ORDINARY help request was received (2026-11-16).
+///
+/// The billing receipt above answers "I want to buy"; this one answers "help me". Both reach the
+/// workspace's owner through the SAME writer shape — the owner row is read from `users`, the mail
+/// goes through `email::send_template_email` (the one funnel carrying per-tenant branding, the
+/// tenant's editable template and the reserved-address gate) — so a probe address is recorded
+/// `withheld` in `email_send_log` and no message is attempted.
+///
+/// Returns whether the mail was QUEUED, which is what the route reports as `acknowledged`: the
+/// console must never promise an acknowledgement that did not happen. Best effort by construction —
+/// the ticket row is the record, and a mail failure must not fail a filed request.
+pub(crate) async fn send_support_request_receipt(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    subject: &str,
+) -> bool {
+    let owner: Option<(Option<String>, String)> = match sqlx::query_as(
+        "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(
+                "support receipt: owner lookup failed (tenant_id={}): {e}",
+                tenant_id
+            );
+            return false;
+        }
+    };
+    let Some((name, email)) = owner else {
+        tracing::warn!(
+            "support receipt: no user to acknowledge for tenant {}",
+            tenant_id
+        );
+        return false;
+    };
+    let vars = serde_json::json!({
+        "name": name.unwrap_or_else(|| "there".to_string()),
+        "request_subject": subject,
+        "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
+    });
+    match crate::email::send_template_email(
+        pool,
+        tenant_id,
+        &email,
+        "support_request_receipt",
+        &vars,
+    )
+    .await
+    {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("support receipt to {email} failed (tenant {tenant_id}): {e}");
             false
         }
     }

@@ -283,6 +283,12 @@ fn get_default_subject(template_type: &str, app_name: &str) -> String {
         // The receipt for a filed plan request (cron 2026-10-20). Named for what the customer just
         // did, so it is not mistaken for the answer itself — the answer arrives later, from a person.
         "billing_request_receipt" => format!("We have your plan request — {}", app_name),
+        // A RECEIPT for an ORDINARY help request (2026-11-16). Until this existed only a request to
+        // BUY was acknowledged: "I cannot sign in" or "my calls are not logging" wrote the row,
+        // alerted the operator, and left the customer's inbox empty — so the person who took the
+        // trouble to write in had no proof their message had landed. Named for what they just did,
+        // never for the answer, which arrives later from a person.
+        "support_request_receipt" => format!("We have your message — {}", app_name),
         // A PERSON MOVED THE WORKSPACE ONTO A PLAN (2026-11-12). Only reached when a stored
         // `plan_changed` row exists without a subject of its own — no install has that row, so the
         // inline arm below (which names the PLAN) is the mail customers actually receive.
@@ -458,6 +464,33 @@ async fn send_inline(
         // customer's only clue was a screen whose allowances had moved. Nothing is charged for a
         // hand-move, so this says so, and it points at the plan screen rather than the marketing
         // site. No install has a `plan_changed` template row, so THIS body is the mail that is sent.
+        //
+        // THE RECEIPT FOR AN ORDINARY HELP REQUEST (2026-11-16). The buying arm above answers a
+        // customer who asked for a plan; this one answers a customer who asked for HELP — "I cannot
+        // sign in", "my calls are not logging". Until now that message wrote the ticket, alerted the
+        // operator, and sent the customer nothing, so they had no confirmation it had reached anyone.
+        // Reached whenever the tenant has no `support_request_receipt` row, which is every install
+        // today, so THIS body is the mail that is really sent. It names what they wrote and where the
+        // answer will appear; it does not promise a time, because no human has read it yet.
+        "support_request_receipt" => {
+            let request_subject = vars
+                .get("request_subject")
+                .and_then(|v| v.as_str())
+                .unwrap_or("your message");
+            let body = format!(
+                "Hi {name},\n\nThanks — your message reached us:\n\n    {request_subject}\n\nA person (not a robot) reads every message and answers this address. You can follow it under Tickets on your dashboard: {app_url}/dashboard\n\nIf you meant to add something, reply to this message and it lands on the same request.\n\n- The {app_name} Team"
+            );
+            send_email_request(
+                pool,
+                tenant_id,
+                template_type,
+                to,
+                &format!("We have your message — {app_name}"),
+                &body,
+                "",
+            )
+            .await
+        }
         "plan_changed" => {
             let body = format!(
                 "Hi {name},\n\nYour workspace has been moved onto the {plan_name_val} plan. Our team made this change for you, and nothing was charged for it.\n\nOpen {app_url}/dashboard and choose Plan & Billing to see exactly what the plan includes and when it renews. If you expected a different plan, reply to this message and we will put it right.\n\n- The {app_name} Team"
