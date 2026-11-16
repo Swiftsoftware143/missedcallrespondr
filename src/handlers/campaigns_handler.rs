@@ -87,6 +87,21 @@ pub async fn create(
     crate::handlers::lists_handler::ensure_campaign_list(&state, &claims.aid, &item.id, &item.name)
         .await;
 
+    // Activity feed (best-effort): a campaign the customer builds shows on their dashboard, the
+    // same way a captured contact and a received call already do. Before this the feed could only
+    // carry calls, replies, contacts and API-key events, so a customer who created a campaign saw
+    // nothing about it on the one screen that claims to show what the workspace did.
+    crate::activity::log(
+        &state.pool,
+        claims.aid,
+        Some(claims.sub),
+        "campaign.created",
+        "campaign",
+        Some(item.id),
+        serde_json::json!({ "name": item.name }),
+    )
+    .await;
+
     Ok(Json(item))
 }
 
@@ -146,14 +161,29 @@ pub async fn activate(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let result = sqlx::query("UPDATE campaigns SET status='active', is_active=true, updated_at=NOW() WHERE id = $1 AND tenant_id = $2")
-        .bind(id)
-        .bind(claims.aid)
-        .execute(&state.pool)
-        .await?;
-    if result.rows_affected() == 0 {
+    let name: Option<String> = sqlx::query_scalar(
+        "UPDATE campaigns SET status='active', is_active=true, updated_at=NOW() \
+         WHERE id = $1 AND tenant_id = $2 RETURNING name",
+    )
+    .bind(id)
+    .bind(claims.aid)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(name) = name else {
         return Err(AppError::NotFound("Campaign not found".into()));
-    }
+    };
+    // Activity feed (best-effort): starting a campaign is the moment customers care about, and it
+    // used to leave no trace on the dashboard's own feed.
+    crate::activity::log(
+        &state.pool,
+        claims.aid,
+        Some(claims.sub),
+        "campaign.activated",
+        "campaign",
+        Some(id),
+        serde_json::json!({ "name": name }),
+    )
+    .await;
     Ok(Json(serde_json::json!({"id": id, "activated": true})))
 }
 
@@ -162,14 +192,28 @@ pub async fn pause(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let result = sqlx::query("UPDATE campaigns SET status='paused', is_active=false, updated_at=NOW() WHERE id = $1 AND tenant_id = $2")
-        .bind(id)
-        .bind(claims.aid)
-        .execute(&state.pool)
-        .await?;
-    if result.rows_affected() == 0 {
+    let name: Option<String> = sqlx::query_scalar(
+        "UPDATE campaigns SET status='paused', is_active=false, updated_at=NOW() \
+         WHERE id = $1 AND tenant_id = $2 RETURNING name",
+    )
+    .bind(id)
+    .bind(claims.aid)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(name) = name else {
         return Err(AppError::NotFound("Campaign not found".into()));
-    }
+    };
+    // Activity feed (best-effort): pausing is a decision the customer made, so it is worth a line.
+    crate::activity::log(
+        &state.pool,
+        claims.aid,
+        Some(claims.sub),
+        "campaign.paused",
+        "campaign",
+        Some(id),
+        serde_json::json!({ "name": name }),
+    )
+    .await;
     Ok(Json(serde_json::json!({"id": id, "paused": true})))
 }
 
