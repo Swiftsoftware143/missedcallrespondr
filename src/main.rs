@@ -9,6 +9,7 @@ mod billing_instructions;
 mod body_deadline;
 mod branding;
 mod config;
+mod credential_watch;
 mod db;
 mod email;
 mod email_provider;
@@ -222,6 +223,12 @@ async fn main() -> anyhow::Result<()> {
     // a bare workspace showed no plan at all while its limits silently fell back to free. One
     // indexed anti-join at boot; zero rows is the normal answer.
     crate::plan_seating::spawn_plan_seater(pool.clone());
+
+    // Tell the operator when a customer's first password never reached them (cron 2026-11-16,
+    // parity with ADASwift/FunnelSwift). The signup door already latches
+    // `users.password_undelivered`; a badge nobody opens told nobody, so a customer could sit
+    // locked out for days. First tick fires at boot, so a deploy reports the existing backlog.
+    crate::credential_watch::spawn_credential_watch(pool.clone());
 
     let app_state = state::AppState {
         pool,

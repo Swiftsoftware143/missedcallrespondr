@@ -1165,6 +1165,87 @@ pub async fn send_support_request_operator_alert(
     outcome.map(|_| ())
 }
 
+/// Tell the OPERATOR that a customer signed up but never received the mail carrying their first
+/// password (cron 2026-11-16, parity with ADASwift and FunnelSwift).
+///
+/// WHY THIS EXISTS: `auth::register` mints the workspace + owner + credentials mail and latches
+/// `users.password_undelivered` when that send does not go. The Tenants screen badges the row and
+/// `POST /api/v1/admin/tenants/:id/resend-credentials` mails it again — but a badge is only seen by
+/// somebody who opens that screen, so a customer can sit locked out of the product they just signed
+/// up for with nobody told. Measured on the sibling app ADASwift (2026-11-15): two days unusable.
+///
+/// Recipient = the operator's own `operator_alert_email` (console -> Email Provider card), resolved
+/// once per pass by the caller. UNSET sends nothing; this code never invents a mailbox. Sent
+/// through the SYSTEM mail configuration, never the customer's workspace, so it still arrives when
+/// that workspace's own mail path is the broken thing.
+///
+/// The SUBJECT carries the user id: that is the watch's "already reported" key, so a later pass does
+/// not page the operator twice for one account. It returns the status of the row this send wrote —
+/// `deliver` answers Ok for a recipient the transport WITHHOLDS, and Ok is not "the operator saw it".
+pub async fn send_undelivered_credential_operator_alert(
+    pool: &PgPool,
+    user_id: Uuid,
+    customer_email: &str,
+    workspace: &str,
+    owner_name: &str,
+    signed_up: &str,
+    to: &str,
+) -> Result<String, String> {
+    let cfg = crate::email_provider::resolve(pool).await.ok_or_else(|| {
+        "system mail is not configured, so no operator alert was sent".to_string()
+    })?;
+    let who = if owner_name.trim().is_empty() {
+        customer_email.to_string()
+    } else {
+        format!("{} ({})", owner_name.trim(), customer_email)
+    };
+    let workspace = if workspace.trim().is_empty() {
+        customer_email
+    } else {
+        workspace.trim()
+    };
+    let signed_up = if signed_up.trim().is_empty() {
+        "unknown"
+    } else {
+        signed_up.trim()
+    };
+    let subject = format!("A customer cannot sign in — no password was delivered ({user_id})");
+    let text = format!(
+        "{workspace} signed up, but the email carrying their first password never reached them, so \
+         they cannot sign in.\n\n\
+         Workspace: {workspace}\n\
+         Customer: {who}\n\
+         Signed up: {signed_up}\n\n\
+         A reset code travels the same mail path that just failed, so it may not reach them either. \
+         The admin console's Tenants screen badges that row and has Resend credentials, which mails \
+         the way back in.\n"
+    );
+    let outcome = crate::email_provider::deliver(&cfg, to, &subject, &text, None).await;
+    // Recorded like every other system send: the panel's send history is where "did anyone get
+    // told?" is answered, and a withheld address must read as withheld, not as sent.
+    record_last_send(
+        pool,
+        "undelivered_credential_operator_alert",
+        to,
+        &cfg.provider,
+        &subject,
+        &outcome,
+    )
+    .await;
+    // What the send ACTUALLY did, read back from the history row it just wrote. A withheld row is
+    // the transport's own answer, and the caller must not treat it as a report.
+    let status: Option<String> = sqlx::query_scalar(
+        "SELECT status FROM email_send_log WHERE to_email = $1 AND subject LIKE '%' || $2 || '%' \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(to)
+    .bind(user_id.to_string())
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("read back the alert row: {e}"))?;
+    Ok(status.unwrap_or_else(|| "unknown".to_string()))
+}
+
 /// Record the outcome of the last send attempt where an operator can see it.
 ///
 /// The defect this replaced was invisible from every surface: `auth::register` created the account,
