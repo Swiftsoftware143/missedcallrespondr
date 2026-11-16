@@ -331,6 +331,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/settings/branding/preview-body",
             get(crate::handlers::branding_handler::preview_body),
         )
+        // The workspace's OWN copy of what this app holds (cron 2026-11-15, parity with FunnelSwift
+        // and WorkflowSwift `/api/v1/account/export`). The tenant comes from the token, so there is
+        // no id to spoof, and the document carries no secret that could be replayed to sign in.
+        .route(
+            "/api/v1/account/export",
+            get(crate::handlers::account_export::export_account),
+        )
         // Calls
         .route(
             "/api/v1/calls",

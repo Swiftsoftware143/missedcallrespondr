@@ -590,6 +590,14 @@ to charge anyone: it only decides <em>where the buyer is sent</em>.</p>
                                                    # proves sha256(repo) == sha256(container)
 the MissedCall Respondr deploy script --verify   # parity + health only</code></pre>
 
+  <h2>A customer can download a copy of their data</h2>
+  <p>The <strong>My Account</strong> tab carries a <strong>📦 Your data</strong> card. <strong>Download a copy of my data</strong> saves one JSON file holding everything the workspace keeps: contacts, leads, clients, deals, lists, tags, phone numbers, call logs, inbound calls, SMS messages, campaigns, follow-ups, response rules, the plan it is on and its teammates.</p>
+  <ul>
+    <li><strong>The route:</strong> <code>GET /api/v1/account/export</code>, signed in, no parameters. The workspace comes from the token, so there is no id in the URL to change and one business can never receive another's file.</li>
+    <li><strong>What is left out on purpose:</strong> stored passwords and password hashes, API-key secrets (each key's name and dates are included), telephony and payment provider credentials, and the internal test marker on the workspace. The file says so in its own <code>excluded</code> field.</li>
+    <li><strong>The file:</strong> a JSON document with one array per collection plus a <code>counts</code> block, so the reader can see at a glance whether everything is there. Nothing is mailed and nothing is deleted &mdash; it is a copy, and it can be downloaded as often as the customer likes.</li>
+  </ul>
+
   <h2>A customer can close their own account</h2>
   <p>Until 2026-11-13 the only way out of this app was asking support to delete the user row, and every foreign key from a workspace to its calls, contacts and follow-ups CASCADEs &mdash; so a request to leave destroyed the business's history with it. The customer's <strong>Profile</strong> screen now ends with <strong>Close my account</strong>, and a closure is recorded as a state, never a delete.</p>
   <ul>
