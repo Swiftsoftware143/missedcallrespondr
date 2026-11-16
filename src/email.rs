@@ -440,13 +440,7 @@ async fn send_inline(
         // payment provider the Plan & Billing screen's request IS the buying path, and until this
         // arm existed the row was written while the customer's inbox stayed empty.
         "billing_request_receipt" => {
-            let request_subject = vars
-                .get("request_subject")
-                .and_then(|v| v.as_str())
-                .unwrap_or("your request");
-            let body = format!(
-                "Hi {name},\n\nThanks — we have your request:\n\n    {request_subject}\n\nNothing has been charged. A person (not a robot) reads it and answers you by email, and you can see where it stands under Tickets on your dashboard: {app_url}/dashboard\n\nIf you would rather not go ahead, reply to this message and we will close it.\n\n- The {app_name} Team"
-            );
+            let body = inline_billing_request_receipt_body(vars, app_name, app_url);
             send_email_request(
                 pool,
                 tenant_id,
@@ -824,6 +818,38 @@ pub async fn render_branding_preview(
         own_logo,
         branded,
     }
+}
+
+/// The inline `billing_request_receipt` body — the receipt for a request to BUY.
+///
+/// HOW TO PAY (2026-11-16): the operator's own words, printed only when he has written some. With no
+/// `payment_providers` row the plan request IS the buying path, so this is exactly where a customer
+/// who is ready to send money needs the answer; the ORDINARY help-request receipt is a different
+/// template (`support_request_receipt`) and never carries these words, so "I cannot sign in" is never
+/// answered with bank details. Empty leaves the body byte-identical to the copy that shipped before.
+fn inline_billing_request_receipt_body(
+    vars: &serde_json::Value,
+    app_name: &str,
+    app_url: &str,
+) -> String {
+    let name = vars.get("name").and_then(|v| v.as_str()).unwrap_or("there");
+    let request_subject = vars
+        .get("request_subject")
+        .and_then(|v| v.as_str())
+        .unwrap_or("your request");
+    let how_to_pay = vars
+        .get("payment_instructions")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let pay_block = if how_to_pay.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nHow to pay now:\n\n{how_to_pay}")
+    };
+    format!(
+        "Hi {name},\n\nThanks — we have your request:\n\n    {request_subject}{pay_block}\n\nNothing has been charged. A person (not a robot) reads it and answers you by email, and you can see where it stands under Tickets on your dashboard: {app_url}/dashboard\n\nIf you would rather not go ahead, reply to this message and we will close it.\n\n- The {app_name} Team"
+    )
 }
 
 /// The inline `branding_preview` body. Shared by the SENDER and the panel's render so the sample an
@@ -1416,6 +1442,60 @@ mod render_tests {
         assert_eq!(
             merged["app_url"],
             json!("https://app.missedcallrespondr.com")
+        );
+    }
+
+    // HOW TO PAY (2026-11-16). The operator's own words must actually reach the receipt — the live
+    // probe can prove the recipient and the dispatch but never the words (a withheld address stores
+    // only the kind), so the renderer is pinned here in both directions. Off must be byte-for-byte
+    // the old copy: an install that never sets the field sends what it always sent, and an ordinary
+    // help ticket (a different template) must never be answered with bank details.
+    #[test]
+    fn the_plan_receipt_prints_how_to_pay_only_when_the_operator_wrote_it() {
+        let words =
+            "Pay by bank transfer to MissedCall Respondr Ltd, sort code 00-00-00, account 12345678.";
+        let with = json!({
+            "name": "Pay Proof",
+            "request_subject": "Upgrade request: Pro plan",
+            "payment_instructions": words,
+        });
+        let text = super::inline_billing_request_receipt_body(
+            &with,
+            "MissedCall Respondr",
+            "https://app.missedcallrespondr.com",
+        );
+        assert!(
+            text.contains("How to pay now:"),
+            "a request to buy must say how to pay: {text}"
+        );
+        assert!(
+            text.contains(words),
+            "the operator's words must appear verbatim: {text}"
+        );
+        assert!(
+            text.contains("Nothing has been charged"),
+            "the promise survives the new block: {text}"
+        );
+
+        // Off: the block is absent and the copy is the old copy.
+        let without = json!({
+            "name": "Pay Proof",
+            "request_subject": "Probe: cannot sign in",
+            "payment_instructions": "",
+        });
+        let plain = super::inline_billing_request_receipt_body(
+            &without,
+            "MissedCall Respondr",
+            "https://app.missedcallrespondr.com",
+        );
+        assert!(
+            !plain.contains("How to pay now:"),
+            "an empty field must say nothing new: {plain}"
+        );
+        let expected = "Hi Pay Proof,\n\nThanks — we have your request:\n\n    Probe: cannot sign in\n\nNothing has been charged. A person (not a robot) reads it and answers you by email, and you can see where it stands under Tickets on your dashboard: https://app.missedcallrespondr.com/dashboard\n\nIf you would rather not go ahead, reply to this message and we will close it.\n\n- The MissedCall Respondr Team";
+        assert_eq!(
+            plain, expected,
+            "with no words set the receipt must be exactly the copy that shipped before"
         );
     }
 }

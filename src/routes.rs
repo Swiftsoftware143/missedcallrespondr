@@ -932,6 +932,17 @@ pub fn create_router(state: AppState) -> Router {
             get(crate::handlers::site_handler::get_site)
                 .put(crate::handlers::site_handler::update_site),
         )
+        // HOW A CUSTOMER PAYS YOU (2026-11-16, fleet parity with FunnelSwift/IncentiveSwift and
+        // ADASwift). `payment_providers` holds zero rows on this installation, so a plan REQUEST is
+        // the buying path — and until this route nothing in the product told a customer where to
+        // send the money. The operator's own words, stored platform-wide (`admin_settings` key
+        // `billing`); read back by `GET /api/v1/checkout/status` and by the plan-request receipt
+        // mail. Mounted under `/api/v1/admin/` so `auth::middleware`'s platform-admin gate covers it.
+        .route(
+            "/api/v1/admin/billing-settings",
+            get(crate::handlers::billing_settings_handler::get_billing_settings)
+                .put(crate::handlers::billing_settings_handler::update_billing_settings),
+        )
         // Payment Providers (admin)
         .route(
             "/api/v1/payment-providers",

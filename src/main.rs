@@ -5,6 +5,7 @@
 
 mod activity;
 mod auth;
+mod billing_instructions;
 mod body_deadline;
 mod branding;
 mod config;

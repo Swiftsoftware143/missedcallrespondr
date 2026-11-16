@@ -61,7 +61,7 @@ window.appGuidePages = {
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
   "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it.", actions: ["Upload your logo", "Set your brand name and colour", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, the password-reset mail, the purchase receipt, the branded preview and the ticket mails. The form lists the merge fields the chosen type actually fills. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
-  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it"] },
+  "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest. The box at the top, How a customer pays you, is for what happens when NO provider is connected: write your bank details or any other way to pay, and a customer who asks for a plan sees them on Plan & Billing and in their receipt email. Leave it empty and nothing changes.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it", "Write how a customer pays you and press Save"] },
   "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on. The last card on this screen closes the account: it ends every session and API key on it and refuses sign-in from then on, while keeping your data so the business can be reopened by support if you change your mind. One card also downloads everything the workspace holds as a single file, with no passwords or provider secrets in it.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on", "Download a copy of everything the workspace holds (contacts, calls, messages, campaigns) as one file", "Close the account — ends every session and API key, keeps the data"] },
   "email-provider": { title: "Email Provider", desc: "The mail provider every transactional message this install sends goes through \u2014 the welcome mail a new customer needs first, invitations and password resets. Choose the provider, then give its API URL, the API key, the sending domain and the From name and address. Two badges say whether it is ready: configured / not configured, and whether the STORED key is encrypted at rest \u2014 a key that arrived from a restored backup or a manual database write reads \u201cstored in the clear\u201d until the app seals it, and leaving the key field blank keeps the stored one instead of replacing it.", actions: ["Choose the provider and enter its API URL", "Paste the API key (leave it blank to keep the saved one)", "Set the sending domain and the From name and address", "Send a test email to prove the path end to end", "Save the provider"] },
 };
@@ -1933,6 +1933,14 @@ const OPS_PANELS = [
 "path": "/payment-providers/:provider_type",
 "fields": [
 "provider_type"
+]
+},
+{
+"label": "Save how a customer pays you",
+"method": "PUT",
+"path": "/admin/billing-settings",
+"fields": [
+"payment_instructions"
 ]
 },
 {
@@ -3921,7 +3929,8 @@ const ppPostureCell = (set, sealed) => !set
      : html`<span class="text-gray-400" data-pp="unknown">unknown</span>`);
 const PP_KINDS = [['stripe', 'Stripe'], ['paypal', 'PayPal'], ['square', 'Square'], ['paddle', 'Paddle']];
 const PaymentProviders = () => {
-  const st = viewState('payment_providers', { list: null, err: null, busy: false, msg: null, form: null });
+  // pay / payBusy / payMsg / _paySet / _payErr carry the "how a customer pays you" box (2026-11-16).
+  const st = viewState('payment_providers', { list: null, err: null, busy: false, msg: null, form: null, pay: null, payBusy: false, payMsg: null, _paySet: false, _payErr: null });
   const isAdmin = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   const load = async () => {
     try { const d = await API.get('/payment-providers'); st.list = (d && d.providers) || []; st.err = null; }
@@ -3929,6 +3938,29 @@ const PaymentProviders = () => {
     renderApp();
   };
   if (!st._loaded && isAdmin) { st._loaded = true; load(); }
+  // HOW A CUSTOMER PAYS YOU (2026-11-16). With no provider row the till answers `request`, so a
+  // customer presses a paid plan and a plan request is filed — and until this box existed the
+  // product never told them where to send the money. The operator's own words, stored
+  // platform-wide (`admin_settings` key `billing`) and read back by the customer's till status and
+  // by the plan-request receipt mail. A failed read leaves the box untouched and SAYS SO, rather
+  // than showing an empty field that would look like "nothing is published".
+  if (st.pay === null) {
+    API.get('/admin/billing-settings')
+      .then((d) => { st.pay = (d && d.payment_instructions) || ''; st._paySet = !!(d && d.payment_instructions_set); st._payErr = null; renderApp(); })
+      .catch((e) => { st._payErr = (e && e.message) || 'the setting could not be read'; renderApp(); });
+  }
+  const savePay = async () => {
+    st.payBusy = true; st.payMsg = null; renderApp();
+    try {
+      const d = await API.put('/admin/billing-settings', { payment_instructions: st.pay || '' });
+      st._paySet = !!(d && d.payment_instructions_set);
+      st._payErr = null;
+      st.payMsg = st._paySet
+        ? 'Saved. A customer who asks to buy now sees these words, and they are printed in the receipt email.'
+        : 'Cleared. Nothing is shown to a customer who asks to buy, and the receipt email is unchanged.';
+    } catch (e) { st.payMsg = 'Not saved: ' + ((e && e.message) || e); }
+    st.payBusy = false; renderApp();
+  };
   const openForm = (row) => {
     st.form = { open: true, edit: !!row, provider_type: row ? row.provider_type : 'stripe',
       api_key: '', webhook_secret: '', publishable_key: (row && row.publishable_key) || '',
@@ -4000,6 +4032,16 @@ const PaymentProviders = () => {
     </div>
     ${st.msg ? html`<div class="text-sm mb-3 text-gray-700">${st.msg}</div>` : null}
     ${st.err ? html`<div class="text-sm mb-3 text-red-700">${st.err}</div>` : null}
+    <div class="card mb-3" data-pay-instructions="1">
+      <h3 class="font-bold mb-1">How a customer pays you</h3>
+      <p class="text-sm text-gray-500 mb-2">With no card provider connected, a plan request is the buying path: the customer presses a paid plan and a request is filed here for you. Write how you take payment — bank details, an invoice, any rail of your own — and the same words appear on the customer's Plan and Billing screen and in their receipt email.</p>
+      ${st._payErr ? html`<div class="text-sm mb-2 text-red-700" data-pay-readerr="1">The saved words could not be read (${st._payErr}), so this box may not show what is published. Reload before saving.</div>` : null}
+      <textarea id="pp-pay-instructions" data-pay-field="1" class="input" rows="4" placeholder="e.g. Pay by bank transfer to Acme Ltd, sort code 00-00-00, account 12345678, and put your workspace name as the reference. A person on our team switches your plan on as soon as the payment lands." value=${st.pay === null ? '' : st.pay} onInput=${e => { st.pay = e.target.value; }}></textarea>
+      <div class="flex items-center gap-3 mt-2">
+        <button class="btn btn-sm btn-green" disabled=${st.payBusy || st.pay === null} onClick=${savePay}>Save</button>
+        <span class=${'text-sm ' + ((st.payMsg || '').indexOf('Not saved') === 0 ? 'text-red-700' : 'text-gray-700')} data-pay-msg="1">${st.payMsg || (st._paySet ? 'Published to customers who ask to buy.' : 'Nothing written yet — nothing is shown to customers.')}</span>
+      </div>
+    </div>
     ${st.list === null ? html`<div class="card text-center text-gray-400 py-8">Loading...</div>`
       : rows.length === 0 ? html`<div class="card text-center text-gray-400 py-8">No payment provider is connected yet. Add your Stripe or PayPal keys so checkout and the inbound payment webhooks can work.</div>`
       : html`<div class="card p-0 overflow-hidden"><table class="table">

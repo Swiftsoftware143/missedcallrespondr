@@ -719,6 +719,13 @@ pub(crate) async fn send_billing_request_receipt(
         "name": name.unwrap_or_else(|| "there".to_string()),
         "request_subject": subject,
         "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
+        // HOW TO PAY (2026-11-16). THIS is the receipt a request to BUY produces, so it is the one
+        // place the operator's payment words belong: the customer is ready to send money and until
+        // now nothing told them where. The ordinary help-request receipt next door
+        // (`send_support_request_receipt`) never carries them, so "I cannot sign in" is never
+        // answered with bank details. Empty stays exactly as before — an install that sets nothing
+        // sends the mail it always sent.
+        "payment_instructions": crate::billing_instructions::load(pool).await.unwrap_or_default(),
     });
     match crate::email::send_template_email(
         pool,

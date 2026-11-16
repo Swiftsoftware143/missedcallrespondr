@@ -594,6 +594,12 @@ pub async fn checkout_status(
         "sellable_links": sellable_links,
         // A sale can complete on either arm `create_checkout_session` implements.
         "can_purchase": configured || sellable_links > 0,
+        // HOW TO PAY (2026-11-16). With no provider row the till answers `request`, so a press files
+        // a plan request — and until this field existed nothing in the product told the buyer where
+        // to send the money. The operator's own words, empty when he has written none (feature off).
+        "payment_instructions": crate::billing_instructions::load(&state.pool)
+            .await
+            .unwrap_or_default(),
     })))
 }
 

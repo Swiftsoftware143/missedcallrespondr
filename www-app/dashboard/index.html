@@ -72,7 +72,7 @@ window.appGuidePages = {
   // YOUR TEAM (2026-10-31): the screen that gives a colleague their own login. Listed here because
   // every other console screen carries an entry and the widget's "?" would otherwise vanish on it.
   team:         { title: "Your team", desc: "Everyone with their own login to this workspace — who they are, what access they have, and how many seats your plan allows. Adding someone emails them their first password; they never share yours.", actions: ["Press Add them to give a colleague their own login", "Press Remove to end someone's access"] },
-  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. When self-serve checkout is open on a plan, pressing it opens the payment provider's own secure checkout. While checkout is not open on this installation (2026-11-08), the paid plans say Request instead: pressing one opens a request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way.", actions: ["Compare the plans", "Press Upgrade or Request on the plan you want"] },
+  billing:      { title: "Plan & Billing", desc: "The plans this app sells, what each one costs per month, and the plan this account is on right now. When self-serve checkout is open on a plan, pressing it opens the payment provider's own secure checkout. While checkout is not open on this installation (2026-11-08), the paid plans say Request instead: pressing one opens a request to our team, who complete the switch by hand and charge nothing. No card details are entered on this site either way. While card payment is off, this screen also shows How to pay now — our team's own payment details — and the same words are emailed to you in the receipt for your request.", actions: ["Compare the plans", "Press Upgrade or Request on the plan you want", "Read How to pay now for where to send the money"] },
   // EMAIL BRANDING HAD NO ENTRY (cron 2026-10-26): every other screen on this console carries one,
   // so the guide's "?" simply disappeared on this tab — measured live in Chromium by opening all
   // thirteen customer screens and reading which ones offer the toggle. The screen is real and does
@@ -2511,6 +2511,10 @@ const Billing = () => {
   // absent answer (route failed, older server) is NOT "closed", so the purchase button and its
   // honest refusal path stay in place.
   const tillClosed = !!(st.till && st.till.can_purchase === false);
+  // HOW TO PAY (2026-11-16) — the last step of the buying path on an install with no card provider:
+  // a plan request is filed, and the operator's own words say where to send the money. Painted only
+  // when he has written some; an empty answer leaves the block out and the screen exactly as it was.
+  const howToPay = String((st.till && st.till.payment_instructions) || '').trim();
   // The price slot must carry a PRICE, not a second copy of the plan's own name. It read
   // `monthly(p) <= 0 ? 'Free' : …`, and this screen already prints the plan name in the `h3`
   // directly above it (`nameOf(p)`), so the free tier rendered as "Free / Free" — the tile's
@@ -2748,6 +2752,11 @@ const Billing = () => {
     ${tillClosed && html`<div class="card" style="border-left:4px solid #f59e0b" id="billing-till-closed">
       <p class="text-sm text-gray-700"><strong>Card payment is not switched on for this installation yet.</strong> Nothing can be charged here, so the paid plans below ask our team to switch your workspace instead of opening a payment page.</p>
     </div>`}
+    ${howToPay ? html`<div class="card" id="billing-how-to-pay" data-how-to-pay="1" style="border-left:4px solid #2563eb;background:#eff6ff">
+      <h3 class="font-semibold mb-1" style="color:#1e3a8a">How to pay now</h3>
+      <div data-how-to-pay-text="1" style="white-space:pre-wrap;font-size:14px;line-height:1.5;color:#1e293b">${howToPay}</div>
+      <p class="text-sm text-gray-600 mt-2">Request a plan below and the same words are emailed to you. Nothing is charged until a person on the team confirms your payment.</p>
+    </div>` : null}
     ${st.requestsLoaded && st.requests.length ? html`<div class="card" id="plan-requests">
       <h3 class="font-semibold mb-1">Your plan requests</h3>
       <p class="text-sm text-gray-600 mb-2">Our team completes these by hand. The state below is the live one.</p>

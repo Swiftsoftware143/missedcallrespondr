@@ -29,12 +29,18 @@
 //! card t_31951eca)
 //!
 //! ```text
-//!   141 mounted `.route(..)` entries in the one routing file, 141 distinct paths (every path is
-//!       mounted once; `:id`-style templates make each one unique)
+//!   151 mounted `.route(..)` entries in the one routing file, 151 distinct paths (every path is
+//!       mounted once; `:id`-style templates make each one unique) — re-measured 2026-11-16 after
+//!       the operator's "how a customer pays you" pair `GET|PUT /api/v1/admin/billing-settings`
+//!       joined (card t_03c38b20), a PROTECTED `/api/v1/admin/*` mount
 //!
-//!   122 entries reach `protected_routes`, which carries `auth_middleware`
-//!    20 entries reach the ANONYMOUS `public_routes`:
-//!        17 deliberate public routes  (this module's PUBLIC_ROUTES)
+//!   130 entries reach `protected_routes`, which carries `auth_middleware` (151 − 21 anonymous;
+//!       the SendGrid inbound receiver is mounted with `.nest(..)` and is counted in the anonymous
+//!       list, which is why the two numbers do not sum to the `.route(` census)
+//!    21 entries reach the ANONYMOUS `public_routes`:
+//!        18 deliberate public routes  (this module's PUBLIC_ROUTES — re-counted 2026-11-16: the
+//!           tenant plan catalogue `/api/v1/public/plans` joined on 2026-11-12 in aed4070 and the
+//!           pin below was left at 17, so `cargo test` was RED on HEAD until this pass)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
 //!           (`/api/v1/internal/portfolio-companies`, `/api/v1/internal/portfolio-sync`,
 //!            `/api/v1/internal/provision-free-account`)
@@ -309,16 +315,54 @@ mod tests {
         out
     }
 
+    /// Every `.nest("<literal>", ..)` prefix in the routing file. A module mounted with `nest`
+    /// declares its own `.route(..)` calls inside its own module, so those paths never appear in
+    /// this file's `.route(` scan — the SendGrid inbound receiver
+    /// (`/api/v1/webhooks/sendgrid/inbound/:token`) is mounted that way (2026-11-16).
+    fn nest_literals() -> Vec<&'static str> {
+        let bytes = ROUTES_SRC.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        while let Some(pos) = ROUTES_SRC[i..].find(".nest(") {
+            let mut j = i + pos + ".nest(".len();
+            while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'"' {
+                let start = j + 1;
+                let mut k = start;
+                while k < bytes.len() && bytes[k] != b'"' {
+                    k += 1;
+                }
+                out.push(&ROUTES_SRC[start..k]);
+            }
+            i = j;
+        }
+        out
+    }
+
     /// Is this keyed path backed by a route the router really mounts?
     ///
     /// The allowlist is written with the `/api/v1` prefix the boundary sees; the literals in
     /// `routes.rs` are the same absolute paths, so an entry is backed when some mounted literal is
     /// equal to it, or when a mounted PARAMETERISED literal matches it segment-wise (the allowlist
-    /// and the mounts both use this crate's `:param` spelling).
+    /// and the mounts both use this crate's `:param` spelling), or when it sits under a nested
+    /// module's prefix.
     fn mounted(entry: &str) -> Option<&'static str> {
-        route_literals()
+        if let Some(lit) = route_literals()
             .into_iter()
             .find(|lit| !lit.is_empty() && (*lit == entry || matches_template(lit, entry)))
+        {
+            return Some(lit);
+        }
+        nest_literals().into_iter().find(|prefix| {
+            let prefix = prefix.trim_end_matches('/');
+            !prefix.is_empty()
+                && (prefix == entry
+                    || entry
+                        .strip_prefix(prefix)
+                        .is_some_and(|rest| rest.starts_with('/')))
+        })
     }
 
     /// Every allowlist entry must name a route the router really mounts. A stale entry is a live
@@ -549,12 +593,15 @@ mod tests {
         // mail provider's delivery receiver joined the four account/entry routes and the payment
         // receivers below — and the route table holds 141 entries / 141 distinct paths (140 at
         // HEAD plus that one mount).
-        assert_eq!(super::PUBLIC_ROUTES.len(), 17, "PUBLIC_ROUTES size");
+        // 18 deliberate public routes: the tenant plan catalogue `/api/v1/public/plans` joined on
+        // 2026-11-12 (aed4070) and this pin was left at 17, so `cargo test` was RED on HEAD until
+        // 2026-11-16 (card t_03c38b20) re-counted it against the list.
+        assert_eq!(super::PUBLIC_ROUTES.len(), 18, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
-        // The 20 anonymous mounts: 17 deliberate + 3 key receivers.
+        // The 21 anonymous mounts: 18 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            20
+            21
         );
         // 135 entries / 135 distinct paths (the "sign out every other device" door
         // `POST /api/v1/auth/logout-all` joined on 2026-11-01 — a PROTECTED mount beside
@@ -597,7 +644,13 @@ mod tests {
         // t_a57ae7db — it is a PROTECTED mount, so the two anonymous lists are untouched), and the
         // two lists are disjoint.
         let lits = route_literals();
-        // 148 entries / 148 distinct paths: the CoreSwift field-mapper SOURCE describe
+        // 151 entries / 151 distinct paths (re-counted 2026-11-16 against the source: the pin had
+        // fallen 2 behind HEAD before this change, so `cargo test` was RED). The operator's
+        // "how a customer pays you" pair
+        // `GET|PUT /api/v1/admin/billing-settings` joined on 2026-11-16 (card t_03c38b20) — a
+        // PROTECTED `/api/v1/admin/*` mount like the rest of that block, so PUBLIC_ROUTES and
+        // INTERNAL_ROUTES are untouched and nothing became reachable without a credential.
+        // Before it, 148 entries / 148 distinct paths: the CoreSwift field-mapper SOURCE describe
         // `GET /api/v1/integration/schema` joined on 2026-11-13 — a plain `require_auth` mount, so
         // PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing became reachable without a
         // credential. Before it, 147 entries / 147 distinct paths (recounted 2026-11-13: SIX
@@ -621,11 +674,11 @@ mod tests {
         // `POST /api/v1/admin/tenants/:id/suspension` joined on 2026-11-01 — a PROTECTED
         // `/api/v1/admin/*` mount like the rest of that block, so both anonymous lists are
         // untouched; before it, 135 entries / 135 distinct paths).
-        assert_eq!(lits.len(), 148, "mounted .route entries");
+        assert_eq!(lits.len(), 151, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 148, "distinct mounted paths");
+        assert_eq!(uniq.len(), 151, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
