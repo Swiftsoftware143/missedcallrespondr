@@ -587,13 +587,33 @@ pub async fn checkout_status(
         .filter(|u| is_hosted_payment_url(u.as_str()))
         .count();
 
+    // CONTRACT PARITY (2026-11-16): this route answered configured/reason/provider_type/
+    // sellable_links/can_purchase/payment_instructions but NOT `upgrade_path` or `provider`, while
+    // every sibling app answers both (FunnelSwift's own comment on this route calls `upgrade_path` a
+    // fleet contract). A console or cross-app page written against the fleet's shape read `undefined`
+    // here and fell back to the checkout branch by default, on an install whose till can only file a
+    // request. The three values are the siblings' own, against THIS app's ladder
+    // (`is_hosted_payment_url` is the till's predicate, so this cannot promise a hand-off the sale
+    // would refuse). Additive: every key this route answered before keeps its value.
+    let can_purchase = configured || sellable_links > 0;
+    let upgrade_path = if configured {
+        "checkout"
+    } else if sellable_links > 0 {
+        "payment_link"
+    } else {
+        "request"
+    };
+
     Ok(Json(json!({
         "configured": configured,
         "reason": reason,
+        // The provider this install would charge through, named the way the siblings name it.
+        "provider": provider_type.clone(),
         "provider_type": provider_type,
+        "upgrade_path": upgrade_path,
         "sellable_links": sellable_links,
         // A sale can complete on either arm `create_checkout_session` implements.
-        "can_purchase": configured || sellable_links > 0,
+        "can_purchase": can_purchase,
         // HOW TO PAY (2026-11-16). With no provider row the till answers `request`, so a press files
         // a plan request — and until this field existed nothing in the product told the buyer where
         // to send the money. The operator's own words, empty when he has written none (feature off).
