@@ -417,11 +417,29 @@ pub async fn regenerate_api_key(
     .ok_or_else(|| AppError::NotFound("API key not found".to_string()))?;
 
     let mut tx = state.pool.begin().await?;
-    sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND tenant_id = $2")
-        .bind(id)
-        .bind(tenant_id)
-        .execute(&mut *tx)
-        .await?;
+    // ONE PRESS AT A TIME (cron 2026-11-17). The SELECT above runs outside the transaction and this
+    // UPDATE carried no `revoked_at IS NULL` predicate and its result was never inspected, so a DOUBLE
+    // PRESS of Regenerate had both presses read the same live key: the winner retired it and minted
+    // the replacement, the loser's UPDATE silently re-touched the already-revoked row and minted a
+    // SECOND live key, which the partial unique index `api_keys_one_live_per_tenant`
+    // (`(tenant_id) WHERE revoked_at IS NULL`) refuses — surfacing to the customer as HTTP 500
+    // `{"error":"Database error"}` (reproduced live 2026-11-17: one press 201, the other 500). The
+    // predicate makes the loser's UPDATE match nothing once the winner commits, and the check below
+    // answers that press with the ordinary 409 instead of letting the mint collide.
+    let retired = sqlx::query(
+        "UPDATE api_keys SET revoked_at = now() \
+         WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .execute(&mut *tx)
+    .await?;
+    if retired.rows_affected() == 0 {
+        return Err(AppError::Conflict(
+            "This key was already replaced by another press — reload the key list to see the new one."
+                .to_string(),
+        ));
+    }
     let minted = mint_on(&mut tx, tenant_id, Some(created_by), &name).await?;
     tx.commit().await?;
 
