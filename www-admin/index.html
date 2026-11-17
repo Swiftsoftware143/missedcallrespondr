@@ -3376,8 +3376,16 @@ const App = () => {
         const r = await API.post('/admin/plans/payment-pages/check', {});
         const byId = {};
         (r.plans || []).forEach(x => { byId[x.id] = x; });
-        setPaycheck({ byId, message: r.message });
-        flash(r.message);
+        // An EMPTY check is not good news when plans are on sale with no page at all: the server's
+        // sentence ("nothing to check") used to be the whole answer while the warning above the
+        // table listed plans nobody can buy. Say both, and say what to do.
+        const gap = unbuyable.length;
+        const extra = ((r.checked || 0) === 0 && gap > 0)
+          ? ` Careful: ${gap} plan${gap === 1 ? ' is' : 's are'} on sale with no payment page at all, so nobody can buy ${gap === 1 ? 'it' : 'them'} yet. Open each one in Edit and paste the checkout address your payment provider gives you for that price.`
+          : '';
+        const said = (r.message || '') + extra;
+        setPaycheck({ byId, message: said });
+        flash(said);
       } catch(e) { alert('Could not check the payment pages: ' + e.message); }
       setBusy(false);
     };
