@@ -105,6 +105,22 @@ pub async fn create_workspace(
     let tid = tenant(&claims)?;
     let name = clean_name(&req.name)?;
 
+    // ONE PRESS AT A TIME PER ACCOUNT (cron 2026-11-17). The ceiling count, the duplicate-name
+    // probe and the INSERT are three statements, so two overlapping presses — a double-click on
+    // "Create workspace" — both read dup = none and the loser then hits
+    // `ux_workspaces_tenant_name` (or `ux_workspaces_one_default` when both try to be first),
+    // which surfaced to the customer as HTTP 500 "Database error" (measured live: 30
+    // simultaneous same-name creates -> 3 x 500). A transaction-scoped advisory lock on the
+    // account makes the three reads and the write one critical section, so the second press sees
+    // the first row and gets the ordinary 409 ("you already have a workspace with that name"),
+    // and the plan ceiling can no longer be beaten by parallelism.
+    let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(tid.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
+
     // Plan ceiling, when the plan states one. MissedCall Respondr sells its allowances in
     // `plans.features` (JSONB) reached through `tenant_plans`; a plan that names no
     // `max_workspaces` is uncapped, because a ceiling exists only where one was sold.
@@ -117,7 +133,7 @@ pub async fn create_workspace(
           LIMIT 1",
     )
     .bind(tid)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(AppError::Database)?
     // A plan whose blob names no `max_workspaces` returns SQL NULL — `fetch_optional` gives
@@ -126,7 +142,7 @@ pub async fn create_workspace(
 
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE tenant_id = $1")
         .bind(tid)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(AppError::Database)?;
 
@@ -143,7 +159,7 @@ pub async fn create_workspace(
     )
     .bind(tid)
     .bind(&name)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(AppError::Database)?;
     if dup.is_some() {
@@ -161,9 +177,11 @@ pub async fn create_workspace(
     .bind(tid)
     .bind(&name)
     .bind(make_default)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(AppError::Database)?;
+
+    tx.commit().await.map_err(AppError::Database)?;
 
     Ok(Json(json!({ "workspace": row_json(&row) })))
 }
