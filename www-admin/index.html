@@ -3401,6 +3401,14 @@ const App = () => {
     if (!reg) return html`<div class="card"><h2 class="text-xl font-bold mb-2">Plans & Features</h2><p class="text-gray-500 text-sm">Loading...</p></div>`;
 
     const plans = reg.plans || [];
+    // A PLAN ON SALE WITH NO PAYMENT PAGE IS A REVENUE LEAK, not a setting (2026-11-17). The
+    // per-plan cell printed the same neutral dash a deliberately request-only FREE plan prints, and
+    // the "Check payment pages" button above SKIPS a plan that carries no link at all — so an
+    // installation where no sellable plan can be bought answered "nothing to check" and read as
+    // healthy. Counted here from the catalogue the console already holds: active + priced + no link.
+    const unbuyable = plans.filter(p => p.is_active !== false
+      && (Number(p.price_monthly || 0) + Number(p.price_yearly || 0)) > 0
+      && !(p.purchase_url && String(p.purchase_url).trim() !== ''));
     const registry = reg.registry || [];
     const gmap = {};
     (reg.grant_matrix || []).forEach(r => { gmap[r.feature] = r; });
@@ -3471,6 +3479,12 @@ const App = () => {
         </div>
       </div>
 
+      ${unbuyable.length ? html`<div class="card" style="border-left:4px solid #b45309">
+        <h3 class="font-semibold mb-1" style="color:#b45309">⚠ ${unbuyable.length} plan${unbuyable.length === 1 ? '' : 's'} on sale cannot be bought yet</h3>
+        <p class="text-sm text-gray-600 mb-1">No payment page is set on ${unbuyable.length === 1 ? 'this plan' : 'these plans'}, so a customer who presses Upgrade can only file a request — nobody can pay. Open Edit on each one and paste the checkout address your payment provider gives you for that price (a Stripe Payment Link, a PayPal button, any secure https page that takes the money), then press <strong>Check payment pages</strong>.</p>
+        <p class="text-sm" style="color:#7c2d12">${unbuyable.map(p => p.name).join(' · ')}</p>
+      </div>` : ''}
+
       <div class="card">
         <h3 class="font-semibold mb-2">Plans</h3>
         <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Price / mo</th><th>Payment page</th><th>Status</th><th>Actions</th></tr></thead>
@@ -3478,7 +3492,9 @@ const App = () => {
             <td class="font-medium">${p.name} ${p.is_top ? html`<span class="badge badge-purple">top</span>` : ''}</td>
             <td class="text-gray-500 font-mono">${p.slug}</td>
             <td>$${p.price_monthly != null ? Number(p.price_monthly).toFixed(2) : '0.00'}</td>
-            <td>${p.purchase_url ? html`<span class="badge badge-green" title=${p.purchase_url}>payment link</span>` : html`<span class="text-gray-400 text-xs">—</span>`}${payVerdict(p.id)}</td>
+            <td>${p.purchase_url ? html`<span class="badge badge-green" title=${p.purchase_url}>payment link</span>` : (p.is_active !== false && (Number(p.price_monthly || 0) + Number(p.price_yearly || 0)) > 0
+                ? html`<span class="badge badge-red" title="A plan on sale with no payment page cannot be bought: a customer who presses Upgrade can only file a request. Paste the checkout address your payment provider gives you for this price in Edit, then press Check payment pages.">⚠ cannot be bought</span>`
+                : html`<span class="text-gray-400 text-xs">—</span>`)}${payVerdict(p.id)}</td>
             <td>${p.is_active ? html`<span class="badge badge-green">active</span>` : html`<span class="badge badge-yellow">inactive</span>`}</td>
             <td>
               <button class="btn btn-sm btn-outline" onClick=${() => setModal({ mode: 'edit', id: p.id, form: { name: p.name, slug: p.slug, description: '', price_monthly: p.price_monthly, price_yearly: (p.price_yearly != null ? p.price_yearly : ''), purchase_url: (p.purchase_url || ''), is_active: p.is_active } })}>Edit</button>
