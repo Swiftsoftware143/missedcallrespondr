@@ -3093,7 +3093,13 @@ fn no_provider_refusal(plan_request: Option<Value>) -> (StatusCode, Json<Value>)
             .to_string()
     };
     (
-        StatusCode::SERVICE_UNAVAILABLE,
+        // 424, not 503 (2026-11-17): this is the BUYER's arm, and it now matches ADASwift,
+        // FunnelSwift, IncentiveSwift and WorkflowSwift, which all answer `FAILED_DEPENDENCY` with
+        // this same `payment_provider_not_configured` code. A missing configuration is not a dead
+        // service, and a 5xx is the one class this fleet's CDN may replace with its own error page,
+        // which would swallow the buyer-first sentence below. Error code, message and the
+        // request_recorded / receipt_emailed / plan_request facts are unchanged.
+        StatusCode::FAILED_DEPENDENCY,
         Json(json!({
             "error": "payment_provider_not_configured",
             "message": message,
@@ -3307,7 +3313,9 @@ mod provider_sentinel_tests {
         // "request the plan by hand" offer on /provider|not configured/i, and `handle()` throws
         // `error` first), and the buyer's own line never reads the internal `none` sentinel.
         let (status, body) = no_provider_refusal(None);
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        // 424 since 2026-11-17, matching every sibling app's buyer arm (a 5xx is the class the CDN
+        // may replace with its own page, which would hide the sentence asserted just below).
+        assert_eq!(status, StatusCode::FAILED_DEPENDENCY);
         let value = body.0;
         let err = value["error"].as_str().unwrap_or("");
         let msg = value["message"].as_str().unwrap_or("");
