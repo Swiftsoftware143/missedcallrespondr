@@ -292,7 +292,7 @@ pub async fn stop_impersonation() -> Result<Json<Value>, AppError> {
 ///    mail, so it cannot be a customer's login.
 ///
 /// An ordinary address on a routable domain answers `false`, so a real customer row is untouched.
-fn owner_is_fleet_machinery(email: &str) -> bool {
+pub(crate) fn owner_is_fleet_machinery(email: &str) -> bool {
     let addr = email.trim();
     if addr.is_empty() {
         return false;
