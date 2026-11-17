@@ -315,6 +315,16 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/team/members/:id",
             delete(crate::handlers::team_handler::remove_member),
         )
+        // THE SAME KIND OF DOOR FOR A LOST PASSWORD (2026-11-17). The invite mints a generated
+        // password and mails it once; until this route the workspace had no way to send it again, so
+        // a mail that bounced or a person who lost it meant asking the platform operator, or
+        // removing the person and adding them back (which discards the calls and contacts that
+        // login owns). A PROTECTED mount beside its siblings — authority (owner / company admin),
+        // the workspace boundary and the reserved-address rule all live in the handler.
+        .route(
+            "/api/v1/team/members/:id/reissue",
+            post(crate::handlers::team_handler::reissue_teammate),
+        )
         // The caller's own in-inbox branding PREVIEW (cron 2026-10-24, parity with FunnelSwift,
         // IncentiveSwift and ADASwift): mails a sample of the branded transactional mail to the
         // caller's OWN address. The request has no body and no recipient field, so it cannot be

@@ -294,3 +294,118 @@ pub async fn remove_member(
         "seats": { "used": used, "limit": limit },
     })))
 }
+
+/// POST /api/v1/team/members/:id/reissue — send a teammate their login details again (2026-11-17).
+///
+/// The invite door mints a generated password and mails it ONCE. If that message never arrived (a
+/// mistyped address the inviter corrected afterwards, a spam trap, a provider hiccup) or the person
+/// lost it, the workspace had NO remedy of its own: the invite's own failure sentence tells the owner
+/// to ask the operator console for a reset, i.e. to ask us — or to remove the person and add them
+/// again, which throws away every call and contact that login owns.
+///
+/// Three rules, the same ones `remove_member` applies and in the same order:
+///   * AUTHORITY — the caller must administer THIS workspace ([`may_administer`]).
+///   * TENANT FROM THE SESSION — the row is looked up with `tenant_id = claims.aid`, and a row that
+///     belongs to somebody else is a 404, not a 403, so the door cannot confirm that a stranger's
+///     login exists.
+///   * OWN LOGIN IS NOT THIS DOOR — changing your own password is the profile screen's job (and it
+///     asks for the current one).
+///
+/// The password is generated and mailed through the SAME credentials mailer the invite uses, so the
+/// two doors cannot drift into two different emails. A reserved / harness address is answered with
+/// the new password in the response instead of a message nobody receives (the same rule the invite's
+/// `credentials_emailed` follows). `sessions_valid_from` moves in the same UPDATE, so every token
+/// minted from the OLD password is refused at the boundary immediately — exactly what the
+/// sign-out-everywhere door does and what a password reset must do. `password_undelivered` stays
+/// TRUE unless a mail really left, so the operator's badge never claims a delivery that did not
+/// happen.
+pub async fn reissue_teammate(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, AppError> {
+    if !may_administer(&claims.role) {
+        return Err(refuse_non_admin(&claims.role));
+    }
+    if id == claims.sub {
+        return Err(AppError::BadRequest(
+            "That is your own login — change your password on your profile screen instead.".into(),
+        ));
+    }
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT email, COALESCE(NULLIF(name, ''), email) FROM users \
+          WHERE id = $1 AND tenant_id = $2",
+    )
+    .bind(id)
+    .bind(claims.aid)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (email, name) =
+        row.ok_or_else(|| AppError::NotFound("No such teammate in this workspace.".into()))?;
+
+    let password = crate::auth::signup::generate_temp_password();
+    let password_hash = hash_password(&password)
+        .map_err(|e| AppError::Internal(format!("could not hash the new password: {e}")))?;
+
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, password_undelivered = TRUE, \
+                sessions_valid_from = NOW(), updated_at = NOW() \
+          WHERE id = $2 AND tenant_id = $3",
+    )
+    .bind(&password_hash)
+    .bind(id)
+    .bind(claims.aid)
+    .execute(&state.pool)
+    .await?;
+
+    let reserved_domain = crate::security::probe_addr::harness_domain(&email);
+    let mut emailed = false;
+    if reserved_domain.is_none() {
+        let vars = json!({ "name": name, "email": email, "password": password });
+        match crate::email::send_template_email(
+            &state.pool,
+            claims.aid,
+            &email,
+            "welcome_credentials",
+            &vars,
+        )
+        .await
+        {
+            Ok(()) => emailed = true,
+            Err(e) => tracing::error!(
+                "teammate {} ({}) in tenant {} was given a new password but the CREDENTIALS EMAIL FAILED: {}",
+                id,
+                email,
+                claims.aid,
+                e
+            ),
+        }
+    }
+    if emailed {
+        let _ = sqlx::query(
+            "UPDATE users SET password_undelivered = FALSE WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(id)
+        .bind(claims.aid)
+        .execute(&state.pool)
+        .await;
+    }
+
+    let detail = if emailed {
+        "A new password is on its way to that address, and anything they were already signed in with has been signed out.".to_string()
+    } else if let Some(domain) = reserved_domain {
+        format!(
+            "'{domain}' is a reserved test address, so no email was sent — hand them the new password shown here."
+        )
+    } else {
+        "A new password was set, but the email carrying it did not leave. Hand them the password shown here, or try again once mail delivery is restored.".to_string()
+    };
+    Ok(Json(json!({
+        "reissued": true,
+        "email": email,
+        "credentials_emailed": emailed,
+        "withheld": reserved_domain.is_some(),
+        "detail": detail,
+        "handover_password": if emailed { Value::Null } else { json!(password) },
+    })))
+}

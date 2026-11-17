@@ -2808,9 +2808,9 @@ const Billing = () => {
 // person — a receptionist, a partner, an office manager — could not be given access at all, and the
 // only other writer of a `users` row was the cross-app portfolio sync, which also mints a tenant.
 // The screen lists the people in THIS workspace (the server takes the tenant from the session, never
-// from the page), lets the owner / a company admin add one, and lets them revoke an access that
-// should end. Every sentence under the form is the SERVER's answer (whether the credentials mail
-// actually left), never invented here.
+// from the page), lets the owner / a company admin add one, send a login again (2026-11-17), and
+// revoke an access that should end. Every sentence under the form is the SERVER's answer (whether the
+// credentials mail actually left), never invented here.
 const Team = () => {
   const st = viewState('team', {
     loaded: false, busy: false, members: [], seats: { used: 0, limit: null },
@@ -2852,6 +2852,24 @@ const Team = () => {
     } catch (e) { st.error = 'Could not remove them: ' + e.message; }
     st.busy = false; load();
   };
+  // A LOST PASSWORD HAD NO DOOR (2026-11-17). The invite mints a generated password and mails it
+  // once; if that message bounced or the person lost it, the owner's only remedies were to ask us or
+  // to remove them and add them back (which discards the calls and contacts that login owns). This
+  // asks the server to re-issue — the server decides authority, generates the password, mails it and
+  // says whether the mail really left; when it did not (a reserved test address, a mail outage) it
+  // hands the password back so the owner can pass it on.
+  const reissue = async (m) => {
+    if (!confirm('Send ' + (m.email || 'this person') + ' their login details again? They get a new password, and anything they are already signed in on is signed out.')) return;
+    st.busy = true; st.error = null; st.notice = null; renderApp();
+    try {
+      const d = await API.post('/team/members/' + m.id + '/reissue', {});
+      const mailed = d.credentials_emailed !== false;
+      let text = d.detail || (mailed ? 'Their login details are on their way.' : 'A new password was set.');
+      if (d.handover_password) text += ' New password: ' + d.handover_password;
+      st.notice = { ok: mailed, text: text };
+    } catch (e) { st.error = 'Could not send their login: ' + e.message; }
+    st.busy = false; load();
+  };
   const roleWord = (r) => ({ account_owner: 'Owner', company_admin: 'Admin', business_user: 'Member' }[r] || String(r || 'Member').replace(/_/g, ' '));
   const seats = () => {
     const used = st.seats.used == null ? st.members.length : st.seats.used;
@@ -2872,8 +2890,10 @@ const Team = () => {
             <td class="text-gray-600">${m.email}</td>
             <td><span class="badge ${m.is_owner ? 'badge-blue' : 'badge-green'}">${roleWord(m.role)}</span></td>
             <td class="text-gray-500">${utcDate(m.created_at)}</td>
-            <td>${st.can_manage && !m.is_owner && !m.is_you
-              ? html`<button class="btn btn-sm btn-red" disabled=${st.busy === true} onClick=${() => remove(m)}>Remove</button>`
+            <td>${st.can_manage
+              ? html`${!m.is_you ? html`<button class="btn btn-sm btn-outline mr-2" id=${'team-resend-' + m.id} disabled=${st.busy === true} onClick=${() => reissue(m)}>Send login</button>` : ''}${(!m.is_owner && !m.is_you)
+                ? html`<button class="btn btn-sm btn-red" disabled=${st.busy === true} onClick=${() => remove(m)}>Remove</button>`
+                : ''}`
               : ''}</td>
           </tr>`)}
           ${st.members.length === 0 && html`<tr><td colspan="5" class="text-center text-gray-400 py-8">No people yet.</td></tr>`}
@@ -2887,7 +2907,7 @@ const Team = () => {
         <div><label class="text-sm font-medium block mb-1">Their email address</label><input class="input" id="team-email" type="email" value=${form.email} onInput=${e => { form.email = e.target.value; }} placeholder="sam@yourcompany.com" /></div>
         <div class="flex gap-2 justify-end"><button class="btn" id="team-invite" disabled=${st.busy === true} onClick=${invite}>Add them</button></div>
       </div>
-    </div>` : html`<div class="card mt-4"><p class="text-sm text-gray-600">Only the workspace owner or a company admin can add or remove someone. Ask them if you need access for a colleague.</p></div>`}
+    </div>` : html`<div class="card mt-4"><p class="text-sm text-gray-600">Only the workspace owner or a company admin can add, re-send a login to, or remove someone. Ask them if you need access for a colleague.</p></div>`}
   </div>`;
 };
 

@@ -674,11 +674,17 @@ mod tests {
         // `POST /api/v1/admin/tenants/:id/suspension` joined on 2026-11-01 — a PROTECTED
         // `/api/v1/admin/*` mount like the rest of that block, so both anonymous lists are
         // untouched; before it, 135 entries / 135 distinct paths).
-        assert_eq!(lits.len(), 151, "mounted .route entries");
+        // 151 → 152 on 2026-11-17: the customer's own re-send-login door
+        // `POST /api/v1/team/members/:id/reissue` — a PROTECTED mount beside its team siblings, so
+        // PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing became reachable without a
+        // credential. Before it, 151 entries / 151 distinct paths: `GET|PUT /api/v1/admin/billing-settings`
+        // joined on 2026-11-16 (card t_03c38b20) — a PROTECTED `/api/v1/admin/*` mount like the rest
+        // of that block.
+        assert_eq!(lits.len(), 152, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 151, "distinct mounted paths");
+        assert_eq!(uniq.len(), 152, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
