@@ -49,6 +49,40 @@ fn caller_is_operator(claims: &Claims) -> bool {
     )
 }
 
+/// Is this one of the two statuses that take a ticket OUT of the operator's open queue?
+///
+/// Same vocabulary the queue uses everywhere else (`status IN ('open','in_progress')` is "still
+/// waiting on us"), so the guard and the queue can never disagree about what "handled" means.
+fn closes_request(status: &str) -> bool {
+    matches!(status.trim().to_lowercase().as_str(), "resolved" | "closed")
+}
+
+/// A CUSTOMER MAY NOT CLOSE THEIR OWN REQUEST (kanban t_d23f1330, mirrored 2026-11-18).
+///
+/// Measured live on the shipped binary: a customer `PUT /api/v1/tickets/<own open plan request>
+/// {"status":"resolved"}` answered **200**, the row turned `resolved` with `plan_applied_at` NULL,
+/// and the workspace stayed on Free — the request left the operator's queue as "handled" with
+/// nothing applied and nobody told. The operator arm below already gates the plan SEAT on
+/// `caller_is_operator`; the STATUS write itself was not gated at all.
+///
+/// The customer's own verb for cancelling is WITHDRAW (`delete`, which the console calls and which
+/// removes the ask outright), so the refusal names that instead of quietly taking the request off
+/// the operator's desk. Checked AFTER the scoped read (a stranger still gets the same 404) and
+/// BEFORE any write (a refusal leaves no row behind and sends no mail). Mirror of WorkflowSwift
+/// 27665c1 and IncentiveSwift d927ee24.
+fn refuse_customer_close(claims: &Claims, status: Option<&str>) -> Result<(), AppError> {
+    if caller_is_operator(claims) {
+        return Ok(());
+    }
+    if status.map(closes_request).unwrap_or(false) {
+        return Err(AppError::Forbidden(
+            "Only the team can mark a request resolved or closed. To cancel your request, withdraw it."
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// A ticket as the OPERATOR's queue shows it: the row plus whose workspace filed it.
 ///
 /// `tenant_name` and `account_email` are what make a request actionable — "Upgrade request: Starter
@@ -831,6 +865,10 @@ pub async fn update(
     check_opt_len("status", req.status.as_deref(), max::TICKETS_STATUS)?;
     check_opt_len("priority", req.priority.as_deref(), max::TICKETS_PRIORITY)?;
     let existing = ticket_visible_to(&state.pool, &claims, id).await?;
+    // THE WRITE THAT TAKES THE REQUEST OFF THE OPERATOR'S DESK (2026-11-18): see
+    // `refuse_customer_close`. After the scoped read (a stranger still gets the same 404) and
+    // BEFORE the UPDATE, so a refusal leaves the row untouched and queues no mail.
+    refuse_customer_close(&claims, req.status.as_deref())?;
     let now = chrono::Utc::now();
     let next_status = req.status.as_ref().unwrap_or(&existing.status).clone();
     sqlx::query(
