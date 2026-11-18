@@ -729,8 +729,8 @@ pub(crate) async fn send_billing_request_receipt(
     tenant_id: Uuid,
     subject: &str,
 ) -> bool {
-    let owner: Option<(Option<String>, String)> = match sqlx::query_as(
-        "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
+    let owner: Option<(Option<String>, String, String)> = match sqlx::query_as(
+        "SELECT name, email, role FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
     )
     .bind(tenant_id)
     .fetch_optional(pool)
@@ -742,13 +742,21 @@ pub(crate) async fn send_billing_request_receipt(
             return false;
         }
     };
-    let Some((name, email)) = owner else {
+    let Some((name, email, role)) = owner else {
         tracing::warn!(
             "plan-request receipt: no user to acknowledge for tenant {}",
             tenant_id
         );
         return false;
     };
+    // A PLATFORM ADMIN NEVER RECEIPTS HIMSELF (2026-11-18). The operator filing a plan request from
+    // his own workspace must not mail himself a receipt about it — the ticket row still lands in the
+    // queue, only the self-receipt is withheld. The owner row is the SAME user whose role the alert
+    // arm next door already suppresses on, so `is_platform_admin` judges the requester, not the door.
+    if crate::auth::middleware::is_platform_admin(&role) {
+        tracing::info!("operator self-request: receipt suppressed");
+        return false;
+    }
     let vars = serde_json::json!({
         "name": name.unwrap_or_else(|| "there".to_string()),
         "request_subject": subject,
@@ -794,8 +802,8 @@ pub(crate) async fn send_support_request_receipt(
     tenant_id: Uuid,
     subject: &str,
 ) -> bool {
-    let owner: Option<(Option<String>, String)> = match sqlx::query_as(
-        "SELECT name, email FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
+    let owner: Option<(Option<String>, String, String)> = match sqlx::query_as(
+        "SELECT name, email, role FROM users WHERE tenant_id = $1 \n         ORDER BY (role IN ('admin','account_owner')) DESC, created_at ASC LIMIT 1",
     )
     .bind(tenant_id)
     .fetch_optional(pool)
@@ -810,13 +818,21 @@ pub(crate) async fn send_support_request_receipt(
             return false;
         }
     };
-    let Some((name, email)) = owner else {
+    let Some((name, email, role)) = owner else {
         tracing::warn!(
             "support receipt: no user to acknowledge for tenant {}",
             tenant_id
         );
         return false;
     };
+    // A PLATFORM ADMIN NEVER RECEIPTS HIMSELF (2026-11-18). The operator filing a support request
+    // from his own workspace must not mail himself a receipt about it — the ticket row still lands
+    // in the queue, only the self-receipt is withheld. The owner row carries the platform role, so
+    // `is_platform_admin` judges the requester, not the door.
+    if crate::auth::middleware::is_platform_admin(&role) {
+        tracing::info!("operator self-request: receipt suppressed");
+        return false;
+    }
     let vars = serde_json::json!({
         "name": name.unwrap_or_else(|| "there".to_string()),
         "request_subject": subject,
