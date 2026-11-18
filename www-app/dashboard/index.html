@@ -2135,7 +2135,7 @@ const Calendar = () => {
 };
 
 const Tickets = () => {
-  const st = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false });
+  const st = viewState('tickets', { list: [], stats: null, showModal: false, editItem: null, threadId: null, thread: null, reply: '', busy: false, notice: '' });
   // The list AND the counts. GET /api/v1/tickets/stats had no caller anywhere in this console, so
   // "see what is still open" was a question the screen could not answer. Its own catch keeps a
   // stats hiccup from blanking the list, and the strip renders only what the API answered.
@@ -2156,6 +2156,19 @@ const Tickets = () => {
   // A ticket the CUSTOMER files is stored with sender_type 'customer', so the thread attributes the
   // opening words to them rather than to the team. The admin console's own "+ New Ticket" keeps the
   // default ('agent') — it is filed on the workspace's behalf.
+  // WITHDRAW (2026-11-18). A customer cannot mark a request resolved or closed — the API refuses
+  // it, because that took the request off the operator's queue with no plan applied. What they
+  // CAN do is take the ask back, which is what this does (DELETE, scoped to their own ticket).
+  const withdraw = async (t) => {
+    if (!t || !t.id) return;
+    if (!confirm('Withdraw this request? The team will stop working on it.')) return;
+    try {
+      await API.del('/tickets/' + t.id);
+      if (st.threadId === t.id) { st.threadId = null; st.thread = null; }
+      st.notice = 'Request withdrawn. The team will no longer see it in the queue.';
+      load();
+    } catch (e) { alert('Could not withdraw it: ' + e.message); }
+  };
   const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', Object.assign({ sender_type: 'customer' }, data)); st.showModal = false; load(); } catch (e) { alert(e.message); } };
   // ── The conversation (2026-10-19) ─────────────────────────────────────────────────────────────
   // This screen files a ticket (Plan & Billing sends one when checkout is closed) and then showed
@@ -2189,9 +2202,10 @@ const Tickets = () => {
       <span><strong>${st.stats.closed||0}</strong> closed</span>
       <span class="text-gray-400">${st.stats.total||0} total</span>
     </div>`}
+    ${st.notice && html`<div class="card p-3 mb-4 text-sm" style="background:#ecfdf5;color:#065f46" id="tk-notice">${st.notice}</div>`}
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>Subject</th><th>Status</th><th>Priority</th><th>Actions</th></tr></thead>
-        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.subject||'-'}</td><td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td><td class="text-gray-500">${t.priority||'medium'}</td><td><button class="btn btn-sm" onClick=${() => openThread(t)}>Open</button><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button></td></tr>`)}
+        <tbody>${st.list.map(t => html`<tr><td class="font-medium">${t.subject||'-'}</td><td><span class="badge ${t.status==='open'?'badge-yellow':t.status==='resolved'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td><td class="text-gray-500">${t.priority||'medium'}</td><td><button class="btn btn-sm" onClick=${() => openThread(t)}>Open</button><button class="btn btn-sm btn-outline" onClick=${() => show(t)}>Edit</button>${(t.status === 'open' || t.status === 'in_progress') && html`<button class="btn btn-sm btn-outline" onClick=${() => withdraw(t)}>Withdraw</button>`}</td></tr>`)}
         ${st.list.length===0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-8">No tickets yet.</td></tr>`}
       </tbody></table>
     </div>
@@ -2224,7 +2238,7 @@ const Tickets = () => {
           f.priority = st.editItem?.priority||'medium';
           st.formSeeded = true;
         }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Status</label><select class="input" value=${f.status} onChange=${e => { f.status = e.target.value; }}><option value="open">Open</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></div><div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${f.priority} onChange=${e => { f.priority = e.target.value; }}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject: f.subject, status: f.status, priority: f.priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Status</label><p class="text-sm text-gray-500" id="tk-status-note">${st.editItem ? (st.editItem.status || 'open') : 'open'} \u2014 the team moves a request to resolved or closed once it is handled. To cancel it yourself, use Withdraw.</p></div><div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${f.priority} onChange=${e => { f.priority = e.target.value; }}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject: f.subject, priority: f.priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
