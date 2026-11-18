@@ -335,6 +335,14 @@ const Overview = () => {
   const creditNote = (u) => {
     const n = u && u.credits;
     if (typeof n !== 'number' || !isFinite(n)) return '';
+    // An UNLIMITED plan (the fleet's -1 sentinel, granted to Enterprise 2026-11-18) never spends a
+    // balance, so `credits` can read any number while every call is answered. Said FIRST: a finite
+    // "50 call credits left" on an unlimited plan reads like a countdown to a hang-up.
+    const unlimitedPlan = Object.prototype.hasOwnProperty.call(al, 'included_credits')
+      && isFinite(Number(al['included_credits'])) && Number(al['included_credits']) < 0;
+    if (unlimitedPlan) {
+      return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">Your plan includes unlimited call credits, so every missed call is answered.</p>`;
+    }
     if (n <= 0) {
       // TWO ARMS (cron 2026-11-08). `credits === 0` used to print ONE sentence, "No call credits
       // left \u2014 incoming calls are being refused", to every workspace at zero — including a
@@ -346,20 +354,16 @@ const Overview = () => {
       // Plan & Billing. The top-up route is unchanged and still true: the operator adds credits
       // (admin_handler's manual add) — no screen of this app sells them.
       const declared = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al['included_credits']) : NaN;
-      // An UNLIMITED plan (the fleet's -1 sentinel, granted to Enterprise 2026-11-18) spends no
-      // balance, so `credits` sits at 0 while every call is answered. Without this arm the customer
-      // paying the most read "no call credits" — the alarm had to be reserved for plans that DO
-      // grant a finite number and have spent it.
-      if (isFinite(declared) && declared < 0) {
-        return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">Your plan includes unlimited call credits, so every missed call is answered.</p>`;
-      }
       if (isFinite(declared) && declared > 0) {
         return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">You have used all ${declared} call credit${declared === 1 ? '' : 's'} this plan includes, so incoming calls are being refused. Credits are added by our team, not from this screen: message us from <a href="/contact.html" style="color:#b91c1c;text-decoration:underline">our contact page</a> to top them up.</p>`;
       }
       return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">This workspace has no call credits, so a missed call cannot be answered yet. Credits are added by our team, not from this screen \u2014 message us from <a href="/contact.html" style="color:#2563eb;text-decoration:underline">our contact page</a> and we will switch them on. <a href="#" style="color:#2563eb;text-decoration:underline" onClick=${(e) => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>Plan & Billing</a> shows what each plan includes.</p>`;
     }
     const cap = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al.included_credits) : null;
-    const of = (cap !== null && isFinite(cap) && cap > 0) ? ' of ' + cap : '';
+    // A balance ABOVE the plan's included number is normal (a top-up, or the plan's own bonus credits
+    // — Pro Monthly grants 5,000 included + 1,500 bonus), and "6500 of 5000 left" reads like a
+    // broken counter. State the count alone when it exceeds the allowance.
+    const of = (cap !== null && isFinite(cap) && cap > 0 && n <= cap) ? ' of ' + cap : '';
     return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">${n}${of} call credit${n === 1 ? '' : 's'} left</p>`;
   };
   // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
