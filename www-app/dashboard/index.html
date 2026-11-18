@@ -2438,7 +2438,7 @@ const withdraw = async (st, t) => {
 };
 
 const Billing = () => {
-  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, withdrawing: null, till: null, tillTried: false, term: 'month' });
+  const st = viewState('billing', { loaded: false, busy: false, plans: [], notice: null, error: null, buying: null, requestFor: null, requests: [], requestsLoaded: false, sessions: [], sessionsLoaded: false, withdrawing: null, till: null, tillTried: false, term: 'month' });
   if (!st.loaded && !st.busy) {
     st.busy = true;
     loadPlanRequests(st);
@@ -2463,6 +2463,54 @@ const Billing = () => {
     st.tillTried = true;
     API.get('/checkout/status').then(d => { st.till = d || null; renderApp(); })
       .catch(() => { st.till = null; renderApp(); });
+  }
+  // ── PAYMENT HISTORY (2026-11-18) ─────────────────────────────────────────────────────────────
+  // What this workspace has TRIED to buy, read from the app's own account-scoped route
+  // `GET /api/v1/checkout/sessions` (this app answers `{sessions: [...]}`, scoped on the server to
+  // the caller's own account, so it can only ever list our own rows). ADASwift, WorkflowSwift and
+  // IncentiveSwift have shown this card for weeks; this console had the route and no screen, which
+  // is the fleet's "a backend route with no UI is a defect" rule. Nothing is computed here: the
+  // date, the amount, its currency, the provider and the outcome are the row's own values, and an
+  // unknown state is printed as it arrives rather than guessed at. An installation with no card
+  // provider answers an empty list, and the card then says plainly that nothing has been charged
+  // instead of showing a dead table.
+  const payDate = v => {
+    const d = new Date(String(v || ''));
+    return isNaN(d.getTime()) ? '\u2014'
+      : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+  const payAmount = s => {
+    const raw = (s && s.amount !== undefined && s.amount !== null) ? String(s.amount).trim() : '';
+    if (!raw) return '\u2014';
+    const cur = String((s && s.currency) || '').trim().toUpperCase();
+    const n = Number(raw);
+    const shown = isFinite(n) ? money(n) : raw;
+    return (!cur || cur === 'USD') ? shown : shown + ' ' + cur;
+  };
+  const payThrough = v => {
+    const s = String(v || '').trim().toLowerCase();
+    if (!s) return '\u2014';
+    if (s === 'payment_link') return 'Your own payment page';
+    if (s === 'stripe') return 'Stripe';
+    if (s === 'paypal') return 'PayPal';
+    return s.replace(/_/g, ' ');
+  };
+  const payState = v => {
+    const s = String(v || '').trim().toLowerCase();
+    const map = { paid: 'Paid', completed: 'Paid', succeeded: 'Paid',
+                  payment_link: 'Payment page opened', pending: 'Waiting for payment',
+                  created: 'Waiting for payment', open: 'Waiting for payment',
+                  failed: 'Did not go through', cancelled: 'Cancelled', canceled: 'Cancelled',
+                  expired: 'Expired', refunded: 'Refunded' };
+    return map[s] || (s ? s.replace(/_/g, ' ') : '\u2014');
+  };
+  if (!st.sessionsLoaded) {
+    st.sessionsLoaded = true;
+    API.get('/checkout/sessions').then(d => {
+      const list = (d && (d.sessions || d.items)) || [];
+      st.sessions = Array.isArray(list) ? list : [];
+      renderApp();
+    }).catch(() => { st.sessions = []; renderApp(); });
   }
   const me = API.user || {};
   const current = me.plan_name ? String(me.plan_name).trim().toLowerCase() : '';
@@ -2783,6 +2831,28 @@ const Billing = () => {
         </li>`)}
       </ul>
     </div>` : null}
+    ${st.sessionsLoaded && html`<div class="card" id="payment-history">
+      <h3 class="font-semibold mb-1">Payment history</h3>
+      ${st.sessions.length
+        ? html`<p class="text-sm text-gray-600 mb-2">Newest first. The amount and the outcome are the ones the payment record carries.</p>
+            <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead><tr>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">Date</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">What for</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">Amount</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">Paid through</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">What happened</th>
+              </tr></thead>
+              <tbody>${st.sessions.map(s => html`<tr data-billing-row=${s.id}>
+                <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payDate(s.created_at)}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${s.description || String(s.purchasable_type || 'plan').replace(/_/g, ' ')}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payAmount(s)}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payThrough(s.payment_provider || s.provider_type)}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payState(s.status)}</td>
+              </tr>`)}</tbody>
+            </table></div>`
+        : html`<p class="text-sm text-gray-600" id="payment-history-empty">Nothing has been charged on this workspace yet. When a plan is bought or a payment is attempted, it appears here with its date, amount and outcome.</p>`}
+    </div>`}
     <div class="card">
       <h3 class="font-semibold mb-1">Your current plan</h3>
       ${assigned

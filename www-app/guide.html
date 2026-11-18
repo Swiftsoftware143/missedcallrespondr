@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MissedCall Respondr — User Guide</title>
+  <meta name="description" content="How MissedCall Respondr works end to end: connect your number, set the text-back message, work the call-back queue, and read the reports.">
+  <link rel="canonical" href="https://missedcallrespondr.com/guide.html">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://missedcallrespondr.com/guide.html">
+  <meta property="og:title" content="MissedCall Respondr — User Guide">
+  <meta property="og:description" content="Connect your number, set the text-back message, work the call-back queue, read the reports.">
+  <meta property="og:image" content="https://missedcallrespondr.com/assets/og-missedcall.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="MissedCall Respondr">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MissedCall Respondr — User Guide">
+  <meta name="twitter:description" content="Connect your number, set the text-back message, work the call-back queue, read the reports.">
+  <meta name="twitter:image" content="https://missedcallrespondr.com/assets/og-missedcall.png">
+  <style>
+    /* ─── Reset & Base ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      color: #1f2937; background: #f9fafb; line-height: 1.65;
+    }
+    a { color: #e11d48; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; }
+
+    /* ─── Top Bar ─── */
+    .topbar {
+      background: #e11d48; color: #fff; padding: 0.75rem 1.5rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    .topbar h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; }
+    .topbar .badge {
+      margin-left: auto; font-size: .75rem; background: rgba(255,255,255,.2);
+      padding: .25rem .6rem; border-radius: 4px; white-space: nowrap;
+    }
+    .topbar .meta { font-size: .8rem; opacity: .85; }
+
+    /* ─── Layout ─── */
+    .wrapper { display: flex; min-height: calc(100vh - 3.2rem); }
+    nav.sidebar {
+      width: 250px; flex-shrink: 0; background: #fff; border-right: 1px solid #e5e7eb;
+      padding: 1.25rem 0; overflow-y: auto; position: sticky; top: 3.2rem; align-self: flex-start; max-height: calc(100vh - 3.2rem);
+    }
+    nav.sidebar ul { list-style: none; }
+    nav.sidebar li a {
+      display: block; padding: .5rem 1.25rem; font-size: .9rem; color: #374151;
+      border-left: 3px solid transparent; transition: .15s;
+    }
+    nav.sidebar li a:hover, nav.sidebar li a.active {
+      background: #fff1f2; color: #e11d48; border-left-color: #e11d48; text-decoration: none;
+    }
+    nav.sidebar .section-label {
+      padding: .6rem 1.25rem .25rem; font-size: .7rem; text-transform: uppercase;
+      letter-spacing: .06em; color: #9ca3af; font-weight: 600;
+    }
+
+    main.content { flex: 1; padding: 2rem 2.5rem; max-width: 900px; }
+
+    /* ─── Typography ─── */
+    main h2 {
+      font-size: 1.6rem; font-weight: 700; margin: 2rem 0 .75rem; padding-bottom: .4rem;
+      border-bottom: 3px solid #e11d48; color: #111827;
+    }
+    main h2:first-of-type { margin-top: 0; }
+    main h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: #1f2937; }
+    main p, main li { margin-bottom: .65rem; color: #374151; }
+    main ul, main ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+    main ul li::marker { color: #e11d48; }
+
+    /* ─── Callout boxes ─── */
+    .callout {
+      border-radius: 8px; padding: 1rem 1.25rem; margin: 1.25rem 0;
+      border-left: 4px solid; font-size: .92rem;
+    }
+    .callout.info    { background: #ecfdf5; border-color: #10b981; }
+    .callout.warning { background: #fffbeb; border-color: #f59e0b; }
+    .callout.tip     { background: #eff6ff; border-color: #3b82f6; }
+    .callout.danger  { background: #fef2f2; border-color: #e11d48; }
+    .callout.example { background: #f8fafc; border-color: #94a3b8; }
+    .callout strong:first-child { display: block; margin-bottom: .25rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* ─── Code / Inline ─── */
+    code {
+      background: #f3f4f6; padding: .15rem .4rem; border-radius: 4px;
+      font-size: .85em; color: #be123c; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+    pre code {
+      display: block; background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px;
+      overflow-x: auto; font-size: .85rem; margin: 1rem 0;
+    }
+
+    /* ─── Tables ─── */
+    table {
+      width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem;
+    }
+    th, td { padding: .6rem .75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    th { background: #fff1f2; color: #9f1239; font-weight: 600; }
+
+    /* ─── Screenshot placeholder ─── */
+    .screenshot {
+      border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 1.5rem;
+      margin: 1.25rem 0; text-align: center; color: #9ca3af; font-size: .85rem;
+    }
+    .screenshot .icon { font-size: 2rem; margin-bottom: .25rem; }
+
+    /* ─── Feature grid ─── */
+    .feature-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 1rem; margin: 1.25rem 0;
+    }
+    .feature-card {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem;
+      text-align: center; transition: box-shadow .15s;
+    }
+    .feature-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .feature-card .icon { font-size: 1.8rem; margin-bottom: .35rem; }
+    .feature-card strong { display: block; font-size: .95rem; color: #111827; }
+    .feature-card span { font-size: .82rem; color: #6b7280; }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 768px) {
+      .wrapper { flex-direction: column; }
+      nav.sidebar {
+        width: 100%; position: static; max-height: none; border-right: none;
+        border-bottom: 1px solid #e5e7eb; padding: .5rem 0;
+      }
+      nav.sidebar ul { display: flex; flex-wrap: wrap; gap: 0; }
+      nav.sidebar li a { padding: .4rem .8rem; font-size: .82rem; border-left: none; }
+      nav.sidebar .section-label { display: none; }
+      main.content { padding: 1.25rem; }
+      .topbar { padding: .5rem 1rem; }
+      .topbar h1 { font-size: 1rem; }
+      /* A long URL inside <code> (the API base, a webhook address) has no break opportunity, so it
+         set a min-content width of 471px and the whole guide laid itself out 496px wide on a 390px
+         phone — measured in Chromium 2026-10-23. Every block then rendered ~20% small. Wrap the
+         token instead of letting it widen the page; nothing changes above 768px. */
+      body, .wrapper, main.content, .content { min-width: 0; max-width: 100%; }
+      code, pre, kbd { overflow-wrap: anywhere; word-break: break-word; }
+      pre { overflow-x: auto; max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Top Bar ─── -->
+<header class="topbar">
+  <h1>📞 MissedCall Respondr</h1>
+  <span class="meta">v1.0 — User Guide</span>
+  <span class="badge">missedcallrespondr.com</span>
+</header>
+<nav class="navx-crumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="navx-sep" aria-hidden="true">&rsaquo;</span><span aria-current="page">Guide</span></nav><script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://missedcallrespondr.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://missedcallrespondr.com/guide.html"}]}</script><style id="navx-style">.navx-crumb{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;font-size:.82rem;max-width:1100px;margin:0 auto;padding:14px 18px 0;line-height:1.4}.navx-crumb a{text-decoration:underline;text-underline-offset:2px}.navx-crumb .navx-sep{opacity:.55}.navx-crumb [aria-current]{opacity:.75}.navx-rel{max-width:1100px;margin:34px auto 18px;padding:16px 18px;border:1px solid rgba(128,128,128,.45);border-radius:10px;background:rgba(128,128,128,.08);color:inherit}.navx-rel h2{font-size:1rem;margin:0 0 .6rem;letter-spacing:.01em}.navx-rel ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.45rem 1.4rem}.navx-rel a{text-decoration:underline;text-underline-offset:2px;font-size:.93rem}</style>
+
+
+
+
+<div class="wrapper">
+
+<!-- ─── Sidebar ─── -->
+<nav class="sidebar">
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#getting-started">Getting Started</a></li>
+    <li><a href="#dashboard">Dashboard</a></li>
+    <li><a href="#call-log">Call Log</a></li>
+    <li><a href="#phone-numbers">Phone Numbers</a></li>
+    <li><a href="#response-rules">Response Rules</a></li>
+    <li><a href="#followups">Follow-ups</a></li>
+    <li><a href="#contacts">Contacts</a></li>
+    <li><a href="#lists">Lists</a></li>
+    <li><a href="#calendar">Calendar</a></li>
+    <li><a href="#tickets">Tickets</a></li>
+    <li><a href="#templates">Message Templates</a></li>
+    <li><a href="#messages">Messages</a></li>
+    <li><a href="#integrations">Integrations</a></li>
+    <li><a href="#settings">Profile &amp; Account</a></li>
+    <li><a href="#email-branding">Email Branding</a></li>
+    <li><a href="#team">Your team</a></li>
+    <li><a href="#workspaces">Workspaces</a></li>
+    <li><a href="#faq">FAQ</a></li>
+    <li><a href="#affiliates">🔗 Referrals &amp; Affiliates</a></li>
+    <li><a href="#provisioning">Provisioning &mdash; a FunnelSwift tag can create a free account here</a></li>
+  </ul>
+</nav>
+
+<!-- ─── Content ─── -->
+<main class="content">
+
+  <!-- Overview -->
+  <h2 id="overview">Overview</h2>
+  <p>
+    <strong>MissedCall Respondr</strong> is a call-response and follow-up automation platform.
+    It captures incoming call data, lets you define custom response rules, sends automated
+    text/callback replies, tracks follow-ups, and manages your contacts — all from one dashboard.
+  </p>
+  <p>
+    Built for businesses that never want to miss a lead or client callback, MissedCall Respondr
+    helps you close the loop on every inbound call.
+  </p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="icon">📊</div>
+      <strong>Overview</strong>
+      <span>Live counts &amp; credits</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📞</div>
+      <strong>Calls</strong>
+      <span>The missed-call queue</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📱</div>
+      <strong>Phone Numbers</strong>
+      <span>Numbers this account holds</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">⚙️</div>
+      <strong>Response Rules</strong>
+      <span>Automated reply triggers</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📋</div>
+      <strong>Templates</strong>
+      <span>Saved message texts</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">💬</div>
+      <strong>Messages</strong>
+      <span>Outbound text log</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">⏰</div>
+      <strong>Follow-ups</strong>
+      <span>The call-back queue</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">👥</div>
+      <strong>Contacts</strong>
+      <span>Directory &amp; custom fields</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🎫</div>
+      <strong>Tickets</strong>
+      <span>Support tickets</span>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🔗</div>
+      <strong>Integrations</strong>
+      <span>Connect 3rd-party services</span>
+    </div>
+  </div>
+
+  <!-- Getting Started -->
+  <h2 id="getting-started">Getting Started</h2>
+
+  <h3>Accessing the App</h3>
+  <p>Open your browser and navigate to:</p>
+  <pre><code>https://app.missedcallrespondr.com/</code></pre>
+
+  <h3>Login Credentials</h3>
+  <p>
+    Sign in with the email address and password issued to your account. The password is generated by
+    the system and emailed to you when the account is created, so keep that message.
+  </p>
+
+  <h3>Logging In</h3>
+  <ol>
+    <li>Visit the app URL above.</li>
+    <li>Enter your email address and password.</li>
+    <li>Click <strong>Sign In</strong>.</li>
+    <li>You land on the <strong>Overview</strong> screen.</li>
+  </ol>
+
+  <div class="callout warning">
+    <strong>🔒 Password Reset</strong>
+    Forgot your password? Click <em>"Forgot Password?"</em> on the login screen to receive a reset link via email.
+  </div>
+
+  <h3>API Access</h3>
+  <p>All platform resources are also available via the REST API at:</p>
+  <pre><code>https://app.missedcallrespondr.com/api/v1/</code></pre>
+  <p>
+    The tenant console is a client of this API. There is no API-key capability on a tenant account:
+    the console has no API-keys screen and the API-key routes were removed, because a key minted
+    there was accepted by no endpoint. Every route the console uses takes your signed-in session
+    instead. Machine access to your own data is not a self-serve feature — ask the platform operator.
+  </p>
+
+  <!-- Dashboard -->
+  <h2 id="dashboard">Dashboard — the Overview screen</h2>
+  <p>
+    The first screen is the <strong>Overview</strong>. It summarises what is set up on your account —
+    it is not a traffic report and it has no date-range picker.
+  </p>
+
+  <h3>Summary Cards</h3>
+  <p>Four counters, each the total number of rows on the matching screen:</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Card</th>
+        <th>What it counts</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Response Rules</td><td>Response rules defined for this account.</td></tr>
+      <tr><td>Templates</td><td>Saved message templates.</td></tr>
+      <tr><td>Contacts</td><td>Contacts in the directory.</td></tr>
+      <tr><td>Auto-Responses</td><td>Automated responses the platform has sent.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Your plan &amp; call credits</h3>
+  <p>
+    The <strong>Your plan</strong> card names the plan this workspace runs on and the allowances it
+    grants &mdash; response rules, phone numbers and contacts. Under those figures sits the
+    call-credit line: how many calling credits are left, or, when there are none, a sentence that
+    says a missed call cannot be answered yet and that credits are added by our team rather than
+    from this dashboard (email
+    <a href="https://app.missedcallrespondr.com/contact.html">our contact page</a> and we switch
+    them on). A plan that includes <strong>unlimited</strong> call credits answers every call and
+    says so on that line, whatever the balance shows &mdash; nothing is counted down. The
+    <strong>Plan &amp; Billing</strong> screen lists what each plan includes.
+  </p>
+  <p>
+    One credit pays for one inbound call handled on your MissedCall number, so the credit line is
+    worth a glance when the balance gets low.
+  </p>
+  <p>
+    <strong>When our team moves you onto a plan.</strong> If this install cannot take a card, a plan
+    change is made for you by our team after you ask for it &mdash; and we email the workspace owner
+    when it happens. That message names the plan you are now on, says plainly that nothing was
+    charged for the change, and points at <strong>Plan &amp; Billing</strong> so you can see what the
+    plan includes. If it names a plan you did not ask for, reply to that message and we put it right.
+  </p>
+
+  <div class="callout">
+    <strong>What the Overview shows</strong>
+    Live counters (calls received, missed, answered, follow-ups pending), your response rate, the
+    <strong>Your plan</strong> card and a <strong>Recent activity</strong> feed of what your
+    auto-response setup has actually done. A new workspace also gets a <strong>Get set up</strong>
+    card that walks through connecting a phone number and writing the first response rule. There are
+    no charts on this screen; the per-call record is on the <a href="#call-log">Call Log</a>.
+  </div>
+
+  <!-- Call Log -->
+  <h2 id="call-log">Call Log</h2>
+  <p>
+    The <strong>Calls</strong> screen (the <em>Call Log</em> in the sidebar) lists this account's
+    inbound calls, newest first. It is a plain table with a <strong>Refresh</strong> button and an
+    <strong>Export CSV</strong> button.
+  </p>
+
+  <h3>Table Columns</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Caller</td><td>The caller's name when the number matches a contact, otherwise the number.</td></tr>
+      <tr><td>Called</td><td>The number the caller dialed (yours).</td></tr>
+      <tr><td>When</td><td>When the call came in.</td></tr>
+      <tr><td>Disposition</td><td>What happened to the call (missed, answered, …).</td></tr>
+      <tr><td>Action</td><td><strong>Respond</strong> — offered on a missed call. It queues a call-back follow-up (it appears in Follow-ups).</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The table shows the most recent 100 calls; <strong>Refresh</strong> reloads it from
+    <code>GET /api/v1/calls</code>.
+  </p>
+  <p>
+    <strong>Export CSV</strong> downloads the call log as <code>call-log.csv</code>, one row per
+    call, with the columns <code>ID, Caller, Called, When, Duration Seconds, Disposition</code>.
+    <em>Caller</em> follows the table's own rule — the name when one is known, the number otherwise.
+    The file comes from <code>GET /api/v1/call-logs/export</code>, which reads the same table this
+    screen lists, so the download cannot disagree with the rows above it; unlike the table it is not
+    capped at 100 rows. CSV is the only format.
+  </p>
+
+  <div class="callout warning">
+    <strong>What the Calls screen does not have</strong>
+    There is no search box, no status filter and no date range, and no row-click detail panel — so
+    there is no call timeline, no note field and no per-call view. The row is the whole record the
+    console shows; what the rules did is visible on <a href="#messages">Messages</a> and
+    <a href="#followups">Follow-ups</a>.
+  </div>
+
+  <!-- Phone Numbers -->
+  <h2 id="phone-numbers">Phone Numbers</h2>
+  <p>
+    <strong>Phone Numbers</strong> lists the numbers this account holds, read from
+    <code>GET /api/v1/telnyx/numbers</code>. <strong>+ Add Number</strong> adds one, and the
+    <strong>Release</strong> button on a row removes it from the account.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Column</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Number</td><td>The number itself.</td></tr>
+      <tr><td>Status</td><td><strong>active</strong> while the account holds the number.</td></tr>
+      <tr><td>Added</td><td>When the number was added to the account.</td></tr>
+    </tbody>
+  </table>
+  <h3>Adding a Number</h3>
+  <p>
+    <strong>+ Add Number</strong> takes the number with its country code (for example
+    <code>+15551234567</code>) and an optional label. How the number is acquired depends on the
+    account: when the platform holds a Telnyx credential the number is bought on the platform's
+    Telnyx account, and when the account has connected its own Telnyx key under
+    <a href="#integrations">Integrations</a> (Pro and Enterprise plans) the number must already be
+    yours on Telnyx and is registered here. How many an account may hold is the plan's own limit
+    (Free 1, Pro Monthly 5); at the cap, or when the platform has no Telnyx credential saved, the
+    server's own message is shown and nothing is added.
+  </p>
+
+  <h3>Releasing a Number</h3>
+  <p>
+    <strong>Release</strong> (confirmation required) removes the number from the account and frees the
+    plan slot, so it leaves this list and can be added back later. The platform operator can also
+    provision and release numbers for an account.
+  </p>
+
+  <!-- Response Rules -->
+  <h2 id="response-rules">Response Rules</h2>
+  <p>
+    <strong>Response Rules</strong> are the heart of MissedCall Respondr. They define
+    <em>when</em> and <em>how</em> the system automatically replies to an incoming call.
+  </p>
+
+  <h3>Creating a Rule</h3>
+  <ol>
+    <li>Navigate to <strong>Response Rules</strong> in the sidebar.</li>
+    <li>Click <strong>+ Add Rule</strong>.</li>
+    <li>Fill in the rule fields (see table below).</li>
+    <li>Click <strong>Add</strong> (or <strong>Save</strong> when editing). From that moment the rule
+      is evaluated on every inbound call.</li>
+  </ol>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Field</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Name</td><td>A label to identify the rule (e.g. "After-Hours Auto SMS").</td></tr>
+      <tr><td>Trigger</td><td>When the rule fires: <em>All missed calls</em>, <em>Specific numbers</em>, <em>Time of day</em>, or <em>Day of week</em>. One trigger per rule.</td></tr>
+      <tr><td>Trigger details</td><td>Whatever the trigger needs — the caller numbers (Specific numbers, one per line), the From/To window (Time of day), or the days (Day of week).</td></tr>
+      <tr><td>Action</td><td><strong>SMS</strong> (text the caller back) or <strong>Callback</strong> (queue a return call for you in Follow-ups, due in an hour).</td></tr>
+      <tr><td>Message</td><td>For an SMS rule, the text to send. It goes out exactly as typed — no placeholders are substituted.</td></tr>
+      <tr><td>Priority</td><td>Rules are evaluated in priority order (lowest number first; the default is 100).</td></tr>
+      <tr><td>Enabled</td><td>Toggle the rule on/off without deleting it.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Rule Evaluation Order</h3>
+  <p>
+    Every inbound call walks your <strong>enabled</strong> rules in <strong>priority</strong> order
+    (lowest number first, oldest first where two rules share a priority). The first rule whose trigger
+    matches fires, its action runs, and the rest are skipped for that call. If no rule matches, the
+    call is logged and nothing is sent.
+  </p>
+
+  <h3>What an SMS Needs</h3>
+  <p>
+    A text leaves through Telnyx, from the number the caller dialed. On a number the platform
+    provides, the message goes out on the platform's own Telnyx account, so there is nothing for you
+    to enter. A Pro or Enterprise account that has connected its own Telnyx key under
+    <a href="#integrations">Integrations</a> sends on that account instead. If this installation has no
+    Telnyx account saved yet, a rule still fires and is logged, but the Messages screen stays empty
+    because nothing was attempted — write to us from <a href="https://app.missedcallrespondr.com/contact.html">our contact page</a> and our team
+    switches it on. Queued, sent, delivered and failed on the Messages screen are always the
+    provider's own answer.
+  </p>
+
+  <h3>Testing a Rule Before a Caller Rings</h3>
+  <p>
+    Above the rule list there is a <strong>Test a caller</strong> box. Type a phone number, press
+    <strong>Test this number</strong>, and the screen answers the two questions you cannot otherwise
+    check without waiting for a real missed call: <em>would any of my rules answer this caller right
+    now</em>, and <em>what would the caller actually receive</em>. It reads your rules exactly the way
+    an inbound call does — the same priority order, the same triggers, the same current time — and
+    reports the first rule that matches, together with the text it would send (for a Callback rule it
+    tells you a callback would be queued instead). Testing writes nothing: no call appears in the Call
+    Log, no message is queued, no text leaves the platform, so you can press it as often as you like.
+    A number that no rule answers is worth knowing about too — the box says so in plain words, and
+    tells you whether that is because you have no enabled rules yet or because every rule you have is
+    a time-of-day or day-of-week rule sitting outside its window.
+  </p>
+
+  <h3>Managing Rules</h3>
+  <ul>
+    <li><strong>Edit</strong> — click <strong>Edit</strong> on any rule row.</li>
+    <li><strong>Delete</strong> — click <strong>Delete</strong> (confirmation required).</li>
+    <li><strong>Re-order</strong> — change the <strong>Priority</strong> number; the list is shown in
+      evaluation order, so what you see is the order the calls are checked in.</li>
+  </ul>
+
+  <div class="callout example">
+    <strong>&#128204; Example Rule</strong>
+    <p>
+      <strong>Name:</strong> "Weekend Auto-Reply"<br>
+      <strong>Trigger:</strong> Day of week — Sat, Sun<br>
+      <strong>Action:</strong> SMS — "Thanks for calling. We're closed for the weekend and will call you back on Monday."<br>
+      <strong>Priority:</strong> 10
+    </p>
+  </div>
+
+  <!-- Follow-ups -->
+  <h2 id="followups">Follow-ups</h2>
+  <p>
+    <strong>Follow-ups</strong> is the call-back queue. Rows arrive on their own: the
+    <strong>Respond</strong> button on a missed call schedules a call-back and a
+    <strong>Callback</strong> response rule queues one automatically. You can also schedule one by
+    hand with <strong>+ New Follow-up</strong>, close it, or delete it.
+  </p>
+
+  <h3>What the Screen Shows</h3>
+  <table>
+    <thead>
+      <tr><th>Column</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Call</td><td>The call the follow-up was raised for — the caller and when it came in. Every follow-up is attached to one of your calls.</td></tr>
+      <tr><td>Scheduled</td><td>When the call-back is due.</td></tr>
+      <tr><td>Status</td><td>The task's state as the server stores it — <em>pending</em> while the call-back is still due, <em>completed</em> once it is closed.</td></tr>
+    </tbody>
+  </table>
+  <p>The list is read from <code>GET /api/v1/follow-ups</code>.</p>
+
+  <h3>Managing Follow-ups</h3>
+  <ul>
+    <li><strong>+ New Follow-up</strong> — pick one of your calls, a type (the app's own value is
+      <code>call_back</code>), the due date and time, and optional notes
+      (<code>POST /api/v1/follow-ups</code>). A follow-up is always attached to a call
+      (<code>call_id</code> is a required foreign key), so the button stays off until the account has
+      at least one call.</li>
+    <li><strong>Mark done</strong> — closes a follow-up (<code>PUT /api/v1/follow-ups/:id</code> with
+      status <code>completed</code> plus the completion time).</li>
+    <li><strong>Delete</strong> — removes it (confirmation required).</li>
+  </ul>
+  <p>
+    There is no status filter, no search box and no <em>Assigned To</em> field: the list is every
+    follow-up on the account.
+  </p>
+
+  <!-- Contacts -->
+  <h2 id="contacts">Contacts</h2>
+  <p>
+    <strong>Contacts</strong> is the directory of the people this account talks to. Each row shows a
+    name, phone and email.
+  </p>
+
+  <h3>Searching</h3>
+  <p>
+    The search box searches <strong>on the server</strong> as you type
+    (<code>GET /api/v1/contacts/search?q=</code>) across name, phone and email. Clearing it returns
+    the full list, and <strong>Refresh</strong> reloads it.
+  </p>
+
+  <h3>Custom Fields</h3>
+  <p>
+    <strong>Custom fields</strong> store extra per-contact data. The button shows how many fields are
+    defined and opens a panel where you can:
+  </p>
+  <ul>
+    <li><strong>Add a field</strong> — a name, a type (<code>text</code>, <code>number</code>,
+      <code>date</code> or <code>boolean</code>) and an order.</li>
+    <li><strong>Delete a field</strong> — its per-contact values go with it.</li>
+    <li><strong>Fill in values</strong> — once at least one field exists, each row gets a
+      <strong>Fields</strong> button that opens that contact's values and saves them with
+      <code>PUT /api/v1/contacts/:id/fields/:field_id</code>.</li>
+  </ul>
+
+  <h3>Adding and Editing Contacts</h3>
+  <ul>
+    <li><strong>+ New Contact</strong> — name and phone are required; email, company, tags (comma
+      separated) and notes are optional (<code>POST /api/v1/contacts</code>).</li>
+    <li><strong>Edit</strong> — reopens the row in the same form and saves with
+      <code>PUT /api/v1/contacts/:id</code>. Emptying an optional box clears that field.</li>
+    <li><strong>Delete</strong> — removes the contact and its custom-field values
+      (<code>DELETE /api/v1/contacts/:id</code>, confirmation required).</li>
+  </ul>
+  <h3>Exporting Contacts</h3>
+  <p>
+    <strong>Export CSV</strong> on the Contacts screen downloads the whole directory as
+    <code>contacts-YYYY-MM-DD.csv</code> — every contact on the account, not just the 100 rows the
+    table renders. Each line carries <code>Name, Phone, Email, Company, Tags, Created</code>; tags are
+    written separated by semicolons, and any value holding a comma or a quote is quoted so the file
+    opens cleanly in a spreadsheet. It is the same data the table lists, CSV is the only format, and
+    the download comes from <code>GET /api/v1/contacts/export</code>, which needs a signed-in session.
+  </p>
+
+  <p>
+    A duplicate email inside the same account is refused by the server, which shows its own message.
+    There is still no contact detail page — clicking a row does nothing, and the row's Fields button
+    opens the custom-field values. Contacts are not created automatically from inbound calls; a new
+    caller reaches your CRM through the CoreSwift integration
+    (<a href="#integrations">Integrations</a>), which captures every missed call as a lead.
+  </p>
+
+  <!-- Lists -->
+  <h2 id="lists">Lists</h2>
+  <p>
+    <strong>Lists</strong> is a set of named groups of your leads. Every campaign keeps a list of
+    its own: the moment a lead carries that campaign's tag it joins the campaign's list
+    automatically, so the Lists screen is where you see everyone one campaign has collected.
+  </p>
+  <p>
+    The table shows each list with how many people are in it and where it came from —
+    <em>Campaign</em> for one the system keeps for a campaign, <em>Your own</em> for one you made.
+    Press <strong>View leads</strong> to open it. Inside a list:
+  </p>
+  <ul>
+    <li><strong>Remove</strong> beside a person takes them off that list only. They stay in your
+      account and in <a href="#contacts">Contacts</a> — a list is a grouping, not a second copy of
+      your contacts.</li>
+    <li><strong>Add a lead</strong> puts someone back on the list; the picker reads your current
+      leads each time it opens, so a lead created a minute ago is already there.</li>
+    <li><strong>Rename</strong> changes the list's name. Everyone already in it stays in it.</li>
+    <li><strong>Delete list</strong> removes a list you made yourself. The people in it stay in your
+      account and in Contacts. A campaign's own list has no Delete control — the campaign manages
+      that one, and it comes back the next time the campaign collects someone.</li>
+    <li><strong>+ New list</strong> makes a list of your own with a name and an optional
+      description, for grouping people the way you work rather than the way a campaign does.</li>
+  </ul>
+
+  <!-- Calendar -->
+  <h2 id="calendar">Calendar</h2>
+  <p>
+    <strong>Calendar</strong> is your own list of appointments, callbacks and reminders for this
+    workspace. Nothing is sent to a caller from it: an event is a note to you, and it stays inside
+    your account.
+  </p>
+  <p>
+    Press <strong>+ New event</strong>, give it a title, pick the date and time, choose a type
+    (call, callback, appointment, reminder or other) and add a note if you want one. The screen
+    keeps two tables — <em>Upcoming</em> and <em>Already passed</em> — so a callback you have not
+    made yet stays at the top and an old one does not clutter it. <strong>Edit</strong> changes an
+    event's title, time, type or note; <strong>Delete</strong> removes it.
+  </p>
+  <p>
+    The calendar is part of the Enterprise plan. On a plan without it the screen still opens and
+    says so in the app's own words, with a link to the plans — no event is written and nothing is
+    changed.
+  </p>
+
+  <!-- Tickets -->
+  <h2 id="tickets">Tickets</h2>
+  <p>
+    <strong>Tickets</strong> is the support-ticket list, read from <code>GET /api/v1/tickets</code>.
+    Each row shows a subject, a status and a priority.
+  </p>
+  <ul>
+    <li><strong>+ New Ticket</strong> — creates a ticket with a subject, a status
+      (<em>Open</em>, <em>In Progress</em>, <em>Resolved</em>, <em>Closed</em>) and a priority
+      (<em>Low</em>, <em>Medium</em>, <em>High</em>, <em>Urgent</em>).</li>
+    <li><strong>Edit</strong> — reopens a ticket to change its subject, status or priority.</li>
+    <li><strong>Open</strong> — shows the whole conversation on that ticket (who said what, and when)
+      and gives you a box to answer in. Your answer is stored on the ticket, shown on the customer's
+      own dashboard, and emailed to the workspace's address, so a request filed from
+      <em>Plan &amp; Billing</em> is answered instead of sitting in a list.</li>
+  </ul>
+
+  <!-- Message Templates -->
+  <h2 id="templates">Message Templates</h2>
+  <p>
+    <strong>Message Templates</strong> are saved message texts you keep for reuse. A template is a
+    library entry and nothing more: nothing sends one automatically, and a response rule carries its
+    own <strong>Message</strong> text. Copy the wording from a template into the rule's Message field
+    when you want to reuse it.
+  </p>
+
+  <h3>No Variable Substitution</h3>
+  <p>
+    Whatever you type is what the caller receives. <code>{{name}}</code>,
+    <code>{{company}}</code> and the like are <em>not</em> replaced — a rule that sends
+    <code>Hi {{name}}</code> texts the caller the literal words. Write the message you want them to
+    read.
+  </p>
+
+  <h3>Creating a Template</h3>
+  <ol>
+    <li>Go to <strong>Message Templates</strong> &rarr; <strong>+ Add Template</strong>.</li>
+    <li>Enter a <strong>name</strong> (e.g. "After-Hours SMS").</li>
+    <li>Write the message body.</li>
+    <li>Click <strong>Add</strong>. It is kept in this list for you to copy from.</li>
+  </ol>
+
+  <div class="callout example">
+    <strong>&#128204; Example</strong>
+    <p>
+      <code>Sorry we missed your call! We're on it and will ring you back shortly.</code>
+    </p>
+  </div>
+
+  <h3>Editing &amp; Deleting</h3>
+  <p>
+    Templates can be edited or deleted from the same list. Deleting a template does not change any
+    rule — rules hold their own message text and never reference a template.
+  </p>
+
+  <!-- Messages -->
+  <h2 id="messages">Messages</h2>
+  <p>
+    The <strong>Messages</strong> tab is the outbound text log and the place you send a text by hand.
+    <strong>+ Send Message</strong> opens a form pre-filled with a number this account holds as the
+    <strong>From</strong> number; enter the recipient and the text and press <strong>Send</strong>.
+    The message is transmitted from your own Telnyx number, and the row records what the provider
+    reports — nothing is marked sent or delivered that the provider did not confirm.
+  </p>
+
+  <h3>What each status means</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>What happened</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>queued</strong></td><td>Telnyx accepted the message. It has not been handed to the recipient's carrier yet.</td></tr>
+      <tr><td><strong>sent</strong></td><td>The carrier took the message. The <strong>Sent</strong> column shows when Telnyx reported this.</td></tr>
+      <tr><td><strong>delivered</strong></td><td>The recipient's network confirmed delivery. The <strong>Delivered</strong> column shows when Telnyx reported this.</td></tr>
+      <tr><td><strong>failed</strong></td><td>The provider refused the message or the carrier reported a failure. The reason Telnyx gave is shown in a dialog when you send; the attempt stays in the log as <strong>failed</strong>.</td></tr>
+      <tr><td><strong>logged</strong></td><td>A message recorded as received (inbound). Nothing is transmitted for these.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>ℹ️ Sending needs a connected number</strong>
+    <p>
+      The <strong>From</strong> number must be a number this account holds — see the
+      <strong>Phone Numbers</strong> tab in the app. If this installation has no Telnyx account saved
+      yet, sending answers
+      <em>"Text delivery is not configured"</em> and nothing is recorded — write to us from <a href="https://app.missedcallrespondr.com/contact.html">our contact page</a> and our team switches it on for you.
+    </p>
+  </div>
+
+  <!-- Integrations -->
+  <h2 id="integrations">Integrations</h2>
+  <p>
+    <strong>Integrations</strong> is the provider catalogue for this account. Each card shows a status
+    badge — <strong>Connected</strong> or <strong>Not connected</strong> — and the controls that apply
+    to it. The catalogue is read live from
+    <code>GET /api/v1/available-providers</code>, so a provider added on the platform appears here
+    without a console release.
+  </p>
+
+  <h3>Available Providers</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>CoreSwift CRM</td><td>Push leads into CoreSwift CRM. Pinned first as <em>Recommended</em>, and the integration every captured call flows into.</td></tr>
+      <tr><td>Telnyx</td><td>Bring your own Telnyx account (BYOK): calls, SMS and number management.</td></tr>
+      <tr><td>Twilio</td><td>Bring your own Twilio account (BYOK): calls, SMS and number management.</td></tr>
+      <tr><td>Mailgun, SendGrid, Sendiio</td><td>Transactional and campaign email delivery.</td></tr>
+      <tr><td>OpenAI, DeepSeek</td><td>AI models for content generation.</td></tr>
+      <tr><td>Nexweave</td><td>Personalized video/image generation.</td></tr>
+      <tr><td>SAM.gov</td><td>Federal contracting opportunities.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Connecting a Provider</h3>
+  <ol>
+    <li>Paste the provider's API key into the field on its card.</li>
+    <li>Click <strong>Connect</strong>. A provider that can use another endpoint also shows an
+      optional <em>Base URL</em> field.</li>
+    <li>Click <strong>Test connection</strong> to run the live probe. CoreSwift is probed against the
+      hub and reports whether the key was accepted; for the other providers the platform answers that
+      no live test is available yet.</li>
+    <li>Click <strong>Disconnect</strong> to remove the stored key.</li>
+  </ol>
+  <p>
+    Once CoreSwift is connected its card also shows the hub URL and a
+    <strong>Push a lead to CoreSwift now</strong> form, which runs the same push the automatic
+    capture path uses for a lead you captured by hand.
+  </p>
+
+  <div class="callout warning">
+    <strong>CoreSwift is the integration the call path uses</strong>
+    Every inbound call is captured as a lead in CoreSwift. The other providers in the catalogue store
+    a key for the platform's own use; they are not switches on the call flow.
+  </div>
+
+  <!-- Settings -->
+  <h2 id="settings">Profile &amp; Account</h2>
+  <p>
+    The <strong>Profile</strong> screen (the last item in the sidebar) holds your own account details.
+    There is no separate "Settings" page.
+  </p>
+
+  <h3>Your Details</h3>
+  <ul>
+    <li><strong>Picture</strong> — <strong>Upload picture</strong> (or <strong>Change picture</strong>)
+      takes a PNG, JPEG, GIF or WebP up to 2 MB and shows it in the console header;
+      <strong>Remove picture</strong> puts the initials back. One picture per account, so a new
+      upload replaces the old one.</li>
+    <li><strong>Name</strong> — the name in the console header and in the messages this app sends you.</li>
+    <li><strong>Company</strong> — optional; clear it when there is nothing to show.</li>
+    <li><strong>Username</strong> — optional short handle for your account; clear it to remove it.</li>
+    <li><strong>Level</strong> — the plan this workspace is actually on, read from the plan itself
+      (<a href="#plan-billing">Plans &amp; Billing</a> shows the allowance and the upgrade path).</li>
+    <li><strong>Email</strong> — the address you sign in with. It is not edited in the field above;
+      use the <strong>Sign-in email</strong> card below to move it.</li>
+  </ul>
+  <p>Changes are saved with <strong>Save changes</strong> (<code>PUT /api/v1/auth/profile</code>);
+    the screen confirms when they are stored, and a refusal appears in place with its reason.</p>
+
+  <h3>Taking your data with you</h3>
+  <p>The <strong>&#128229; Download my data</strong> card builds one file holding everything this
+    workspace has — its calls and call log, contacts, leads, phone numbers, follow-ups, campaigns,
+    messages, templates and plan — and saves it to your computer as JSON. It is built fresh each time
+    you press <strong>Download my data</strong>, and the server takes the workspace from your sign-in,
+    so the file can only ever be your own data. Keep it somewhere safe: it is the copy you would take
+    with you if you ever leave.</p>
+
+  <h3>Moving your sign-in email</h3>
+  <p>The <strong>Sign-in email</strong> card shows the address on file. Enter the new one and press
+    <strong>Send confirmation link</strong>: a confirmation goes to the NEW address and your current
+    address keeps working until that link is opened, so a typo cannot lock you out.</p>
+
+  <h3>Change Password</h3>
+  <p>
+    Enter your current password and a new one (at least 8 characters) and click
+    <strong>Update password</strong> (<code>PUT /api/v1/auth/password</code>).
+  </p>
+
+  <div class="callout warning">
+    <strong>There is no Settings page</strong>
+    Phone, timezone, notification preferences and business hours are not part
+    of the console, and the account-settings and API-key routes were removed from the API — nothing
+    read a stored tenant setting, so those screens were deliberately not built. The one branding
+    control that <em>does</em> exist is the <a href="#email-branding">Email Branding</a> tab (your
+    logo, display name and colour on the emails this app sends). No response rule
+    references business hours either: a rule's trigger is
+    <em>All missed calls</em>, <em>Specific numbers</em>, <em>Time of day</em> or <em>Day of week</em>
+    (see <a href="#response-rules">Response Rules</a>).
+  </div>
+
+  <!-- EMAIL BRANDING -->
+  <h2 id="email-branding">Email Branding</h2>
+  <p>
+    Your account can put its own logo, display name and colour at the top of every transactional email
+    this app sends &mdash; the welcome / login-credentials mail, purchase confirmations and password
+    resets. Open the <strong>🎨 Email Branding</strong> tab in the console (it sits beside
+    <strong>Site Config</strong>) and set:
+  </p>
+  <ul>
+    <li><strong>Brand display name</strong> — up to 60 characters, printed above the message.</li>
+    <li><strong>Brand colour</strong> — a hex colour such as <code>#4f46e5</code>; it draws the rule under your logo.</li>
+    <li><strong>Logo</strong> — upload a PNG, JPEG, WebP or GIF up to 2 MB. Once one is set the upload
+      button becomes <strong>Replace logo</strong> and a <strong>Remove logo</strong> button appears.</li>
+  </ul>
+  <p>
+    Below the logo and name fields, the <strong>Company signature</strong> block holds five plain fields
+    &mdash; full name, job title, company, phone and a line &mdash; that print under your logo on every
+    message this workspace sends. Leave them blank to send without one. Each mailbox can instead write
+    its own signature (or send without one) from the inbox's compose screen, so the workspace default
+    here is just the fallback every new address starts from.
+  </p>
+  <p>
+    Click <strong>Save branding</strong>. The logo is served from your account's own public URL
+    (<code>GET /api/v1/branding/logo/{tenant_id}</code>), which is what lets the recipient's mail app
+    display it. Until you set a name or a logo nothing changes &mdash; every message keeps the
+    MissedCall look, because branding is per account, not per app.
+  </p>
+  <p>
+    Under the fields the tab shows <strong>the actual email your account sends</strong> &mdash; not a drawing
+    of it. It is the message your sender builds from the branding you have <strong>saved</strong>: the subject
+    line, then the logo, display name and colour rule exactly as a recipient opens them. Press
+    <strong>Save branding</strong> (or upload or remove a logo) and the tab re-reads the message, so what you
+    see is what leaves the building; <strong>Refresh</strong> re-reads it on demand. Nothing is mailed and
+    nothing is stored by this preview.
+  </p>
+  <p>
+    Under that preview, <strong>Send me a preview email</strong> sends the same sample to
+    <strong>your own account address</strong>. The request names no recipient, so the button can never be
+    used to mail anybody else. Save your branding first: what arrives is exactly what the next real email
+    from your account will look like in an inbox. The line under the button is the server's own answer and
+    says plainly when nothing was sent &mdash; for example when the account's address is on a reserved test
+    domain that cannot receive mail.
+  </p>
+
+  <!-- Your team -->
+  <h2 id="team">Your team</h2>
+  <p>
+    A workspace can have more than one login. Open the <strong>🤝 Your team</strong> tab in the console
+    to see everyone who can sign in to this account, what access each of them has, and how many seats
+    your plan allows. The person who created the workspace is labelled <strong>Owner</strong>; anyone
+    added later is a <strong>Member</strong>.
+  </p>
+  <ul>
+    <li><strong>Add someone</strong> — type their name and email address and press <strong>Add them</strong>.
+      Their own login is created and an email with their first password goes to that address. Nobody has
+      to share your password, and everything they do is inside this same workspace.</li>
+    <li><strong>Remove someone</strong> — press <strong>Remove</strong> on their row. Their login stops
+      working immediately; the calls, contacts and settings stay with the workspace.</li>
+    <li>The <strong>Owner</strong> row cannot be removed here, and you cannot remove yourself — a
+      workspace always keeps one person who can get back in.</li>
+  </ul>
+  <p>
+    Only the <strong>Owner</strong> and anyone the platform team has made a <strong>Company admin</strong>
+    can add or remove people; everyone else sees the list and a line saying who to ask. The line under
+    the form is the server's own answer: it tells you when the password email actually left, and when it
+    did not (for instance an address on a reserved test domain that cannot receive mail) it says so
+    instead of claiming a send. If a colleague never receives their password, use
+    <strong>Forgot your password?</strong> on the sign-in page once mail delivery is confirmed, or ask
+    the platform team to send a reset from the operator console.
+  </p>
+
+  <!-- Workspaces -->
+  <h2 id="workspaces">Workspaces</h2>
+  <p>
+    A workspace is a separate drawer inside this business account &mdash; a client, a location, or a
+    brand you run from the same login. Your plan says how many you may have, and exactly one is the
+    <strong>default</strong> that opens when you sign in.
+  </p>
+  <p>
+    The <strong>🗂️ button at the top of the dashboard</strong>, beside your workspace&rsquo;s name, is
+    the quickest way to move around. Open it to <strong>Switch</strong> to another workspace &mdash;
+    the screen reloads signed into that one &mdash; or to <strong>Add</strong> a new one. The full
+    list and the same controls also live on the <strong>🗂️ Workspaces</strong> tab in the sidebar.
+  </p>
+  <ul>
+    <li><strong>Switch</strong> &mdash; move this session to a different workspace. Your calls,
+      contacts and settings follow the workspace, never your login.</li>
+    <li><strong>Add</strong> &mdash; create a workspace with a name your team will recognise.</li>
+    <li><strong>Rename</strong> &mdash; change a workspace&rsquo;s name.</li>
+    <li><strong>Make default</strong> &mdash; choose the workspace that opens on sign-in.</li>
+    <li><strong>Delete</strong> &mdash; remove a workspace. The account always keeps at least one,
+      and you cannot delete the workspace you are signed into &mdash; switch away first.</li>
+  </ul>
+  <p>
+    The <strong>Owner</strong> and <strong>Company admin</strong> see all five controls; a
+    <strong>Member</strong> sees <strong>Switch</strong> and <strong>Add</strong> only. The server
+    enforces the same rule, so a member can never rename or delete a workspace.
+  </p>
+
+  <!-- MCP -->
+  <h2 id="mcp">MCP — connect an AI tool</h2>
+  <p>
+    <strong>MCP</strong> in the app's navigation (directly above <strong>Profile</strong>) connects
+    an AI assistant &mdash; Claude, Cursor, or your own agent &mdash; to this account. It can
+    <em>read</em> only: there is no tool that changes, deletes or sends anything, and every answer is
+    limited to your own workspace.
+  </p>
+  <p>
+    The screen shows the endpoint (<code>https://hooks.swiftsoftware.net/mcp</code>) and your
+    account&rsquo;s API key, which is created together with your account. <strong>Reveal</strong> asks
+    for your password before it shows the key, and every reveal is recorded. <strong>Copy</strong>
+    puts the key on your clipboard, and <strong>Regenerate</strong> replaces it &mdash; the old key
+    stops working the moment the new one is issued, so any AI client still using it must be given the
+    new key.
+  </p>
+  <p>
+    The <strong>Connect</strong> block shows the exact config to paste into Claude Desktop
+    (<code>claude_desktop_config.json</code>) or Cursor (<code>.cursor/mcp.json</code>). Treat the key
+    like a password: anyone holding it can read your account, so regenerate it if you think it has
+    been shared by mistake.
+  </p>
+
+  <!-- Plan & Billing -->
+  <h2 id="inbox">📬 Inbox</h2>
+  <p>The <strong>Inbox</strong> screen holds your own addresses on your own domain, the newest mail that reached them, and the search for that list. Add the domain you already own, press <strong>Show records</strong>, paste them at your DNS provider, then press <strong>Check again</strong> until the domain reads Receiving &mdash; mail cannot arrive before that. Create the addresses you want on it, within what your plan sells.</p>
+  <p>Above <strong>Recent mail</strong> there is a <strong>Search subject, sender or text</strong> box: type part of a subject, an address or a phrase from the opening of the message and the list narrows as you type (press Enter to search at once). Capitals do not matter. When nothing matches, the table says <strong>No mail matches &ldquo;&hellip;&rdquo;</strong> with a <strong>Clear the search</strong> button, so a filtered list never looks like an empty inbox; <strong>Clear search</strong> beside the box restores the list. Reading and answering the whole thread happens in the mail client at <a href="https://inbox.missedcallrespondr.com" target="_blank" rel="noopener">inbox.missedcallrespondr.com</a>, which is the same account.</p>
+
+  <h2 id="plan-billing">💳 Plan &amp; Billing</h2>
+  <p>
+    The <strong>Plan &amp; Billing</strong> tab shows the plan this workspace is on right now (the
+    blue badge under <em>Your current plan</em>) and every plan this install sells, with its monthly
+    price and what it includes. Press <strong>Upgrade to …</strong> on the plan you want: checkout is
+    hosted by the payment provider the install is connected to, so no card details are entered on
+    this site. A plan already on your account reads <em>Your plan</em>, and the free tier reads
+    <em>Included</em>.
+  </p>
+  <p>
+    If self-serve checkout is not open on this install yet, that same press tells you plainly that
+    nothing was charged and files the request with our team for you &mdash; there is no second button
+    to find (a <strong>Request the … plan</strong> button appears only if sending failed, and pressing
+    it retries). The team make the switch by hand &mdash; and <strong>you are emailed a receipt for it
+    straight away</strong>, naming the plan you asked for and saying that nothing has been charged,
+    so you have a record of what you asked and when. The request then appears under
+    <strong>Your plan requests</strong> on the same screen with its live state (<em>open</em>,
+    <em>in progress</em>, <em>resolved</em> or <em>closed</em>), and when our team answers you are
+    emailed that answer too.
+  </p>
+  <p>
+    A request our team has not acted on yet can be taken back: press <strong>Withdraw</strong> on its
+    row under <strong>Your plan requests</strong> and confirm. Nothing was charged, so nothing is
+    refunded &mdash; the request simply leaves your list and you can ask again whenever you like.
+    Withdraw is offered only while the plan is still off your account and the request is neither
+    <em>resolved</em> nor <em>closed</em>, so once our team has answered, that row is the record.
+  </p>
+  <p>
+    While card payment is switched off, this screen also shows <strong>How to pay now</strong> when
+    our team has written payment details for you: a bank transfer, an invoice, or another way to
+    send the money, in their own words. The same words are printed in the receipt email your plan
+    request sends you, so you never have to ask how to pay. The box appears only once those details
+    have been written; when it is absent, our team will tell you how to pay when they reply.
+  </p>
+  <p>
+    Under <strong>Payment history</strong> the same screen lists every plan purchase or payment this
+    workspace has tried to make: the date, what it was for, the amount and its currency, the way it
+    was to be paid, and what happened to it. An attempt that is waiting on a payment page says so, a
+    payment that did not go through says that too, and the list is newest first. When nothing has
+    been charged yet the card says exactly that instead of showing an empty table &mdash; so if you
+    have never bought anything here, this is how you can tell.
+  </p>
+
+  <!-- FAQ -->
+  <h2 id="faq">Frequently Asked Questions</h2>
+
+  <h3>How does MissedCall Respondr receive call data?</h3>
+  <p>
+    Your VoIP provider (Telnyx) sends webhooks to MissedCall Respondr's API. Configure the webhook URL
+    from your provider's dashboard to point to
+    <code>https://app.missedcallrespondr.com/api/v1/telnyx/webhook</code>. That one public URL carries
+    both the call events (which raise the Call Log entry and run your Response Rules) and the message
+    delivery events (which set a text's Sent/Delivered times). The platform answers the call and plays
+    no prompt — it collects no keypad input — so the only thing a caller ever receives is what your
+    Response Rules arrange: a text back, or a callback for you on the Follow-ups screen.
+  </p>
+
+  <h3>Can I have multiple response rules active at the same time?</h3>
+  <p>
+    Yes. Rules are evaluated by priority. Only the <strong>first matching rule</strong> fires per call.
+    You can keep as many rules as your plan allows, each with its own trigger and priority.
+  </p>
+
+  <h3>What happens if no rule matches a call?</h3>
+  <p>
+    The call is still logged on the <a href="#call-log">Calls</a> screen, but no automated response is
+    sent. You can handle it from that row with <strong>Respond</strong>, which queues a call-back
+    follow-up.
+  </p>
+
+  <h3>Are message templates required for SMS responses?</h3>
+  <p>
+    No. Type your message straight into the rule's <strong>Message</strong> field. Message Templates
+    are a separate library you keep for reuse — a rule never references one, so copy the wording in if
+    you want to use it.
+  </p>
+
+  <h3>How do I export my call data?</h3>
+  <p>
+    Open the <strong>Calls</strong> screen and click <strong>Export CSV</strong>. The file
+    <code>call-log.csv</code> holds every call on the account — not just the 100 the table renders —
+    with the columns <code>ID, Caller, Called, When, Duration Seconds, Disposition</code>. It is the
+    same data the table lists, and CSV is the only format.
+  </p>
+
+  <h3>How do I export my contacts?</h3>
+  <p>
+    Open the <strong>Contacts</strong> screen and click <strong>Export CSV</strong>. The file
+    <code>contacts-YYYY-MM-DD.csv</code> holds every contact on the account — not just the rows the
+    table is showing — with the columns <code>Name, Phone, Email, Company, Tags, Created</code>.
+  </p>
+
+  <h3>What variable syntax does the app support?</h3>
+  <p>
+    None for the text a rule sends. Messages and templates are sent exactly as typed —
+    <code>{{name}}</code>, <code>{{company}}</code> and the other double-curly-brace forms are not
+    replaced, so write the finished sentence you want the caller to read. (The app's own account
+    emails — welcome, password reset, purchase — do fill in their own fields; that does not apply to
+    the text a Response Rule sends.)
+  </p>
+
+  <h3>How do I reset my password?</h3>
+  <p>
+    On the login page, click <strong>"Forgot Password?"</strong> and enter your email address.
+    You'll receive a password reset link. You can also change your password under
+    <strong>Profile → Change password</strong> while logged in.
+  </p>
+
+  <h3>Someone else may be signed in to my account — how do I get them out?</h3>
+  <p>
+    Open <strong>Profile</strong> and press <strong>Sign out other devices</strong> in the
+    <em>Sign out of every other device</em> card. Every other signed-in device is signed out at its
+    next action, and the screen you pressed it from stays signed in — you do not have to change your
+    password to do this. Use it when a phone was sold, a laptop was shared, or a session is one you do
+    not recognise. Changing your password also ends every other session, as it always has.
+  </p>
+
+  <h3>Is there a mobile app?</h3>
+  <p>
+    The MissedCall Respondr web app is fully responsive and works on mobile browsers.
+    There is no native iOS/Android app at this time.
+  </p>
+
+  <h3>How do I contact support?</h3>
+  <p>
+    Send us a message from <a href="https://app.missedcallrespondr.com/contact.html">our contact page</a>.
+  </p>
+
+  <!-- Referrals & Affiliates -->
+  <h2 id="affiliates">🔗 Referrals &amp; Affiliates</h2>
+  <p>
+    <strong>MissedCall Respondr does not run its own affiliate programme.</strong> The affiliate
+    system lives in FunnelSwift; this app only <em>connects</em> to it, over two outbound
+    <code>x-internal-key</code> wires, and keeps no affiliate store of its own.
+  </p>
+
+  <h3>What This App Sends</h3>
+  <table>
+    <thead><tr><th>When</th><th>What leaves this app</th></tr></thead>
+    <tbody>
+      <tr><td>An account moves to a paid plan</td><td>A plan-upgrade event, so a referred customer's upgrade can be credited to the referrer.</td></tr>
+      <tr><td>A checkout completes with referral details</td><td>A conversion event, so the referral is recorded.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What This App Does Not Do</h3>
+  <ul>
+    <li>There is no affiliate panel in this app's console — there is nothing to configure here.</li>
+    <li>No affiliate products, commission rates or prices are stored in this app. The catalogue belongs to FunnelSwift.</li>
+    <li>Nothing in this app tracks clicks or sets a cookie.</li>
+  </ul>
+
+  <h3>How To Get A Link</h3>
+  <p>
+    Ask your account manager, then create and manage your affiliate links in the FunnelSwift
+    affiliate portal. Commission rates, conversions and payouts are all handled there.
+  </p>
+
+  <h2 id="provisioning">Provisioning &mdash; a FunnelSwift tag can create a free account here</h2>
+  <p>
+    A lead captured in FunnelSwift can be tagged with <strong>MissedCall Respondr &mdash; Free</strong>.
+    When this app's provisioning switch is on, that tag creates a real, log-in-able free account for
+    the business here: its own workspace, an owner login whose password is emailed to the contact
+    address, and a plan row they can upgrade from.
+  </p>
+
+  <h3>What happens when it is ON</h3>
+  <ul>
+    <li>A tagged lead gets a real account here on the free plan &mdash; not just a contact record.</li>
+    <li>The new owner is emailed their login details by MissedCall Respondr.</li>
+    <li>Tagging the same lead twice does <strong>not</strong> create a duplicate account &mdash; the second attempt is recognised by email and ignored.</li>
+  </ul>
+
+  <h3>What happens when it is OFF</h3>
+  <p>
+    The tagged lead is still recorded as a contact, so nothing is lost, but <strong>no account is
+    created and no login email is sent</strong>.
+  </p>
+
+  <h3>Where the switch is</h3>
+  <p>
+    Operators turn it on or off in this app's admin console, under <strong>Create free accounts from
+    tags</strong>.
+  </p>
+
+  <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid #e5e7eb;">
+  <p style="text-align:center; color:#9ca3af; font-size:.82rem;">
+    MissedCall Respondr &mdash; Built by SwiftSoftware<br>
+    © 2026 SwiftSoftware. All rights reserved.
+  </p>
+
+
+
+
+<section class="navx-rel" aria-labelledby="navx-rel-h"><h2 id="navx-rel-h">Keep exploring missedcallrespondr</h2><ul><li><a href="/">Home</a></li><li><a href="/thank-you.html">Thank you</a></li><li><a href="/terms.html">Terms of Service</a></li><li><a href="/privacy.html">Privacy Policy</a></li></ul></section>
+</main>
+</div>
+
+</body>
+</html>
