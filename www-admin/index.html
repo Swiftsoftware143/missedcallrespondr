@@ -3980,7 +3980,7 @@ const PaymentProviders = () => {
       st._paySet = !!(d && d.payment_instructions_set);
       st._payErr = null;
       st.payMsg = st._paySet
-        ? 'Saved. A customer who asks to buy now sees these words, and they are printed in the receipt email.'
+        ? 'Saved. A customer who asks to buy now sees these words on the public pricing page and on their plan screen, and they are printed in the receipt email.'
         : 'Cleared. Nothing is shown to a customer who asks to buy, and the receipt email is unchanged.';
     } catch (e) { st.payMsg = 'Not saved: ' + ((e && e.message) || e); }
     st.payBusy = false; renderApp();
@@ -4058,7 +4058,7 @@ const PaymentProviders = () => {
     ${st.err ? html`<div class="text-sm mb-3 text-red-700">${st.err}</div>` : null}
     <div class="card mb-3" data-pay-instructions="1">
       <h3 class="font-bold mb-1">How a customer pays you</h3>
-      <p class="text-sm text-gray-500 mb-2">With no card provider connected, a plan request is the buying path: the customer presses a paid plan and a request is filed here for you. Write how you take payment — bank details, an invoice, any rail of your own — and the same words appear on the customer's Plan and Billing screen and in their receipt email.</p>
+      <p class="text-sm text-gray-500 mb-2">With no card provider connected, a plan request is the buying path: the customer presses a paid plan and a request is filed here for you. Write how you take payment — bank details, an invoice, any rail of your own — and the same words appear on the public pricing page (so a visitor sees them before signing up), on the customer's Plan and Billing screen, and in their receipt email.</p>
       ${st._payErr ? html`<div class="text-sm mb-2 text-red-700" data-pay-readerr="1">The saved words could not be read (${st._payErr}), so this box may not show what is published. Reload before saving.</div>` : null}
       <textarea id="pp-pay-instructions" data-pay-field="1" class="input" rows="4" placeholder="e.g. Pay by bank transfer to Acme Ltd, sort code 00-00-00, account 12345678, and put your workspace name as the reference. A person on our team switches your plan on as soon as the payment lands." value=${st.pay === null ? '' : st.pay} onInput=${e => { st.pay = e.target.value; }}></textarea>
       <div class="flex items-center gap-3 mt-2">
