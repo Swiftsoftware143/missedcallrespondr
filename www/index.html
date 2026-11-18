@@ -276,6 +276,10 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
 
     </div>
     <p data-plan-footnote style="color:#9ca3af;font-size:.85rem;line-height:1.6;margin:26px auto 0;max-width:640px">Every new account starts on Free and no card is taken. Pick a paid plan when you sign up and we are notified straight away — we email you a payment link, and your workspace moves to that plan once it is paid.</p>
+    <div id="how-to-pay" hidden style="text-align:left;background:#0b1220;border:1px solid #1f2937;border-left:4px solid #2563eb;border-radius:12px;padding:18px 20px;margin:22px auto 0;max-width:640px">
+      <h3 style="color:#f9fafb;font-size:.95rem;font-weight:800;margin:0 0 6px">How to pay for a paid plan</h3>
+      <p style="color:#d1d5db;font-size:.9rem;line-height:1.65;white-space:pre-wrap;margin:0" id="how-to-pay-text"></p>
+    </div>
   </div>
 </section>
 </div>
@@ -416,6 +420,16 @@ body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased
         var val = fmt(plan.features[s.getAttribute('data-limit')]);
         if (val === null) continue;
         s.textContent = val;
+      }
+      // HOW TO PAY (2026-11-18): the operator's own payment details, so a visitor — not only a
+      // signed-in buyer on the Plan screen — can see how this install can actually take the money
+      // while no card provider is configured. Empty or absent leaves the block hidden.
+      var pay = (d && typeof d.payment_instructions === 'string') ? d.payment_instructions.trim() : '';
+      var payBox = document.getElementById('how-to-pay');
+      var payText = document.getElementById('how-to-pay-text');
+      if (pay && payBox && payText) {
+        payText.textContent = pay;
+        payBox.hidden = false;
       }
     })
     .catch(function () { /* the authored figures stand */ });

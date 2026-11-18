@@ -96,7 +96,21 @@ pub async fn list_plans(
 pub async fn list_active_plans(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    plans_payload(state, true).await
+    // HOW TO PAY (2026-11-18): the ANONYMOUS arm also carries the operator's own payment details, so
+    // a visitor deciding to buy on the public pricing page can see how this install can actually take
+    // the money while no card provider is configured. It belongs on the public arm only — the
+    // operator's own catalogue (`list_plans`, gated) has no use for it, and the console reads the
+    // same words from `/api/v1/admin/billing-settings`. Empty/absent keeps the page exactly as it
+    // shipped; the feature switch is the operator's and this module never invents payment details.
+    let state_for_pay = state.clone();
+    let Json(mut payload) = plans_payload(state, true).await?;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "payment_instructions".to_string(),
+            json!(crate::billing_instructions::load(&state_for_pay.pool).await),
+        );
+    }
+    Ok(Json(payload))
 }
 
 async fn plans_payload(
