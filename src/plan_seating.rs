@@ -26,11 +26,22 @@ pub async fn seat_unseated_workspaces(pool: &PgPool) -> Result<u64, sqlx::Error>
     // active, zero-price row — a database whose free plan was renamed or priced out seats nothing
     // rather than inventing a tier.
     //
+    // The starter credits travel WITH the seat (measured 2026-11-18): this INSERT used to leave
+    // `credit_balance` at its default 0, and the call meter (`telnyx_handler::deduct_credit`)
+    // refuses every inbound call unless the balance is positive — so a workspace repaired onto the
+    // free plan could not answer a single call. The allowance is read from the plan's OWN `features`
+    // JSON (an absent key yields NULL, which is why the fallback is 0 and never an invented number).
+    //
     // `ON CONFLICT (tenant_id)` is the second belt: `tenant_plans` is UNIQUE on the workspace, so a
     // race with a concurrent signup loses politely instead of failing the boot.
     let written = sqlx::query(
-        r#"INSERT INTO tenant_plans (tenant_id, plan_id, status, billing_cycle, is_active)
-           SELECT t.id, p.id, 'active', 'free', true
+        r#"INSERT INTO tenant_plans
+                  (tenant_id, plan_id, status, billing_cycle, is_active, credit_balance, lifetime_credits)
+           SELECT t.id, p.id, 'active', 'free', true,
+                  COALESCE(NULLIF(p.features->>'included_credits', '')::int,
+                           NULLIF(p.features->>'starter_credits', '')::int, 0),
+                  COALESCE(NULLIF(p.features->>'included_credits', '')::int,
+                           NULLIF(p.features->>'starter_credits', '')::int, 0)
              FROM tenants t
              JOIN plans p ON p.slug = 'free' AND p.is_active = true AND p.price = 0
             WHERE NOT EXISTS (SELECT 1 FROM tenant_plans tp WHERE tp.tenant_id = t.id)

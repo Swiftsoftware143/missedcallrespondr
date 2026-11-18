@@ -510,6 +510,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000059_private_email_attachments",
             include_str!("../migrations/000059_private_email_attachments.sql"),
         ),
+        // The TOP plan must actually work (2026-11-18). Enterprise granted every ceiling as -1 but
+        // no call-credit grant, and no seating door wrote a balance, so an Enterprise workspace sat
+        // at `credit_balance = 0` and the meter hung up on every inbound call. `included_credits =
+        // -1` is the same unlimited sentinel, read through the same resolver the console uses.
+        // Idempotent (NOT EXISTS + the unique index) because this runner re-executes every file per
+        // boot, and `include_str!` of a brand-new file is also what forces the rebuild to embed it.
+        (
+            "000060_enterprise_call_credits_unlimited",
+            include_str!("../migrations/000060_enterprise_call_credits_unlimited.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

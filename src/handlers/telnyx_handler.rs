@@ -133,6 +133,18 @@ async fn tenant_id_for_number(pool: &sqlx::PgPool, called_number: &str) -> Resul
 /// there to spend, so "no credit" spends nothing (no balance move, no lifetime bump, no charge for
 /// a call we refuse) and the LAST credit is spent on the last call it can pay for.
 async fn deduct_credit(pool: &sqlx::PgPool, tenant_id: Uuid) -> Result<bool, AppError> {
+    // An UNLIMITED plan is not metered. The top plan's `feature_limits` grant every ceiling as -1
+    // (`max_calls`, `max_phone_numbers`, …) but the credit meter had no grant at all, so an
+    // Enterprise workspace seated by hand carried `credit_balance = 0` and the condition below hung
+    // up on EVERY inbound call for the customers paying the most (measured 2026-11-18: two live
+    // Enterprise tenants and one portfolio tenant at 0). Unlimited answers `true` and spends
+    // nothing, which is what "unlimited" has to mean for a meter to be honest.
+    if matches!(
+        crate::features::plan_credit_allowance(pool, tenant_id).await?,
+        Some(allowance) if allowance < 0
+    ) {
+        return Ok(true);
+    }
     let result = sqlx::query_scalar::<_, Option<i32>>(
         "UPDATE tenant_plans
          SET credit_balance = credit_balance - 1,

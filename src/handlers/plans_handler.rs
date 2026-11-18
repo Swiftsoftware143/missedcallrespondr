@@ -1399,6 +1399,36 @@ pub(crate) async fn seat_plan_for_tenant(
             .await?;
         }
     }
+    // ── The plan's included credits ─────────────────────────────────────────────────────────────
+    // Seating a plan by hand used to leave `credit_balance` at its default 0, and the call meter
+    // (`telnyx_handler::deduct_credit`) refuses every inbound call unless the balance is positive —
+    // so an operator's *Assign plan* handed the customer a plan they could not use (measured
+    // 2026-11-18: two live Enterprise workspaces and one portfolio tenant at 0). Grant what the
+    // plan declares, and NEVER lower a balance: `GREATEST` keeps a customer who bought extra
+    // credits, `lifetime_credits` only moves by the shortfall. An unlimited plan (-1) is not
+    // granted here — it is honoured at the meter, so no sentinel ever lands in a balance column.
+    match crate::features::plan_credit_allowance_by_id(&state.pool, plan_id).await {
+        Ok(Some(allowance)) if allowance > 0 => {
+            sqlx::query(
+                "UPDATE tenant_plans \
+                    SET lifetime_credits = COALESCE(lifetime_credits, 0) \
+                                         + GREATEST(0, $2 - COALESCE(credit_balance, 0)), \
+                        credit_balance = GREATEST(COALESCE(credit_balance, 0), $2), \
+                        updated_at = NOW() \
+                  WHERE tenant_id = $1",
+            )
+            .bind(tenant_id)
+            .bind(allowance)
+            .execute(&state.pool)
+            .await?;
+        }
+        Ok(_) => {}
+        // The seat itself is already written; a grant read failure must not undo the plan change.
+        Err(e) => tracing::warn!(
+            tenant_id = %tenant_id,
+            "plan seated but its credit grant could not be resolved: {e}"
+        ),
+    }
     Ok(())
 }
 

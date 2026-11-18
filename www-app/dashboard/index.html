@@ -346,6 +346,13 @@ const Overview = () => {
       // Plan & Billing. The top-up route is unchanged and still true: the operator adds credits
       // (admin_handler's manual add) — no screen of this app sells them.
       const declared = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al['included_credits']) : NaN;
+      // An UNLIMITED plan (the fleet's -1 sentinel, granted to Enterprise 2026-11-18) spends no
+      // balance, so `credits` sits at 0 while every call is answered. Without this arm the customer
+      // paying the most read "no call credits" — the alarm had to be reserved for plans that DO
+      // grant a finite number and have spent it.
+      if (isFinite(declared) && declared < 0) {
+        return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">Your plan includes unlimited call credits, so every missed call is answered.</p>`;
+      }
       if (isFinite(declared) && declared > 0) {
         return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">You have used all ${declared} call credit${declared === 1 ? '' : 's'} this plan includes, so incoming calls are being refused. Credits are added by our team, not from this screen: message us from <a href="/contact.html" style="color:#b91c1c;text-decoration:underline">our contact page</a> to top them up.</p>`;
       }

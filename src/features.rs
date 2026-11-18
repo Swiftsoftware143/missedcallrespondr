@@ -446,6 +446,61 @@ pub async fn active_plan_slug(pool: &PgPool, tenant_id: Uuid) -> Option<String> 
     .flatten()
 }
 
+/// A plan's included call credits, resolved through the SAME [`resolve_limit`] the console's
+/// `allowances` read uses, so no screen can disagree with the meter. `Some(-1)` is the fleet's
+/// unlimited sentinel; a plan that declares `included_credits` plus `bonus_credits` grants both.
+///
+/// WHY THIS EXISTS (measured 2026-11-18). Every door that seats a plan BY HAND — the operator's
+/// *Assign plan* action (`plans_handler::seat_plan_for_tenant`), the checkout/tag arm that reuses it
+/// and the boot-time repair in `plan_seating` — inserted a `tenant_plans` row without touching
+/// `credit_balance`, so the column default (0) decided whether that workspace could answer a call
+/// at all: `telnyx_handler::deduct_credit` refuses every inbound call unless `credit_balance > 0`.
+/// Three live workspaces sat exactly there (two real Enterprise customers and one portfolio tenant),
+/// and the top plan's `feature_limits` granted every ceiling as -1 but no credit grant at all. The
+/// included credits are part of what a plan IS, so seating it must deliver them — the public signup
+/// door already did.
+pub async fn plan_credit_allowance_by_id(
+    pool: &PgPool,
+    plan_id: Uuid,
+) -> Result<Option<i64>, AppError> {
+    let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM plans WHERE id = $1")
+        .bind(plan_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(slug) = slug else {
+        return Ok(None);
+    };
+    let (included, _) = resolve_limit(pool, &slug, "included_credits").await?;
+    let bonus = resolve_limit(pool, &slug, "bonus_credits")
+        .await?
+        .0
+        .unwrap_or(0)
+        .max(0);
+    Ok(match included {
+        // Unlimited is a sentinel, not a quantity: never add a bonus to it.
+        Some(i) if i < 0 => Some(i),
+        Some(i) => Some(i + bonus),
+        None => None,
+    })
+}
+
+/// The tenant's ACTIVE plan's credit allowance, `None` when the workspace holds no plan row.
+pub async fn plan_credit_allowance(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<Option<i64>, AppError> {
+    let plan_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT plan_id FROM tenant_plans WHERE tenant_id = $1 AND status = 'active' LIMIT 1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await?;
+    match plan_id {
+        Some(pid) => plan_credit_allowance_by_id(pool, pid).await,
+        None => Ok(None),
+    }
+}
+
 /// Current usage snapshot for the dashboard/me/usage endpoint.
 pub async fn get_usage_json(pool: &PgPool, tenant_id: Uuid) -> serde_json::Value {
     let contacts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contacts WHERE tenant_id = $1")
