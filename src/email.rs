@@ -904,9 +904,14 @@ pub async fn send_plan_request_operator_alert(
         "system mail is not configured, so no operator alert was sent".to_string()
     })?;
     // The two facts the operator needs to answer the row: which workspace, and who to reply to.
-    let who: Option<(String, String)> = sqlx::query_as(
+    // The third column is the SAME user's role, so the self-request suppression below can judge the
+    // requester by role rather than by a second lookup.
+    let who: Option<(String, String, String)> = sqlx::query_as(
         "SELECT t.name,
                 COALESCE((SELECT u.email FROM users u WHERE u.tenant_id = t.id \
+                          ORDER BY (u.role IN ('admin','account_owner')) DESC, u.created_at ASC \
+                          LIMIT 1), ''),
+                COALESCE((SELECT u.role FROM users u WHERE u.tenant_id = t.id \
                           ORDER BY (u.role IN ('admin','account_owner')) DESC, u.created_at ASC \
                           LIMIT 1), '') \
            FROM tenants t WHERE t.id = $1",
@@ -915,13 +920,25 @@ pub async fn send_plan_request_operator_alert(
     .fetch_optional(pool)
     .await
     .unwrap_or(None);
-    let (workspace, requester) =
-        who.unwrap_or_else(|| (format!("workspace {tenant_id}"), String::new()));
+    let (workspace, requester, requester_role) = who.unwrap_or_else(|| {
+        (
+            format!("workspace {tenant_id}"),
+            String::new(),
+            String::new(),
+        )
+    });
     let requester = if requester.trim().is_empty() {
         "(no owner address on file)"
     } else {
         requester.trim()
     };
+    // A PLATFORM ADMIN NEVER PAGES HIMSELF (2026-11-18). The operator filing a plan request from
+    // his own workspace must not mail himself an alert about it — the ticket row still lands in the
+    // queue, only the self-page is withheld.
+    if crate::auth::middleware::is_platform_admin(&requester_role) {
+        tracing::info!("operator self-request: alert suppressed");
+        return Ok(());
+    }
     // A FLEET PROBE MUST NEVER RING THE OPERATOR (kanban t_f17b5802). Requester, not route: the
     // ticket row still lands in the operator's queue, only the alert to a person is withheld.
     if let Some(reason) = crate::security::probe_addr::synthetic_requester(requester, &workspace) {
@@ -1115,6 +1132,23 @@ pub async fn send_support_request_operator_alert(
     } else {
         who.trim()
     };
+    // A PLATFORM ADMIN NEVER PAGES HIMSELF (2026-11-18). The operator filing a support request from
+    // his own account must not mail himself an alert — the ticket row still lands in the queue, only
+    // the self-page is withheld. The filer's address is the key: a platform admin's own users row
+    // carries the platform role, whatever workspace the ticket was filed under.
+    if let Some(role) = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM users WHERE lower(email) = lower($1) LIMIT 1",
+    )
+    .bind(reply_to.trim())
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None)
+    {
+        if crate::auth::middleware::is_platform_admin(&role) {
+            tracing::info!("operator self-request: alert suppressed");
+            return Ok(());
+        }
+    }
     // A FLEET PROBE MUST NEVER RING THE OPERATOR (kanban t_f17b5802). Requester, not route.
     if let Some(reason) = crate::security::probe_addr::synthetic_requester(reply_to, who) {
         tracing::info!(

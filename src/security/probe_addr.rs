@@ -50,7 +50,7 @@ pub const FLEET_HARNESS_DOMAINS: &[&str] = &[
 /// Measured 2026-10-24 on ADASwift: `probe-swsink165312@maxxspace.com` minted the workspace "Sink
 /// Probe swsink165312" with `probe_harness` NULL, so it sat in the operator's Tenants list until the
 /// residue sweep deleted it. Ported from ADASwift commit 96a16b2.
-pub const ATTRIBUTION_ONLY_DOMAINS: &[&str] = &["maxxspace.com"];
+pub const ATTRIBUTION_ONLY_DOMAINS: &[&str] = &["maxxspace.com", "fldubai.com", "euploading.com"];
 
 /// The domain that makes a SIGNUP a probe: the fleet-harness class of [`harness_domain`] plus the
 /// attribution-only class above. The mail layer must keep using [`harness_domain`], never this.
@@ -159,6 +159,11 @@ mod attribution_only_tests {
             attribution_domain("x@mail.maxxspace.com"),
             Some("maxxspace.com")
         );
+        assert_eq!(
+            attribution_domain("x@euploading.com"),
+            Some("euploading.com")
+        );
+        assert_eq!(attribution_domain("x@fldubai.com"), Some("fldubai.com"));
         // The mail layer's own predicate must NOT learn this domain.
         assert_eq!(harness_domain("probe-swsink165312@maxxspace.com"), None);
         // A real customer is untouched by either arm.
