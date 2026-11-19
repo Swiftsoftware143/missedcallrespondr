@@ -456,7 +456,8 @@ pub async fn send_reset_for_log(
         .ok();
     sqlx::query("INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)")
         .bind(user_id)
-        .bind(&token)
+        // The DIGEST, for the same reason the public flow stores it (security::reset_token).
+        .bind(crate::security::reset_token::hash(&token))
         .bind(expires_at)
         .execute(&state.pool)
         .await?;

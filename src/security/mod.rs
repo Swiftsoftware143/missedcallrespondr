@@ -6,4 +6,5 @@ pub mod email_addr;
 pub mod payment_provider_secrets;
 pub mod probe_addr;
 pub mod provider_key_crypto;
+pub mod reset_token;
 pub mod telnyx_signature;

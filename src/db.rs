@@ -520,6 +520,13 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000060_enterprise_call_credits_unlimited",
             include_str!("../migrations/000060_enterprise_call_credits_unlimited.sql"),
         ),
+        // Reset tokens are stored as a SHA-256 digest from 2026-11-19 (security::reset_token); this
+        // retires any row still holding the raw mailed value, so a token already in the clear cannot
+        // be replayed. Idempotent: a second run matches no unused non-digest row.
+        (
+            "000061_reset_tokens_hashed",
+            include_str!("../migrations/000061_reset_tokens_hashed.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

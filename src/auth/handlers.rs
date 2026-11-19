@@ -1144,7 +1144,9 @@ pub async fn forgot_password(
 
         sqlx::query("INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)")
             .bind(user.id)
-            .bind(&token)
+            // The column holds the DIGEST, never the mailed value (security::reset_token): a
+            // database read must not be replayable as a login.
+            .bind(crate::security::reset_token::hash(&token))
             .bind(expires_at)
             .execute(&state.pool)
             .await?;
@@ -1196,7 +1198,9 @@ pub async fn reset_password(
     let reset = sqlx::query(
         "SELECT id, user_id FROM password_resets WHERE token = $1 AND used = false AND expires_at > NOW()",
     )
-    .bind(&req.token)
+    // Hash what the caller presented: the row stores the digest (security::reset_token), so the
+    // mailed link is the ONLY value that can match it.
+    .bind(crate::security::reset_token::hash(&req.token))
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::BadRequest("Invalid or expired reset token".into()))?;
