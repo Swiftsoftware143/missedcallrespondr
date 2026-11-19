@@ -326,6 +326,15 @@ pub struct MeResponse {
     /// `/api/v1/auth/avatar/<id>` when the account has uploaded a picture, absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
+    /// WHICH workspace THIS SESSION is in — the `wsid` the switcher re-mints
+    /// (`POST /api/v1/workspaces/:id/switch`). Cron `default`, 2026-11-19: the workspaces
+    /// API could move a session between workspaces but `/auth/me` never said where the
+    /// caller stood, so a console could list workspaces and had no way to mark the one the
+    /// session is actually in. Absent for a token minted before the switcher shipped (the
+    /// session is then on the account's default workspace), which is why the screen falls
+    /// back to the `is_default` row rather than inventing a position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

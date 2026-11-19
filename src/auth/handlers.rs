@@ -539,6 +539,20 @@ pub async fn me(
         plan_slug,
         plan_cycle,
         avatar_url: avatar_stamp.map(|v| format!("/api/v1/auth/avatar/{}?v={v}", claims.sub)),
+        // WHERE THIS SESSION STANDS (cron `default`, 2026-11-19). The switcher re-mints the token
+        // with `wsid`; a token minted before it existed carries none, and that session is on the
+        // account's DEFAULT workspace — so the fallback is the `is_default` row, read through the
+        // same tenant scope, never a guessed id.
+        workspace_id: match claims.wsid.clone() {
+            Some(w) => Some(w),
+            None => sqlx::query_scalar::<_, uuid::Uuid>(
+                "SELECT id FROM workspaces WHERE tenant_id = $1 AND is_default LIMIT 1",
+            )
+            .bind(tenant_id)
+            .fetch_optional(&state.pool)
+            .await?
+            .map(|w| w.to_string()),
+        },
     }))
 }
 

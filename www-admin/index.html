@@ -36,6 +36,7 @@ window.appGuidePages = {
   // screens are real (Your Team reads GET /team/members and posts /team/invite; Plan & Pricing reads
   // /plans + /auth/me and posts /checkout/create). Text describes what the screens actually do,
   // including that adding a teammate emails them their own password and reports whether it left.
+  "workspaces": { title: "Workspaces", desc: "The named spaces inside your business. Switch between them without signing in again: the session is re-issued for the workspace you pick, and the screen reloads so every panel shows that workspace. Your account always keeps at least one workspace, and the one you are signed into cannot be deleted — switch away first. The owner or a company admin can rename a workspace, choose which one a new sign-in opens (Make default) and delete one; a teammate can switch and add. Add a workspace by giving it a name in the box at the bottom; if your plan includes a set number of workspaces, adding past it tells you to upgrade rather than failing silently.", actions: ["See every workspace on the account and which one you are signed into", "Switch to another workspace", "Add a workspace by name", "Rename it, make it the default, or delete it"] },
   "team": { title: "Your Team", desc: "Everyone who can sign in to this workspace, and how many seats your plan includes. The owner is the login the workspace was created with and cannot be removed here. Adding a teammate creates their own login and emails them a password, so nobody shares one; their role is Teammate, which means they answer calls and work the queue but cannot add or remove people. The message after you add someone says whether that password email actually left.", actions: ["See how many seats are used and what your plan allows", "Add a teammate with their name and email", "Remove someone's access"] },
   "my-plan": { title: "Plan & Pricing", desc: "The plan this workspace is on, the plans you can move to, and the limits and features each one includes. Pressing a plan records the switch. When this install has no payment provider connected, nothing is charged: your press becomes a request in the operator's Plan Requests queue, and the operator switches the workspace over.", actions: ["See the plan this workspace is on", "Compare what each plan includes", "Press the plan you want to move to"] },
   "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data. The Plan picker on a row moves that workspace onto a plan: with no payment provider connected this is the purchase itself, so the workspace owner is emailed which plan they are now on and that nothing was charged — the line above the table says whether that email went out, or that they were already on that plan and nobody was mailed.", actions: ["Search for a workspace", "Choose a plan in a row's Plan picker to move the workspace onto it", "Select rows and delete the selected workspaces"] },
@@ -611,8 +612,46 @@ const Dashboard = () => {
     && isFinite(Number(st.total_responses));
   const fresh = hasCounts && Number(st.total_rules) === 0 && Number(st.total_responses) === 0;
   const go = (id) => { S.view = id; renderApp(); };
+  // THE TOP-BAR SWITCHER (cron `default`, 2026-11-19). The admin guide has described a workspace
+  // switcher at the top of this screen since the workspaces module shipped, and there was no such
+  // control: the customer could not move between workspaces at all. These two reads are the RAW
+  // getters, because a failure here must not paint the shell's "this screen could not load" banner
+  // over a dashboard whose own figures arrived fine — a missing switcher simply renders nothing.
+  if (!st._wsLoaded) {
+    st._wsLoaded = true;
+    Promise.all([_get('/workspaces').catch(() => null), _get('/auth/me').catch(() => null)])
+      .then(([w, me]) => {
+        st.wsList = (w && Array.isArray(w.workspaces)) ? w.workspaces : null;
+        st.wsCurrent = (me && me.workspace_id) || null;
+        renderApp();
+      });
+  }
+  const wsSwitch = async (id) => {
+    if (!id) return;
+    try {
+      const r = await API.post('/workspaces/' + id + '/switch', {});
+      if (!r || !r.token) throw new Error('The server did not return a session for that workspace.');
+      API.setAuth(r.token, API.user);
+      location.reload();
+    } catch (e) { alert('Could not switch workspace: ' + (e.message || 'unknown error')); }
+  };
+  const wsCurrentName = (() => {
+    const l = st.wsList || [];
+    const c = l.filter(w => String(w.id) === String(st.wsCurrent))[0];
+    if (c) return c.name;
+    const d = l.filter(w => w.is_default)[0];
+    return d ? d.name : '';
+  })();
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Dashboard</h2>
+    ${(st.wsList && st.wsList.length > 1) ? html`<div data-ws-switcher="1" class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      <span style="font-size:13px;color:#64748b">Workspace</span>
+      <select class="input" data-ws-select="1" style="max-width:260px;padding:6px 10px" onChange=${e => wsSwitch(e.target.value)}>
+        ${st.wsList.map(w => html`<option value=${w.id} selected=${String(w.id) === String(st.wsCurrent)}>${w.name}${w.is_default ? ' (default)' : ''}</option>`)}
+      </select>
+      <button type="button" class="btn btn-outline btn-sm" data-ws-manage="1" onClick=${() => go('workspaces')}>Manage workspaces</button>
+      <span style="font-size:12px;color:#94a3b8">You are signed in to ${wsCurrentName || 'this workspace'} — picking another re-opens every screen on it.</span>
+    </div>` : null}
     ${fresh && html`<div class="card" data-console="get-set-up" style="border-left:4px solid #2563eb;margin-bottom:16px">
       <div style="display:flex;gap:12px;align-items:flex-start">
         <div style="font-size:26px;line-height:1">🚀</div>
@@ -3144,6 +3183,10 @@ const App = () => {
     // had no way to remove one — clearing a probe/junk workspace meant a psql session.
     { id: 'tenants', label: 'Tenants', icon: '🗂️', adminOnly: true },
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+    // Workspaces (cron `default`, 2026-11-19): `src/workspaces/` served list / create / rename /
+    // set-default / switch / delete with no screen behind any of them. Visible to every signed-in
+    // user (a teammate may switch and add); the management buttons follow the server's own role rule.
+    { id: 'workspaces', label: 'Workspaces', icon: '🗃️' },
     { id: 'portfolio', label: 'Portfolio', icon: '🏢' },
     { id: 'rules', label: 'Response Rules', icon: '⚙️' },
     { id: 'templates', label: 'Templates', icon: '📋' },
@@ -4126,6 +4169,130 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
   </div>`;
 };
 
+  // ---- WORKSPACES (cron `default`, 2026-11-19) ----
+  // A backend route with no UI is a defect. `src/workspaces/` has served the full set since
+  // 2026-10-31 — GET /api/v1/workspaces (list), POST (create, plan-gated on `max_workspaces`),
+  // PATCH /:id (rename), POST /:id/default, POST /:id/switch (re-mints the session token with
+  // `wsid`) and DELETE /:id — and NOTHING in this console reached any of them, so a customer with
+  // more than one workspace could neither see nor switch between them. This is that screen.
+  //
+  // Everything true on the screen comes from the answer, never from the panel:
+  //  * `workspace_id` on /auth/me is the workspace THIS session is in (the switcher's own `wsid`,
+  //    falling back to the account's default row for a token minted before the switcher shipped);
+  //  * the refusal texts (delete the workspace you are in, delete the last one, portfolio
+  //    businesses, plan ceiling) are the SERVER's sentences, shown verbatim;
+  //  * `can_manage` is derived from this session's role exactly as the server derives it —
+  //    owner / company admin may rename, re-default and delete; a teammate may only switch and add.
+  const Workspaces = () => {
+    const st = viewState('workspaces', { _loaded: false, list: null, current: null, me: null, name: '', busy: false, msg: null });
+    const load = async () => {
+      try {
+        const d = await API.get('/workspaces');
+        st.list = Array.isArray(d.workspaces) ? d.workspaces : [];
+        try { const me = await API.get('/auth/me'); st.me = me; st.current = me.workspace_id || null; } catch (e) { /* the list still renders */ }
+      } catch (e) { st.msg = { ok: false, text: e.message || 'Could not load your workspaces.' }; }
+      st.busy = false;
+      renderApp();
+    };
+    if (!st._loaded) { st._loaded = true; load(); }
+    const role = String((st.me && st.me.role) || (API.user && API.user.role) || '');
+    const canManage = ['account_owner', 'company_admin', 'admin', 'super_admin', 'agency_admin'].indexOf(role) >= 0;
+    const currentName = (() => {
+      const c = (st.list || []).filter(w => String(w.id) === String(st.current))[0];
+      if (c) return c.name;
+      const d = (st.list || []).filter(w => w.is_default)[0];
+      return d ? d.name : '';
+    })();
+    const add = async () => {
+      const name = (st.name || '').trim();
+      if (!name) { st.msg = { ok: false, text: 'Give the new workspace a name first.' }; renderApp(); return; }
+      st.busy = true; st.msg = null; renderApp();
+      try {
+        const r = await API.post('/workspaces', { name: name });
+        st.name = '';
+        st.msg = { ok: true, text: 'Created "' + ((r && r.workspace && r.workspace.name) || name) + '". Switch to it when you are ready — nothing already on screen changes until you do.' };
+      } catch (e) { st.msg = { ok: false, text: e.message || 'Could not create the workspace.' }; }
+      await load();
+    };
+    const rename = async (w) => {
+      const next = prompt('New name for this workspace:', w.name);
+      if (next === null) return;
+      const name = String(next).trim();
+      if (!name) { st.msg = { ok: false, text: 'A workspace needs a name.' }; renderApp(); return; }
+      st.busy = true; renderApp();
+      try { await API.put('/workspaces/' + w.id, { name: name }); st.msg = { ok: true, text: 'Renamed to "' + name + '".' }; }
+      catch (e) { st.msg = { ok: false, text: e.message || 'Could not rename the workspace.' }; }
+      await load();
+    };
+    const makeDefault = async (w) => {
+      st.busy = true; renderApp();
+      try { await API.post('/workspaces/' + w.id + '/default', {}); st.msg = { ok: true, text: '"' + w.name + '" is now your default workspace — the one a new sign-in opens.' }; }
+      catch (e) { st.msg = { ok: false, text: e.message || 'Could not change the default workspace.' }; }
+      await load();
+    };
+    const switchTo = async (w) => {
+      st.busy = true; st.msg = null; renderApp();
+      try {
+        const r = await API.post('/workspaces/' + w.id + '/switch', {});
+        if (!r || !r.token) throw new Error('The server did not return a session for that workspace.');
+        // The switcher re-mints the SAME session with the new workspace; the console reloads so
+        // every screen re-reads under it (nothing is left painting the previous workspace).
+        API.setAuth(r.token, API.user);
+        try { sessionStorage.setItem('mc_ws', JSON.stringify((r && r.workspace) || w)); } catch (e) { /* storage can be blocked */ }
+        location.reload();
+      } catch (e) {
+        st.busy = false; st.msg = { ok: false, text: e.message || 'Could not switch workspace.' }; renderApp();
+      }
+    };
+    const remove = async (w) => {
+      if (!confirm('Delete the workspace "' + w.name + '"? This cannot be undone. Your account always keeps at least one workspace.')) return;
+      st.busy = true; renderApp();
+      try { await API.del('/workspaces/' + w.id); st.msg = { ok: true, text: 'Deleted "' + w.name + '".' }; }
+      catch (e) { st.msg = { ok: false, text: e.message || 'Could not delete the workspace.' }; }
+      await load();
+    };
+    const rows = st.list || [];
+    return html`<div>
+      <div class="flex items-center justify-between mb-2" style="gap:12px;flex-wrap:wrap">
+        <h2 class="text-xl font-bold">Workspaces</h2>
+        ${currentName ? html`<span class="badge badge-blue" id="ws-current">You are in: ${currentName}</span>` : null}
+      </div>
+      <p class="text-sm text-gray-500 mb-4">A workspace is a named space inside your business. Switch between them without signing in again; the one you are signed into cannot be deleted, and every account keeps at least one.</p>
+      ${st.msg ? html`<div class="card" id="ws-msg" style=${'border-left:4px solid ' + (st.msg.ok ? '#059669' : '#dc2626') + ';color:' + (st.msg.ok ? '#065f46' : '#991b1b') + ';font-size:14px'}>${st.msg.text}</div>` : null}
+      ${st.list === null ? html`<div class="text-sm text-gray-400 py-4">Loading…</div>` : null}
+      ${st.list && !st.list.length ? html`<div class="card p-4 text-sm text-gray-600">No workspaces yet — create the first one below.</div>` : null}
+      ${rows.length ? html`<div class="card"><table class="table" id="ws-table">
+        <thead><tr><th>Name</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody>
+          ${rows.map(w => {
+            const isCurrent = String(w.id) === String(st.current);
+            return html`<tr data-ws-row=${w.id} data-ws-name=${w.name}>
+              <td style="font-weight:600">${w.name}</td>
+              <td>
+                ${isCurrent ? html`<span class="badge badge-green" data-ws-current="1">signed in here</span>` : null}
+                ${w.is_default ? html`<span class="badge badge-blue" data-ws-default="1" style="margin-left:6px">default</span>` : null}
+              </td>
+              <td style="text-align:right;white-space:nowrap">
+                ${!isCurrent ? html`<button class="btn btn-sm" data-ws-switch=${w.id} disabled=${st.busy} onClick=${() => switchTo(w)}>Switch</button>` : null}
+                ${canManage ? html`<button class="btn btn-ghost btn-sm" data-ws-rename=${w.id} disabled=${st.busy} onClick=${() => rename(w)} style="margin-left:6px">Rename</button>` : null}
+                ${canManage && !w.is_default ? html`<button class="btn btn-ghost btn-sm" data-ws-default-btn=${w.id} disabled=${st.busy} onClick=${() => makeDefault(w)} style="margin-left:6px">Make default</button>` : null}
+                ${canManage ? html`<button class="btn btn-ghost btn-sm text-red-500" data-ws-delete=${w.id} disabled=${st.busy} onClick=${() => remove(w)} style="margin-left:6px">Delete</button>` : null}
+              </td>
+            </tr>`;
+          })}
+        </tbody>
+      </table></div>` : null}
+      <div class="card mt-4">
+        <h3 class="font-semibold mb-2" style="font-size:15px">Add a workspace</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input class="input" id="ws-new-name" data-ws-new="1" style="max-width:320px" placeholder="e.g. Front desk, Downtown branch" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} />
+          <button class="btn" data-ws-add="1" disabled=${st.busy} onClick=${add}>Add workspace</button>
+        </div>
+        <p class="text-xs text-gray-500" style="margin-top:10px">If your plan includes a set number of workspaces, adding past it tells you to upgrade — the ceiling comes from your plan, not from this screen.</p>
+      </div>
+    </div>`;
+  };
+
   // ---- YOUR TEAM (2026-11-07) ----
   // The workspace's people, and the door that adds one. The backend has been complete since
   // 2026-10-31: GET /api/v1/team/members answers the people plus the seat allowance,
@@ -4490,7 +4657,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback, 'api-keys': ApiKeys };
+  const views = { dashboard: Dashboard, workspaces: Workspaces, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback, 'api-keys': ApiKeys };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
