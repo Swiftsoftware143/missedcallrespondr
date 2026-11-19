@@ -3241,6 +3241,11 @@ const App = () => {
     // be recovered with a psql session. David's standing rule: View / Copy / Regenerate, on screen.
     { id: 'api-keys', label: 'API Keys', icon: '🔑' },
     { id: 'team', label: 'Your Team', icon: '👥' },
+    // MCP (2026-11-19) — the fleet slot directly above the account entry
+    // (docs/fleet-mcp-nav-convention.md: anchor rule 2, "Profile/account settings"). The fleet MCP
+    // server serves this app's data and answers 21 missedcall* tools for a workspace key, but this
+    // console had no screen naming the endpoint or handing over a key — a capability with no UI.
+    { id: 'mcp', label: 'MCP', icon: '🔌' },
     { id: 'account', label: 'My Account', icon: '👤' }
   ];
 
@@ -3701,6 +3706,113 @@ const App = () => {
     company_admin:'Company admin', team_member:'Team member', member:'Member', user:'Member',
     viewer:'Viewer' };
   const roleLabel = r => { const s = String(r == null ? '' : r).trim(); if (!s) return '—'; return ROLE_LABELS[s.toLowerCase()] || s; };
+  // ── MCP (2026-11-19) — the fleet slot directly above My Account (docs/fleet-mcp-nav-convention.md).
+  // PROVEN LIVE the day it shipped: POST tools/list to the fleet MCP server with a MissedCall
+  // workspace key answered 200 and named all seven family SUMMARY/SEARCH pairs below. The key block
+  // reads the SAME GET /api/v1/api-keys the API Keys screen reads; Reveal/Copy/Regenerate call this
+  // app's existing routes (password-gated reveal, atomic regenerate). `<family>_list_tenants` is
+  // admin-only and is deliberately NOT offered here — a workspace credential can never use it.
+  const MCP_ENDPOINT = 'https://hooks.swiftsoftware.net/mcp';
+  const MCP_TOOL_SPECS = [
+    ['missedcallrespondr', 'leads: name, email, phone, status'],
+    ['missedcallrespondr_contacts', 'contacts: name, email, phone, company'],
+    ['missedcallrespondr_tickets', 'tickets: subject, requester, priority, status'],
+    ['missedcallrespondr_ticket_messages', 'ticket messages: sender, subject, body, received'],
+    ['missedcallrespondr_workspaces', 'workspaces: name, default flag'],
+    ['missedcallrespondr_activity', 'activity: action, entity type'],
+    ['missedcallrespondr_plans', 'your plan: status, plan, billing cycle'],
+  ];
+  const MCP_CONFIG_TEXT = JSON.stringify({
+    mcpServers: { missedcallrespondr: { url: MCP_ENDPOINT, headers: { Authorization: 'Bearer YOUR_API_KEY' } } },
+  }, null, 2);
+  const mcpCopy = (t) => {
+    try {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(t).then(() => alert('Copied to the clipboard.'), () => alert('Select the text and copy it.'));
+        return;
+      }
+    } catch (e) { /* fall through to the manual path */ }
+    alert('Select the text and copy it.');
+  };
+  const Mcp = () => {
+    const st = viewState('mcp', { keys: [], revealed: null, revealedId: null, loaded: false });
+    const load = async () => {
+      try { const r = await API.get('/api-keys'); st.keys = Array.isArray(r) ? r : ((r && r.api_keys) || []); }
+      catch (e) { st.keys = []; }
+      st.loaded = true; renderApp();
+    };
+    if (!st._loaded) { st._loaded = true; load(); }
+    const live = (st.keys || []).filter(k => !k.revoked_at);
+    const k = live.length ? live[0] : null;
+    const reveal = async (copyOnly) => {
+      if (!k) return;
+      const pw = prompt('Enter YOUR account password to show this key. Every view is recorded.');
+      if (!pw) return;
+      try {
+        const r = await API.post('/api-keys/' + k.id + '/reveal', { password: pw });
+        if (copyOnly) { mcpCopy(r.token); return; }
+        st.revealedId = k.id; st.revealed = r.token; renderApp();
+      } catch (e) { alert('Could not show the key: ' + (e.message || 'unknown error')); }
+    };
+    const regen = async () => {
+      if (!k) return;
+      if (!confirm('Regenerate this key? The current key stops working immediately, so anything already wired up with it — including any connected MCP client — stops until you paste the new one in.')) return;
+      try {
+        const r = await API.post('/api-keys/' + k.id + '/regenerate', {});
+        st.revealedId = k.id; st.revealed = r.token; await load();
+      } catch (e) { alert('Could not regenerate the key: ' + (e.message || 'unknown error')); }
+    };
+    return html`<div style="max-width:52rem">
+      <h2 class="text-xl font-bold mb-1">MCP — connect your AI tools</h2>
+      <p class="text-sm text-gray-500 mb-5">Point any MCP client (Claude Code, Cursor, Hermes, or your own agent) at the endpoint below and it can read this workspace's MissedCall data. Read-only: every tool is a SELECT scoped to this workspace.</p>
+
+      <div class="card">
+        <h3 class="font-semibold text-gray-700 mb-1">Endpoint</h3>
+        <div class="flex items-center gap-2 flex-wrap">
+          <code style="background:#f1f5f9;padding:6px 10px;border-radius:6px;font-size:13px">${MCP_ENDPOINT}</code>
+          <button class="btn btn-sm btn-outline" onClick=${() => mcpCopy(MCP_ENDPOINT)}>Copy</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold text-gray-700 mb-1">Your key</h3>
+        <p class="text-xs text-gray-500 mb-3">The MCP server accepts this workspace's API key as a Bearer token. It is listed by prefix only — the secret appears when you Reveal or Regenerate, and every view is recorded.</p>
+        ${!st.loaded ? html`<p class="text-sm text-gray-400">Loading your key…</p>`
+          : (!k ? html`<p class="text-sm text-gray-500">No active API key on this workspace. Create one on the API Keys screen, then come back here to connect an MCP client.</p>`
+          : html`<div>
+            <div class="flex items-center justify-between gap-2 flex-wrap" style="padding:6px 0">
+              <span class="text-sm"><strong>${k.name || 'API key'}</strong> <code class="font-mono" style="font-size:11px;color:#6366f1">${k.key_prefix}…</code></span>
+              <span style="white-space:nowrap">
+                <button class="btn btn-sm btn-outline" onClick=${() => reveal(false)}>Reveal</button>
+                <button class="btn btn-sm btn-outline" style="margin-left:6px" onClick=${() => reveal(true)}>Copy</button>
+                <button class="btn btn-sm btn-outline" style="margin-left:6px;color:#b45309" onClick=${regen}>Regenerate</button>
+              </span>
+            </div>
+            ${(st.revealed && st.revealedId === k.id) ? html`<div class="flex items-center gap-2 flex-wrap" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px;margin-top:8px">
+              <input class="input font-mono" style="flex:1;min-width:220px;font-size:12px" readonly value=${st.revealed} onFocus=${e => e.target.select()} />
+              <button class="btn btn-sm" onClick=${() => mcpCopy(st.revealed)}>Copy key</button>
+            </div>` : null}
+          </div>`)}
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold text-gray-700 mb-1">What it can read</h3>
+        <p class="text-xs text-gray-500 mb-3">The real tool names this app exposes to a workspace credential — each scoped to this workspace.</p>
+        <ul style="font-size:13px;color:#334155;line-height:1.9;padding-left:18px;margin:0">
+          ${MCP_TOOL_SPECS.map(([name, desc]) => html`<li><code>${name}_summary</code> / <code>${name}_search</code> — ${desc}</li>`)}
+        </ul>
+        <p class="text-xs text-gray-400" style="margin:10px 0 0">There is no write tool and no free-form SQL door. Operator-wide tools are refused for a workspace credential.</p>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold text-gray-700 mb-1">Connect</h3>
+        <p class="text-xs text-gray-500 mb-3">Paste this into your MCP client config (Claude Desktop / Cursor). Replace YOUR_API_KEY with this workspace's key.</p>
+        <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;font-size:11px;overflow-x:auto;margin:0">${MCP_CONFIG_TEXT}</pre>
+        <button class="btn btn-sm btn-outline" style="margin-top:8px" onClick=${() => mcpCopy(MCP_CONFIG_TEXT)}>Copy config</button>
+      </div>
+    </div>`;
+  };
+
   const Account = () => {
     const [me, setMe] = useState(null);
     const [err, setErr] = useState(null);
@@ -4672,7 +4784,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     </div>`;
   };
 
-  const views = { dashboard: Dashboard, workspaces: Workspaces, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, 'payment-providers': PaymentProviders, feedback: Feedback, 'api-keys': ApiKeys };
+  const views = { dashboard: Dashboard, workspaces: Workspaces, portfolio: Portfolio, rules: ResponseRules, templates: Templates, contacts: Contacts, 'site-config': SiteConfig, leads: Leads, deals: Deals, 'follow-ups': FollowUps, campaigns: Campaigns, tickets: Tickets, clients: Clients, calendar: CalendarView, lists: Lists, core: CoreIntegration, branding: Branding, 'email-templates': EmailTemplates, 'email-provider': EmailProviderScreen, 'ops': OpsConsole, plans: Plans, 'my-plan': MyPlan, provisioning: Provisioning, tenants: TenantsScreen, team: Team, account: Account, mcp: Mcp, 'payment-providers': PaymentProviders, feedback: Feedback, 'api-keys': ApiKeys };
   const CurrentView = views[S.view] || Dashboard;
 
   return html`<div class="flex w-full">
