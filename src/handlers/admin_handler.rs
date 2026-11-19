@@ -260,7 +260,17 @@ pub async fn impersonate(
         pwd_minted: false,
         exp: now + 900,
         iat: now,
-        wsid: None,
+        // An impersonation session lands in the target account's default workspace, so the operator
+        // sees exactly what a sign-in there would open (cron `default`, 2026-11-19).
+        wsid: sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM workspaces WHERE tenant_id = $1 ORDER BY is_default DESC, created_at LIMIT 1",
+        )
+        .bind(target_tenant_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|w| w.to_string()),
     };
 
     let token = create_token(&imp_claims, &state.config.jwt_secret)

@@ -94,7 +94,18 @@ const API = (() => {
   let user = JSON.parse(sessionStorage.getItem('mc_user') || 'null');
 
   const headers = () => ({ 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) });
-  const handle = async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || d.message || 'Request failed'); return d; };
+  // A REFUSAL MUST COME BACK AS ITS OWN SENTENCE, NOT AS A JSON PARSE ERROR (2026-11-19). `await
+  // r.json()` throws "Unexpected end of JSON input" on an empty body, so a 405 / a proxy's plain-text
+  // error reached the customer as a parser message instead of what the server said. Read the text
+  // first and fall back to the status, so every screen's error line is the server's own words.
+  const handle = async (r) => {
+    let txt = '';
+    try { txt = await r.text(); } catch (e) { txt = ''; }
+    let d = {};
+    try { d = txt ? JSON.parse(txt) : {}; } catch (e) { d = { error: txt.slice(0, 200) || ('Request failed (' + r.status + ')') }; }
+    if (!r.ok) throw new Error(d.error || d.message || ('Request failed (' + r.status + ')'));
+    return d;
+  };
   const login = (e, p) => fetch(base + '/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:e,password:p}) }).then(handle);
   // A 401 on a request that CARRIED a session means the session the server knows about is gone: the
   // panel's 7-day token has expired or was revoked. Ending it HERE is the only way this console gets
@@ -116,6 +127,9 @@ const API = (() => {
   const get = (p) => send(p, {headers:headers()}).catch(e => { console.error(e); throw e; });
   const post = (p, b) => send(p, {method:'POST', headers:headers(), body:JSON.stringify(b)});
   const put = (p, b) => send(p, {method:'PUT', headers:headers(), body:JSON.stringify(b)});
+  // PATCH is a distinct method, not a spelling of PUT: `/api/v1/workspaces/:id` answers PATCH and a
+  // PUT there is a 405 (measured 2026-11-19 — the rename button sent PUT and the row never moved).
+  const patch = (p, b) => send(p, {method:'PATCH', headers:headers(), body:JSON.stringify(b)});
   const del = (p) => send(p, {method:'DELETE', headers:headers()});
   // A CSV export cannot go through `handle` — it parses JSON, and this response is a file. Same 401
   // discipline as `send`: a 401 on a request that CARRIED a session ends the panel's session instead
@@ -131,7 +145,7 @@ const API = (() => {
     return { blob: await r.blob(), name: m ? m[1] : 'export.csv' };
   };
   return {
-    login, get, post, put, del, download,
+    login, get, post, put, patch, del, download,
     get token(){ return token; },
     get user(){ return user; },
     setAuth(t, u){ token = t; user = u; sessionStorage.setItem('mc_token', t); sessionStorage.setItem('mc_user', JSON.stringify(u)); },
@@ -140,7 +154,7 @@ const API = (() => {
 })();
 
 const S = { view: 'dashboard', loading: false, error: null, views: {}, loadError: null, followUpDue: 0, followUpLoaded: false, ticketOpen: 0, ticketLoaded: false };
-const _get = API.get, _post = API.post, _put = API.put, _del = API.del;
+const _get = API.get, _post = API.post, _put = API.put, _patch = API.patch, _del = API.del;
 // A FAILED READ MUST NEVER READ AS AN EMPTY SCREEN (2026-10-29). Every list view loads through
 // API.get, and fifteen of them caught the failure with `console.error(e)` only — so an API 500 (or a
 // 403 the browser never surfaced) left the operator reading "No clients yet." / "No calendar events
@@ -159,6 +173,7 @@ API.get = async (p) => _get(p)
   });
 API.post = async (p, b) => _post(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
 API.put = async (p, b) => _put(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
+API.patch = async (p, b) => _patch(p, b).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
 API.del = async (p) => _del(p).catch(e => { if (e.message && e.message.indexOf("Upgrade")>=0) showUpgradePrompt(e.message); throw e; });
 
 const viewState = (name, defaults = {}) => { if (!S.views[name]) S.views[name] = Object.assign({}, defaults); return S.views[name]; };
@@ -4220,7 +4235,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       const name = String(next).trim();
       if (!name) { st.msg = { ok: false, text: 'A workspace needs a name.' }; renderApp(); return; }
       st.busy = true; renderApp();
-      try { await API.put('/workspaces/' + w.id, { name: name }); st.msg = { ok: true, text: 'Renamed to "' + name + '".' }; }
+      try { await API.patch('/workspaces/' + w.id, { name: name }); st.msg = { ok: true, text: 'Renamed to "' + name + '".' }; }
       catch (e) { st.msg = { ok: false, text: e.message || 'Could not rename the workspace.' }; }
       await load();
     };

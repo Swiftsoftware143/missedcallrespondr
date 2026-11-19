@@ -13,6 +13,36 @@ use serde_json::Value;
 use sqlx::Row;
 
 use super::models::{create_token, hash_password, verify_password};
+
+/// The workspace a session OPENS IN, and the one it KEEPS until it is switched (cron `default`,
+/// 2026-11-19). Every mint used to leave `wsid` empty, so `/auth/me` had no idea which workspace the
+/// caller was in and the console could not mark a row. A fresh sign-in opens the account's DEFAULT
+/// workspace (`is_default`, else the oldest row); a re-mint inside an existing session KEEPS the
+/// workspace it is already in. `None` only when the account holds no workspace at all.
+async fn default_workspace_id(pool: &sqlx::PgPool, tenant: uuid::Uuid) -> Option<String> {
+    sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT id FROM workspaces WHERE tenant_id = $1 ORDER BY is_default DESC, created_at LIMIT 1",
+    )
+    .bind(tenant)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|w| w.to_string())
+}
+
+/// The wsid a RE-MINT should carry: the session's own workspace when it has one, otherwise the
+/// account's default. Used by every non-sign-in mint so a token refresh never moves the customer.
+async fn keep_or_default_wsid(
+    pool: &sqlx::PgPool,
+    tenant: uuid::Uuid,
+    cur: Option<&str>,
+) -> Option<String> {
+    match cur {
+        Some(w) => Some(w.to_string()),
+        None => default_workspace_id(pool, tenant).await,
+    }
+}
 use crate::{
     config::{
         AuthResponse, ChangePasswordRequest, Claims, ForgotPasswordRequest, InitialPasswordRequest,
@@ -224,7 +254,9 @@ pub async fn register(
         pwd_minted: minted_password && !credentials_emailed,
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
-        wsid: None,
+        // The new account's default workspace (migration 000051 creates it with the tenant), so the
+        // first session already knows where it stands.
+        wsid: default_workspace_id(&state.pool, ids.account_id).await,
     };
 
     let token = create_token(&claims, &state.config.jwt_secret)
@@ -382,7 +414,8 @@ pub async fn login(
         pwd_minted: false,
         exp: (chrono::Utc::now().timestamp() + 86400 * 7) as usize,
         iat: chrono::Utc::now().timestamp() as usize,
-        wsid: None,
+        // A sign-in opens the account's DEFAULT workspace (the switcher can move it afterwards).
+        wsid: default_workspace_id(&state.pool, user.tenant_id).await,
     };
 
     let token = create_token(&claims, &state.config.jwt_secret)
@@ -620,7 +653,8 @@ pub async fn change_password(
         pwd_minted: false,
         exp: valid_from as usize + 86400 * 7,
         iat: valid_from as usize,
-        wsid: None,
+        // A re-mint KEEPS the workspace the session was already in (never jumps to the default).
+        wsid: keep_or_default_wsid(&state.pool, user.tenant_id, claims.wsid.as_deref()).await,
     };
     let token = create_token(&fresh, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -677,7 +711,8 @@ pub async fn logout_all(
         pwd_minted: false,
         exp: now + 86400 * 7,
         iat: now,
-        wsid: None,
+        // This device stays in the workspace it was working in; the others simply die.
+        wsid: keep_or_default_wsid(&state.pool, user.tenant_id, claims.wsid.as_deref()).await,
     };
     let token = create_token(&fresh, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
