@@ -916,29 +916,70 @@ pub async fn update(
         && existing.plan_applied_at.is_none()
     {
         if let (Some(slug), Some(tenant_id)) = (existing.plan_slug.as_deref(), existing.tenant_id) {
-            let plan: Option<(Uuid, String)> =
-                sqlx::query_as("SELECT id, name FROM plans WHERE slug = $1 AND is_active = true")
-                    .bind(slug)
-                    .fetch_optional(&state.pool)
-                    .await?;
+            // The requested tier's PRICE travels with it (2026-11-19): the seat below is refused
+            // when the workspace already holds a dearer plan, and tiers are compared on the
+            // catalogue price every plan carries.
+            let plan: Option<(Uuid, String, f64)> = sqlx::query_as(
+                "SELECT id, name, COALESCE(price, 0)::float8 FROM plans WHERE slug = $1 AND is_active = true",
+            )
+            .bind(slug)
+            .fetch_optional(&state.pool)
+            .await?;
             match plan {
-                Some((plan_id, plan_name)) => {
-                    crate::handlers::plans_handler::seat_plan_for_tenant(
-                        &state, tenant_id, plan_id, None,
+                Some((plan_id, plan_name, requested_price)) => {
+                    // The workspace's CURRENT tier, slug and catalogue price together. A workspace
+                    // with no `tenant_plans` row reads as "nothing held" (price 0.0) and is seated,
+                    // exactly as it was before this arm.
+                    let current: Option<(String, f64)> = sqlx::query_as(
+                        "SELECT p.slug, COALESCE(p.price, 0)::float8 FROM tenant_plans tp \
+                           JOIN plans p ON p.id = tp.plan_id \
+                          WHERE tp.tenant_id = $1 AND tp.status = 'active'",
                     )
-                    .await?;
-                    sqlx::query("UPDATE tickets SET plan_applied_at = NOW() WHERE id = $1")
-                        .bind(id)
-                        .execute(&state.pool)
+                    .bind(tenant_id)
+                    .fetch_optional(&state.pool)
+                    .await
+                    .unwrap_or(None);
+                    let current_slug = current.as_ref().map(|(s, _)| s.clone());
+                    let current_price = current.as_ref().map(|(_, pr)| *pr).unwrap_or(0.0);
+                    // A request that names a STRICTLY CHEAPER tier than the one the workspace
+                    // already holds is refused below. An equal price still goes through, because
+                    // that is a side switch between two plans of the same tier.
+                    let is_downgrade = current_slug.as_deref() != Some(slug)
+                        && current_slug.is_some()
+                        && current_price > requested_price + 0.001;
+                    if is_downgrade {
+                        // CLOSING A REQUEST IS NOT THE SAME AS APPLYING IT (2026-11-19). The queue
+                        // keeps stale asks, so an old request for a cheaper tier can sit beside a
+                        // workspace that has since been put on a dearer one. Honouring that old row
+                        // silently DOWNGRADES a paying customer because an operator cleared a queue.
+                        let held = current_slug.clone().unwrap_or_default();
+                        tracing::info!(
+                            ticket = %id,
+                            tenant = %tenant_id,
+                            held = %held,
+                            asked = %slug,
+                            "Plan request resolved: the workspace already holds a dearer plan - no downgrade applied"
+                        );
+                        // plan_applied_at stays NULL and plan_applied stays false: the ask reads
+                        // as answered but visibly unapplied instead of silently moving the plan.
+                    } else {
+                        crate::handlers::plans_handler::seat_plan_for_tenant(
+                            &state, tenant_id, plan_id, None,
+                        )
                         .await?;
-                    plan_applied = true;
-                    applied_plan_name = Some(plan_name);
-                    tracing::info!(
-                        ticket = %id,
-                        tenant = %tenant_id,
-                        plan = %slug,
-                        "Plan request resolved — the workspace was seated on the requested plan"
-                    );
+                        sqlx::query("UPDATE tickets SET plan_applied_at = NOW() WHERE id = $1")
+                            .bind(id)
+                            .execute(&state.pool)
+                            .await?;
+                        plan_applied = true;
+                        applied_plan_name = Some(plan_name);
+                        tracing::info!(
+                            ticket = %id,
+                            tenant = %tenant_id,
+                            plan = %slug,
+                            "Plan request resolved — the workspace was seated on the requested plan"
+                        );
+                    }
                 }
                 None => {
                     tracing::warn!(
