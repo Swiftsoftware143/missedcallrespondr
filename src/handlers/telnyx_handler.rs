@@ -593,6 +593,14 @@ async fn process_webhook_event(state: &AppState, body: &Value) -> ApiResult<Json
         call_control_id
     );
 
+    // Telnyx spells call-control events with DOTS (`call.initiated`, `call.answered`,
+    // `call.hangup`); the arms below were written with UNDERSCORES. Measured live 2026-11-20 with a
+    // correctly-signed delivery: `call.initiated` answered `200 {"commands":[]}` and wrote NO
+    // `inbound_calls` row, so every real call was acknowledged and then DROPPED — the product's
+    // whole purpose (record the missed call, text the caller back) never ran. Both spellings are
+    // accepted; the raw string stays in force for the message arm and the log line above.
+    let event_key = event_type.replace('.', "_");
+
     // -- 2. MESSAGE events (kanban t_2ed95642). The outbound send path stores the PROVIDER'S OWN
     //        message id (`messages.provider_message_id`), and the delivery events Telnyx sends
     //        afterwards are matched by it, so a row moves queued -> sent -> delivered (or failed)
@@ -604,7 +612,7 @@ async fn process_webhook_event(state: &AppState, body: &Value) -> ApiResult<Json
     }
 
     // -- 3. Only process inbound calls
-    match event_type.as_str() {
+    match event_key.as_str() {
         "call_received" | "call_initiated" => { /* proceed */ }
         _ => {
             // Ack other events (answered, ringing, hangup, etc.) with empty commands
