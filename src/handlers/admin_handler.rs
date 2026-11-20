@@ -2,6 +2,8 @@ use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHasher};
 use axum::{
     extract::{Extension, Path, Query, State},
+    http::{header, HeaderMap, HeaderValue},
+    response::IntoResponse,
     Json,
 };
 use rand::rngs::OsRng;
@@ -526,6 +528,139 @@ pub async fn list_all_tenants(
         "tenants": tenants,
         "total": tenants.len()
     })))
+}
+
+/// GET /api/v1/admin/tenants/export — the Tenants screen as a downloadable CSV file
+/// (cron `default`, 2026-11-20).
+///
+/// WHY: the operator's list of customer workspaces is the one table he takes OUT of the product —
+/// to follow up on a signup, to see who sits on which plan, or to hand the books a list. Until now
+/// that meant reading the screen row by row. This answers the SAME rows the screen shows (the same
+/// `is_hidden_workspace` rule holds probe machinery back, the same `row_protected` markers name the
+/// portfolio accounts) as one file, so the two surfaces cannot disagree about who is a customer.
+///
+/// Auth is the same manual bearer check `list_all_tenants` uses — these `/admin` routes validate
+/// the token themselves — and a role below platform admin is refused before a single row is read.
+/// Read only: nothing is written, and every column is named EXPLICITLY so a credential can never
+/// ride into a downloaded file.
+pub async fn export_tenants_csv(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| AppError::Unauthorized("Missing auth token".into()))?;
+    let claims = crate::auth::models::validate_token(auth_header, &state.config.jwt_secret)
+        .map_err(|_| AppError::Unauthorized("Invalid token".into()))?;
+    if claims.role != "agency_admin" && claims.role != "admin" && claims.role != "super_admin" {
+        return Err(AppError::Unauthorized(
+            "Not authorized to export tenants".into(),
+        ));
+    }
+
+    use sqlx::Row;
+    let rows = sqlx::query(
+        r#"SELECT t.name, t.slug, t.is_active,
+                  COALESCE(t.probe_harness, '') AS probe_harness,
+                  COALESCE(p.name, (SELECT dp.name FROM plans dp
+                                     WHERE dp.slug = 'free' AND dp.is_active
+                                     ORDER BY dp.sort_order NULLS LAST, dp.created_at LIMIT 1)) AS plan_name,
+                  (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) AS user_count,
+                  (SELECT u.email FROM users u WHERE u.tenant_id = t.id
+                    ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
+                                  THEN 0 ELSE 1 END,
+                             u.created_at ASC
+                    LIMIT 1) AS owner_email,
+                  t.created_at,
+                  (SELECT max(u.last_login_at) FROM users u WHERE u.tenant_id = t.id) AS last_sign_in
+             FROM tenants t
+             LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id AND tp.status = 'active'
+             LEFT JOIN plans p ON p.id = tp.plan_id
+            ORDER BY t.created_at DESC"#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut csv =
+        String::from("Workspace,Slug,Plan,Status,Users,Owner,Created,Last sign-in,Protected\n");
+    let mut written = 0usize;
+    for r in rows {
+        let name: String = r.try_get("name").unwrap_or_default();
+        let slug: String = r.try_get("slug").unwrap_or_default();
+        let harness: String = r.try_get("probe_harness").unwrap_or_default();
+        let owner: Option<String> = r.try_get("owner_email").ok().flatten();
+        let users: i64 = r
+            .try_get::<Option<i64>, _>("user_count")
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        // The SAME visibility rule the console list applies: a probe workspace is not a customer.
+        if is_hidden_workspace(&harness, owner.as_deref(), users) {
+            continue;
+        }
+        let plan: Option<String> = r.try_get("plan_name").ok().flatten();
+        let active: Option<bool> = r.try_get("is_active").ok().flatten();
+        let created: Option<chrono::NaiveDateTime> = r.try_get("created_at").ok();
+        let last: Option<chrono::DateTime<Utc>> = r.try_get("last_sign_in").ok().flatten();
+        let protected = row_protected(&name, &slug).unwrap_or("");
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{}\n",
+            tenant_csv_cell(&name),
+            tenant_csv_cell(&slug),
+            tenant_csv_cell(plan.as_deref().unwrap_or("")),
+            if active.unwrap_or(true) {
+                "Open"
+            } else {
+                "Suspended"
+            },
+            users,
+            tenant_csv_cell(owner.as_deref().unwrap_or("")),
+            created
+                .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_default(),
+            last.map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_default(),
+            protected,
+        ));
+        written += 1;
+    }
+
+    tracing::info!(rows = written, "operator downloaded the tenant list");
+    let filename = format!("tenants-{}.csv", Utc::now().format("%Y-%m-%d"));
+    let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+        .unwrap_or_else(|_| HeaderValue::from_static("attachment; filename=\"tenants.csv\""));
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/csv; charset=utf-8"),
+            ),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        csv,
+    ))
+}
+
+/// A CSV cell carrying customer-supplied text (the shape the contacts/calls exports already use),
+/// plus the guard those do not carry: a workspace NAME is chosen by the customer, and a spreadsheet
+/// executes a cell that opens with `=`, `+`, `-` or `@`. The leading apostrophe keeps the text and
+/// stops the formula.
+fn tenant_csv_cell(v: &str) -> String {
+    let t = v.trim();
+    let body =
+        if t.starts_with('=') || t.starts_with('+') || t.starts_with('-') || t.starts_with('@') {
+            format!("'{t}")
+        } else {
+            t.to_string()
+        };
+    if body.contains(',') || body.contains('"') || body.contains('\n') || body.contains('\r') {
+        format!("\"{}\"", body.replace('"', "\"\""))
+    } else {
+        body
+    }
 }
 
 /// POST /api/v1/admin/tenants/:id/resend-credentials

@@ -39,7 +39,7 @@ window.appGuidePages = {
   "workspaces": { title: "Workspaces", desc: "The named spaces inside your business. Switch between them without signing in again: the session is re-issued for the workspace you pick, and the screen reloads so every panel shows that workspace. Your account always keeps at least one workspace, and the one you are signed into cannot be deleted — switch away first. The owner or a company admin can rename a workspace, choose which one a new sign-in opens (Make default) and delete one; a teammate can switch and add. Add a workspace by giving it a name in the box at the bottom; if your plan includes a set number of workspaces, adding past it tells you to upgrade rather than failing silently.", actions: ["See every workspace on the account and which one you are signed into", "Switch to another workspace", "Add a workspace by name", "Rename it, make it the default, or delete it"] },
   "team": { title: "Your Team", desc: "Everyone who can sign in to this workspace, and how many seats your plan includes. The owner is the login the workspace was created with and cannot be removed here. Adding a teammate creates their own login and emails them a password, so nobody shares one; their role is Teammate, which means they answer calls and work the queue but cannot add or remove people. The message after you add someone says whether that password email actually left.", actions: ["See how many seats are used and what your plan allows", "Add a teammate with their name and email", "Remove someone's access"] },
   "my-plan": { title: "Plan & Pricing", desc: "The plan this workspace is on, the plans you can move to, and the limits and features each one includes. Pressing a plan records the switch. When this install has no payment provider connected, nothing is charged: your press becomes a request in the operator's Plan Requests queue, and the operator switches the workspace over.", actions: ["See the plan this workspace is on", "Compare what each plan includes", "Press the plan you want to move to"] },
-  "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data. The Plan picker on a row moves that workspace onto a plan: with no payment provider connected this is the purchase itself, so the workspace owner is emailed which plan they are now on and that nothing was charged — the line above the table says whether that email went out, or that they were already on that plan and nobody was mailed.", actions: ["Search for a workspace", "Choose a plan in a row's Plan picker to move the workspace onto it", "Select rows and delete the selected workspaces"] },
+  "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data. The Plan picker on a row moves that workspace onto a plan: with no payment provider connected this is the purchase itself, so the workspace owner is emailed which plan they are now on and that nothing was charged — the line above the table says whether that email went out, or that they were already on that plan and nobody was mailed.", actions: ["Search for a workspace", "Choose a plan in a row's Plan picker to move the workspace onto it", "Select rows and delete the selected workspaces", "Download the list as a CSV file — the same rows you see, with the probe workspaces a test harness minted left out"] },
   "dashboard": { title: "Dashboard", desc: "The whole install at a glance: workspaces, people, calls received, and how many customers are waiting on a plan switch. The queue tile opens the plan requests already filtered; a workspace user sees that workspace's own figures instead. When nobody can be charged — no payment provider is connected and no plan carries its own payment page — a red Buyers cannot pay card sits at the top, with the button that opens Payment Providers so you can connect a Stripe or PayPal key.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list", "If Buyers cannot pay is showing, press Connect a payment provider"] },
   "portfolio": { title: "Portfolio Companies", desc: "The businesses and brands this workspace lists.", actions: ["Add or edit a portfolio company", "Open a company's record"] },
   "rules": { title: "Response Rules", desc: "What should happen automatically when a call is missed or a message arrives — the routing and reply rules that run without anyone watching.", actions: ["Create a rule", "Choose the trigger", "Enable or disable a rule"] },
@@ -2801,6 +2801,27 @@ const TenantsScreen = () => {
     st.busy = null; renderApp();
   };
   const reload = async () => { st.busy = 'list'; st.picked = {}; st.msg = null; renderApp(); await load(); };
+  // ── THE LIST AS A FILE (cron `default`, 2026-11-20) ──────────────────────────────────────────
+  // The workspace list is the one table an operator takes OUT of the product — to follow up on a
+  // signup, to check who sits on which plan, or to hand the books a list. `/admin/tenants/export`
+  // answers the SAME rows this table shows (probe machinery held back by the same server rule, the
+  // portfolio accounts flagged), so the file and the screen can never disagree about who is a
+  // customer. Fetched WITH the bearer token and handed to the browser as a Blob, exactly the way
+  // the Contacts export works — a plain `<a href>` would arrive without the credential.
+  const exportCsv = async () => {
+    st.busy = 'csv'; st.msg = null; st.ok = true; renderApp();
+    try {
+      const f = await API.download('/admin/tenants/export');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f.blob);
+      a.download = f.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    } catch (e) { st.ok = false; st.msg = 'Could not export the list: ' + e.message; }
+    st.busy = null; renderApp();
+  };
   if (!st._loaded) { st._loaded = true; load(); }
 
   const list = Array.isArray(st.list) ? st.list : [];
@@ -2974,6 +2995,7 @@ const TenantsScreen = () => {
       <div class="flex items-center gap-2">
         <label class="flex items-center gap-1 text-xs text-gray-600" data-tenants="show-probes-label" title="Probe workspaces a test harness minted. Hidden by default because they are not customers; tick this and they are listed so Select probes can reach them."><input type="checkbox" id="tnShowProbes" data-tenants="show-probes" checked=${st.showProbes ? true : false} onChange=${e => { st.showProbes = !!e.target.checked; st.picked = {}; st.list = null; renderApp(); load(); }} /> show probe workspaces</label>
         <button class="btn btn-sm btn-outline" data-tenants="select-probes" disabled=${probes.length === 0 ? true : false} onClick=${pickProbes}>Select probes (${probes.length})</button>
+        <button class="btn btn-sm btn-outline" data-tenants="export-csv" title="Download this list as a CSV file — the same rows, held-back probe workspaces excluded" disabled=${st.busy === 'csv'} onClick=${exportCsv}>${st.busy === 'csv' ? '...' : '⬇ CSV'}</button>
         <button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button>
         <button class="btn btn-sm btn-red" id="tnDel" data-tenants="delete" disabled=${(picked.length === 0 || st.busy === 'del') ? true : false} onClick=${del}>${picked.length ? 'Delete selected (' + picked.length + ')' : 'Delete selected'}</button>
       </div>

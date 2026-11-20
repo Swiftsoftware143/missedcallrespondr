@@ -832,6 +832,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/tenants",
             get(crate::handlers::admin_handler::list_all_tenants),
         )
+        // The Tenants screen as a file (cron `default`, 2026-11-20): the SAME rows, the same
+        // hidden-probe rule, so the operator can take his customer list out of the product without
+        // reading it off the screen. A static segment, so it can never be captured by `/tenants/:id`.
+        .route(
+            "/api/v1/admin/tenants/export",
+            get(crate::handlers::admin_handler::export_tenants_csv),
+        )
         // The operator's remedy for "I never got the email and I can't sign in" (2026-11-05).
         // `users.password_undelivered` marks exactly that state; the list publishes it on the row
         // (`owner_credentials_undelivered`) and this is the action behind the badge. POST, not PUT:
