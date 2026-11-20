@@ -224,6 +224,30 @@ pub async fn invite_teammate(
     };
 
     let (used, limit) = seats(&state, claims.aid).await;
+    // The seat is real either way, so record the state the roster reads: TRUE = this person has a
+    // login but no password ever reached them, which is what the "Their password email never went
+    // out" mark and the "Send login again" button answer. Without this a FAILED invite looked
+    // identical to a delivered one (measured 2026-11-20: only /reissue latched the flag, so the
+    // case that matters most — the welcome mail that never left — was the one the roster could not
+    // show).
+    if !credentials_emailed {
+        if let Err(e) = sqlx::query(
+            "UPDATE users SET password_undelivered = TRUE WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(user_id)
+        .bind(claims.aid)
+        .execute(&state.pool)
+        .await
+        {
+            tracing::error!(
+                "teammate {} ({}) was created with an undelivered password but the users row could not record it: {}",
+                user_id,
+                email,
+                e
+            );
+        }
+    }
+
     let detail = if credentials_emailed {
         "Their login has been created and their password is on its way to that address.".to_string()
     } else if let Some(domain) = reserved_domain {
