@@ -2169,7 +2169,7 @@ const Tickets = () => {
       load();
     } catch (e) { alert('Could not withdraw it: ' + e.message); }
   };
-  const save = async (data) => { try { if (st.editItem) await API.put('/tickets/' + st.editItem.id, data); else await API.post('/tickets', Object.assign({ sender_type: 'customer' }, data)); st.showModal = false; load(); } catch (e) { alert(e.message); } };
+  const save = async (data) => { try { if (st.editItem) { await API.put('/tickets/' + st.editItem.id, data); } else { const res = await API.post('/tickets', Object.assign({ sender_type: 'customer' }, data)); st.notice = (res && res.acknowledged === true) ? 'Request sent - a receipt is on its way to your email address.' : 'Request sent - it is with our team. You can follow it on your dashboard.'; } st.showModal = false; load(); } catch (e) { alert(e.message); } };
   // ── The conversation (2026-10-19) ─────────────────────────────────────────────────────────────
   // This screen files a ticket (Plan & Billing sends one when checkout is closed) and then showed
   // nothing but its status, so an answer from the team was invisible unless the customer guessed to
