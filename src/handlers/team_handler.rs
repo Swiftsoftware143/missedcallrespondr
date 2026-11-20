@@ -72,8 +72,9 @@ pub async fn list_members(
     Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, AppError> {
-    let rows = sqlx::query_as::<_, (Uuid, String, String, String, chrono::NaiveDateTime)>(
-        "SELECT id, name, email, role, created_at FROM users \
+    let rows = sqlx::query_as::<_, (Uuid, String, String, String, chrono::NaiveDateTime, bool)>(
+        "SELECT id, name, email, role, created_at, COALESCE(password_undelivered, false) \
+         FROM users \
          WHERE tenant_id = $1 ORDER BY created_at ASC, id ASC",
     )
     .bind(claims.aid)
@@ -83,17 +84,24 @@ pub async fn list_members(
     let owner_id = rows.first().map(|r| r.0);
     let members: Vec<Value> = rows
         .iter()
-        .map(|(id, name, email, role, created_at)| {
-            json!({
-                "id": id,
-                "name": name,
-                "email": email,
-                "role": role,
-                "is_owner": Some(*id) == owner_id,
-                "is_you": *id == claims.sub,
-                "created_at": created_at,
-            })
-        })
+        .map(
+            |(id, name, email, role, created_at, password_undelivered)| {
+                json!({
+                    "id": id,
+                    "name": name,
+                    "email": email,
+                    "role": role,
+                    "is_owner": Some(*id) == owner_id,
+                    "is_you": *id == claims.sub,
+                    "created_at": created_at,
+                    // TRUE = the credentials mail carrying their password never left (a reserved test
+                    // address, or delivery refused), so this person cannot sign in until someone hands
+                    // them a password. The console marks the row and offers "Send login again", which
+                    // posts /team/members/:id/reissue — the route shipped on 2026-11-17 with no screen.
+                    "password_undelivered": *password_undelivered,
+                })
+            },
+        )
         .collect();
     let (used, limit) = seats(&state, claims.aid).await;
     Ok(Json(json!({
