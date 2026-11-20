@@ -37,7 +37,7 @@ window.appGuidePages = {
   // /plans + /auth/me and posts /checkout/create). Text describes what the screens actually do,
   // including that adding a teammate emails them their own password and reports whether it left.
   "workspaces": { title: "Workspaces", desc: "The named spaces inside your business. Switch between them without signing in again: the session is re-issued for the workspace you pick, and the screen reloads so every panel shows that workspace. Your account always keeps at least one workspace, and the one you are signed into cannot be deleted — switch away first. The owner or a company admin can rename a workspace, choose which one a new sign-in opens (Make default) and delete one; a teammate can switch and add. Add a workspace by giving it a name in the box at the bottom; if your plan includes a set number of workspaces, adding past it tells you to upgrade rather than failing silently.", actions: ["See every workspace on the account and which one you are signed into", "Switch to another workspace", "Add a workspace by name", "Rename it, make it the default, or delete it"] },
-  "team": { title: "Your Team", desc: "Everyone who can sign in to this workspace, and how many seats your plan includes. The owner is the login the workspace was created with and cannot be removed here. Adding a teammate creates their own login and emails them a password, so nobody shares one; their role is Teammate, which means they answer calls and work the queue but cannot add or remove people. The message after you add someone says whether that password email actually left.", actions: ["See how many seats are used and what your plan allows", "Add a teammate with their name and email", "Remove someone's access"] },
+  "team": { title: "Your Team", desc: "Everyone who can sign in to this workspace, and how many seats your plan includes. The owner is the login the workspace was created with and cannot be removed here. Adding a teammate creates their own login and emails them a password, so nobody shares one; their role is Teammate, which means they answer calls and work the queue but cannot add or remove people. The message after you add someone says whether that password email actually left.", actions: ["See how many seats are used and what your plan allows", "Add a teammate with their name and email", "Remove someone's access", "Send a teammate a fresh password by email when theirs never arrived"] },
   "my-plan": { title: "Plan & Pricing", desc: "The plan this workspace is on, the plans you can move to, and the limits and features each one includes. Pressing a plan records the switch. When this install has no payment provider connected, nothing is charged: your press becomes a request in the operator's Plan Requests queue, and the operator switches the workspace over.", actions: ["See the plan this workspace is on", "Compare what each plan includes", "Press the plan you want to move to"] },
   "tenants": { title: "Tenants", desc: "Every workspace on this install, with a checkbox per row. Deleting here removes the workspace and its data. The Plan picker on a row moves that workspace onto a plan: with no payment provider connected this is the purchase itself, so the workspace owner is emailed which plan they are now on and that nothing was charged — the line above the table says whether that email went out, or that they were already on that plan and nobody was mailed.", actions: ["Search for a workspace", "Choose a plan in a row's Plan picker to move the workspace onto it", "Select rows and delete the selected workspaces", "Download the list as a CSV file — the same rows you see, with the probe workspaces a test harness minted left out"] },
   "dashboard": { title: "Dashboard", desc: "The whole install at a glance: workspaces, people, calls received, and how many customers are waiting on a plan switch. The queue tile opens the plan requests already filtered; a workspace user sees that workspace's own figures instead. When nobody can be charged — no payment provider is connected and no plan carries its own payment page — a red Buyers cannot pay card sits at the top, with the button that opens Payment Providers so you can connect a Stripe or PayPal key.", actions: ["See recent activity", "Open Contacts or Campaigns to work a list", "If Buyers cannot pay is showing, press Connect a payment provider"] },
@@ -4474,8 +4474,13 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
         const r = await API.post('/team/invite', { email: email, name: (st.name || '').trim() });
         st.name = ''; st.email = ''; st.busy = false;
         // `credentials_emailed` is the ONLY claim about the mail. False means the login exists but the
-        // password did not reach them (reserved address, or delivery refused) — `detail` says which.
-        st.msg = { ok: !!r.credentials_emailed, text: r.detail || 'Teammate added.' };
+        // password did not reach them (reserved address, or delivery refused) — `detail` says which,
+        // and the server now hands the generated password back ONCE on that arm (2026-11-20). Before
+        // this the sentence told the inviter to hand over a password the screen never showed, so an
+        // invite whose mail failed left the new teammate with no way in at all.
+        let text = r.detail || 'Teammate added.';
+        if (r && r.handover_password) text += ' Password: ' + r.handover_password + ' — give it to them and ask them to change it after their first sign-in.';
+        st.msg = { ok: !!r.credentials_emailed, text: text };
         await load();
       } catch (e) { st.busy = false; st.msg = { ok: false, text: e.message }; renderApp(); }
     };
@@ -4486,6 +4491,25 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
         await API.del('/team/members/' + m.id);
         st.busy = false;
         st.msg = { ok: true, text: (m.email || m.name) + ' no longer has access.' };
+      } catch (e) { st.busy = false; st.msg = { ok: false, text: e.message }; }
+      await load();
+    };
+    // ---- SEND LOGIN AGAIN (2026-11-20) ----
+    // POST /api/v1/team/members/:id/reissue shipped on 2026-11-17: it sets a fresh password, signs
+    // that person's old sessions out and mails the new one. No screen ever called it, so a teammate
+    // whose welcome mail never arrived could only be REMOVED and invited afresh (losing their place
+    // on the queue). The answer says whether the mail actually left; when it did not — a reserved
+    // test address, or delivery refused — the server hands the password back once so the owner can
+    // pass it on. That password is shown here and nowhere else.
+    const reissue = async (m) => {
+      if (!confirm('Send ' + (m.email || m.name) + ' a new password by email? Anything they are already signed in with will be signed out.')) return;
+      st.busy = true; st.msg = null; renderApp();
+      try {
+        const r = await API.post('/team/members/' + m.id + '/reissue', {});
+        st.busy = false;
+        let text = (r && r.detail) || 'A new password was set.';
+        if (r && r.handover_password) text += ' New password: ' + r.handover_password;
+        st.msg = { ok: !!(r && r.credentials_emailed), text: text };
       } catch (e) { st.busy = false; st.msg = { ok: false, text: e.message }; }
       await load();
     };
@@ -4512,7 +4536,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
               <td>${roleLabel(m.role)}</td>
               <td>${m.created_at ? String(m.created_at).slice(0, 10) : '\u2014'}</td>
               <td style="text-align:right">${st.can_manage && !m.is_owner && !m.is_you
-                ? html`<button class="btn btn-sm btn-red" disabled=${st.busy} onClick=${() => remove(m)}>Remove</button>`
+                ? html`${m.password_undelivered ? html`<div style="font-size:12px;color:#b45309;margin-bottom:4px">Their password email never went out</div>` : null}<button class="btn btn-sm" disabled=${st.busy} onClick=${() => reissue(m)}>Send login again</button> <button class="btn btn-sm btn-red" disabled=${st.busy} onClick=${() => remove(m)}>Remove</button>`
                 : null}</td>
             </tr>`)}
           </tbody>

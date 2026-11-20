@@ -252,10 +252,10 @@ pub async fn invite_teammate(
         "Their login has been created and their password is on its way to that address.".to_string()
     } else if let Some(domain) = reserved_domain {
         format!(
-            "Their login was created, but '{domain}' is a reserved test address, so no password email could be sent to it."
+            "Their login was created, but '{domain}' is a reserved test address, so no password email could be sent to it \u{2014} give them the password shown here."
         )
     } else {
-        "Their login was created, but the email carrying the password did not leave. Use Send reset on the operator console, or ask them to use Forgot password once mail delivery is restored.".to_string()
+        "Their login was created, but the email carrying the password did not leave. Give them the password shown here, or press Send login again to try the mail once more.".to_string()
     };
     Ok(Json(json!({
         "member": {
@@ -270,6 +270,14 @@ pub async fn invite_teammate(
         "credentials_emailed": credentials_emailed,
         "seats": { "used": used, "limit": limit },
         "detail": detail,
+        // The SAME hand-over the reissue door already performs (2026-11-20). An invite whose
+        // credentials mail did not leave used to answer with a sentence telling the inviter to
+        // "hand them the password" while handing over NOTHING: the generated password was hashed
+        // into the row and then dropped, so the only way to give the new teammate a login was to
+        // guess at the operator console or remove and re-invite the person (which loses their seat
+        // and their place on the queue). Returned ONCE here, only when no mail left — the hash in
+        // the row is still the only durable copy, and the console shows this value to nobody else.
+        "handover_password": if credentials_emailed { Value::Null } else { json!(password) },
     })))
 }
 

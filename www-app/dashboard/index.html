@@ -2931,9 +2931,14 @@ const Team = () => {
     try {
       const d = await API.post('/team/invite', { name: name || null, email: email });
       // The server says whether the password mail actually LEFT. A created login whose mail failed
-      // (or a reserved test address the sender withholds) must not be painted as a success.
+      // (or a reserved test address the sender withholds) must not be painted as a success — and on
+      // that arm it now hands the generated password back ONCE (2026-11-20) so the owner can pass it
+      // on. Before this the sentence told the owner the password "did not leave" while giving them
+      // nothing to give the new teammate, who therefore had no way to sign in at all.
       const mailed = d.credentials_emailed !== false;
-      st.notice = { ok: mailed, text: d.detail || (mailed ? 'Their login has been created.' : 'Their login was created, but the password email did not leave.') };
+      let text = d.detail || (mailed ? 'Their login has been created.' : 'Their login was created, but the password email did not leave.');
+      if (d.handover_password) text += ' New password: ' + d.handover_password + ' — give it to them and ask them to change it after their first sign-in.';
+      st.notice = { ok: mailed, text: text };
       form.name = ''; form.email = '';
     } catch (e) { st.error = 'Could not add them: ' + e.message; }
     st.busy = false; load();
