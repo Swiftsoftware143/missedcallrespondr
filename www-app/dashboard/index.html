@@ -3098,6 +3098,25 @@ const Workspaces = () => {
   </div>`;
 };
 
+/* SESSION HANDOFF TO THE MAIL CLIENT (2026-11-20). The Inbox pane's sentence promises "the same
+   account, so there is nothing to sign in to twice", and the door dropped the customer on a login form
+   on another host with a password they only ever saw once, in the welcome email. The console now hands
+   the SAME session over in the URL FRAGMENT (#token=...), which a browser never sends to the server, so
+   it cannot reach an nginx access log or a Referer header. The mail client stores it as its own session
+   and strips the fragment before its first render. MissedCall keeps its session in sessionStorage
+   (`mc_token`), so the reader checks there first. DELEGATED, capture phase, because the Inbox pane is
+   re-rendered on every tab switch. */
+document.addEventListener('click', function (ev) {
+  var a = ev.target && ev.target.closest ? ev.target.closest('#inbox-open-client') : null;
+  if (!a) return;
+  var t = '';
+  try {
+    t = sessionStorage.getItem('mc_token') || localStorage.getItem('mc_token')
+      || localStorage.getItem('ws_fs_token') || '';
+  } catch (e) {}
+  if (t) a.href = 'https://inbox.missedcallrespondr.com/#token=' + encodeURIComponent(t);
+}, true);
+
 const Inbox = () => {
   const st = viewState('inbox', {
     loaded: false, busy: '', domains: [], boxes: [], messages: [],
