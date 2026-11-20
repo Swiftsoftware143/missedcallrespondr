@@ -60,7 +60,7 @@ window.appGuidePages = {
   "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
-  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it.", actions: ["Upload your logo", "Set your brand name and colour", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
+  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it. The Workspace signature card holds the default name, title, company, phone and one line printed under your logo on every message this workspace sends; an address in the mail client can override it or turn it off, and a field left blank stays blank in the message.", actions: ["Upload your logo", "Set your brand name and colour", "Set the workspace signature every address starts with", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, the password-reset mail, the purchase receipt, the branded preview and the ticket mails. The form lists the merge fields the chosen type actually fills. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest. The box at the top, How a customer pays you, is for what happens when NO provider is connected: write your bank details or any other way to pay, and a customer who asks for a plan sees them on Plan & Billing and in their receipt email. Leave it empty and nothing changes.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it", "Write how a customer pays you and press Save"] },
   "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on. The last card on this screen closes the account: it ends every session and API key on it and refuses sign-in from then on, while keeping your data so the business can be reopened by support if you change your mind. One card also downloads everything the workspace holds as a single file, with no passwords or provider secrets in it.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on", "Download a copy of everything the workspace holds (contacts, calls, messages, campaigns) as one file", "Close the account — ends every session and API key, keeps the data"] },
@@ -337,7 +337,7 @@ const LoginView = () => {
 // upload convention, and the public GET /api/v1/branding/logo/:tenant_id streams it back for a mail
 // client's <img src>. A backend route with no UI is a defect.
 const Branding = () => {
-  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null, previewBusy: false, previewMsg: null, bodyBusy: false, bodyHtml: null, bodySubject: '', bodyMsg: null });
+  const st = viewState('branding', { _loaded: false, brand_name: '', brand_color: '#4f46e5', logo_url: '', busy: false, msg: null, previewBusy: false, previewMsg: null, bodyBusy: false, bodyHtml: null, bodySubject: '', bodyMsg: null, sig: { full_name: '', job_title: '', company: '', phone: '', line: '' }, sigLoaded: false, sigHas: false, sigBusy: false, sigMsg: null });
   if (!st._loaded) { st._loaded = true;
     API.get('/settings/branding').then(b => {
       b = b && typeof b === 'object' ? b : {};
@@ -345,6 +345,33 @@ const Branding = () => {
       renderApp();
     }).catch(() => { st._loaded = false; });
   }
+  // ── THE WORKSPACE SIGNATURE (cron 2026-11-20) ─────────────────────────────────────────────────
+  // `GET|PUT /api/v1/private-email/signature/workspace` is the ONLY writer of
+  // `tenant_email_signatures`: the default block printed under the logo on every message this
+  // workspace sends. The mail client tells a customer to set it "in Email Branding", and this
+  // screen had no such control — a dead-end instruction, and a backend route with no UI at all.
+  // Read back from the same route that writes, so the panel shows what the sender will actually use.
+  if (!st.sigLoaded) { st.sigLoaded = true;
+    API.get('/private-email/signature/workspace').then(r => {
+      const s = (r && r.signature) || {};
+      st.sig = { full_name: s.full_name || '', job_title: s.job_title || '', company: s.company || '', phone: s.phone || '', line: s.line || '' };
+      st.sigHas = !!(r && r.has_signature);
+      renderApp();
+    }).catch(() => { st.sigLoaded = false; });
+  }
+  const saveSig = async () => {
+    st.sigBusy = true; st.sigMsg = null; renderApp();
+    try {
+      const r = await API.put('/private-email/signature/workspace', st.sig);
+      st.sigHas = !!(r && r.has_signature);
+      st.sigMsg = { ok: true, text: (r && r.detail) || 'Workspace signature saved.' };
+    } catch(e) { st.sigMsg = { ok: false, text: 'Save failed: ' + e.message }; }
+    st.sigBusy = false; renderApp();
+  };
+  // Five plain fields. A blank one stays blank in the message — nothing is invented for the
+  // customer, which is the same rule the sender applies (Signature::is_blank).
+  const sigField = (key, label, ph, max) => html`<div><label class="text-sm font-medium text-gray-600 block mb-1">${label}</label>
+    <input class="input" maxlength=${String(max)} value=${st.sig[key]} placeholder=${ph} onInput=${e => { st.sig[key] = e.target.value; }} /></div>`;
   const save = async () => {
     st.busy = true; st.msg = null; renderApp();
     try {
@@ -498,6 +525,22 @@ const Branding = () => {
         </div>`}
       </div>
       ${st.msg && html`<div class="mt-3 text-sm ${st.msg.ok ? 'text-green-600' : 'text-red-600'}">${st.msg.ok ? 'OK - ' : 'Error - '}${st.msg.text}</div>`}
+    </div>
+    <div class="card mt-4" data-branding="workspace-signature">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="font-semibold">Workspace signature</div>
+        <span class="badge ${st.sigHas ? 'badge-green' : 'badge-yellow'}">${st.sigHas ? 'set' : 'not set'}</span>
+      </div>
+      <p class="text-sm text-gray-500 mb-4">The default signature every address in this workspace prints under the logo: name, title, company, phone and one short line. An address can override it, or turn it off, in the mail client. A field left blank stays blank in the message — it is never invented.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        ${sigField('full_name', 'Name', 'e.g. Dana Whitfield', 120)}
+        ${sigField('job_title', 'Title', 'e.g. Owner', 120)}
+        ${sigField('company', 'Company', 'e.g. Acme Plumbing', 120)}
+        ${sigField('phone', 'Phone', 'e.g. +1 305 555 0123', 120)}
+        <div class="md:col-span-2">${sigField('line', 'One line under it', 'e.g. Acme Plumbing — fixed prices, written quotes', 160)}</div>
+      </div>
+      <div class="mt-3"><button id="wsig-save" class="btn" disabled=${st.sigBusy} onClick=${saveSig}>${st.sigBusy ? 'Saving…' : 'Save signature'}</button></div>
+      ${st.sigMsg && html`<div class="mt-2 text-sm ${st.sigMsg.ok ? 'text-green-600' : 'text-red-600'}">${st.sigMsg.text}</div>`}
     </div>
   </div>`;
 };
