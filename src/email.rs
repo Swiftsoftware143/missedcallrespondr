@@ -1419,7 +1419,7 @@ async fn send_email_request(
             to,
             "suppressed",
             subject,
-            &Err(format!("do-not-mail list: {reason}")),
+            &Err(format!("withheld: do-not-mail list: {reason}")),
         )
         .await;
         return Ok(());
