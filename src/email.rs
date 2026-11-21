@@ -1396,6 +1396,34 @@ async fn send_email_request(
     text_body: &str,
     html_body: &str,
 ) -> Result<(), String> {
+    // THE DO-NOT-MAIL GATE (2026-11-21). An address this workspace has been told to stop mailing —
+    // an opt-out clicked in a message, or one the operator watched hard-bounce — is refused HERE, at
+    // the one choke point both the template arm and the inline fallbacks pass through, so no send
+    // path can bypass it. Notice mail is stoppable by a notice opt-out; a blanket stop ('all', used
+    // for an address that bounces) also stops transactional mail, because mail to it can only bounce
+    // again and every bounce is a cost on the sending domain. The gate FAILS OPEN: a read error is
+    // logged and the send proceeds (see `crate::compliance::gate`). It runs BEFORE the address-class
+    // guard below, so an address that is both blocked and reserved records the operator's own reason
+    // rather than the generic harness sentence.
+    let mail_class = crate::compliance::class_of(kind);
+    if let Some(reason) = crate::compliance::gate(pool, tenant_id, to, mail_class).await {
+        tracing::info!(
+            to = %to,
+            kind = %kind,
+            reason = %reason,
+            "send withheld: the recipient is on the do-not-mail list"
+        );
+        record_last_send(
+            pool,
+            kind,
+            to,
+            "suppressed",
+            subject,
+            &Err(format!("do-not-mail list: {reason}")),
+        )
+        .await;
+        return Ok(());
+    }
     // Fleet harness addresses never reach a real relay (parity with FunnelSwift, kanban t_36b55ed2).
     // A probe that signs up with a fleet-dev domain (`swiftsoftware.dev/.net`) is created normally but
     // its mail is withheld: the address is routable, so a send can only land in a fleet mailbox or
@@ -1424,32 +1452,6 @@ async fn send_email_request(
             &Err(format!(
                 "withheld: '{domain}' is a fleet-harness / reserved address, so nothing was sent"
             )),
-        )
-        .await;
-        return Ok(());
-    }
-    // THE DO-NOT-MAIL GATE (2026-11-21). An address this workspace has been told to stop mailing —
-    // an opt-out clicked in a message, or one the operator watched hard-bounce — is refused HERE, at
-    // the one choke point both the template arm and the inline fallbacks pass through, so no send
-    // path can bypass it. Notice mail is stoppable by a notice opt-out; a blanket stop ('all', used
-    // for an address that bounces) also stops transactional mail, because mail to it can only bounce
-    // again and every bounce is a cost on the sending domain. The gate FAILS OPEN: a read error is
-    // logged and the send proceeds (see `crate::compliance::gate`).
-    let mail_class = crate::compliance::class_of(kind);
-    if let Some(reason) = crate::compliance::gate(pool, tenant_id, to, mail_class).await {
-        tracing::info!(
-            to = %to,
-            kind = %kind,
-            reason = %reason,
-            "send withheld: the recipient is on the do-not-mail list"
-        );
-        record_last_send(
-            pool,
-            kind,
-            to,
-            "suppressed",
-            subject,
-            &Err(format!("do-not-mail list: {reason}")),
         )
         .await;
         return Ok(());
