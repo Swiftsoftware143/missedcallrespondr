@@ -264,7 +264,9 @@ pub(crate) fn apply_to_disk(settings: &Value) -> (Vec<String>, PlanSkips) {
 /// The marketing page: the SEO/tracking injection, as a pure function of the bytes already on disk
 /// (so the applier can compare before writing) — the authored body of the page is never touched.
 fn render_index(before: &str, settings: &Value) -> String {
-    inject_settings(before, settings)
+    let mut r = inject_settings(before, settings);
+    inject_theme(&mut r, INDEX_THEME_REMAP);
+    r
 }
 
 /// One legal page: ONLY the body between `<h1>{title}</h1>` and the trailing `<div class="back">` is
@@ -283,6 +285,7 @@ fn render_legal(before: &str, title: &str, text: &str) -> Option<String> {
     out.push_str(&escape_addresses(text));
     out.push('\n');
     out.push_str(&before[close_start..]);
+    inject_theme(&mut out, LEGAL_THEME_REMAP);
     Some(out)
 }
 
@@ -504,6 +507,72 @@ fn inject_settings(html: &str, s: &Value) -> String {
     r
 }
 
+/// ---- Day/Night theme for the DB-rendered pages. ----
+///
+/// The marketing page + the three legal pages are materialized by this applier, so the switch, the
+/// pre-paint boot and the elevation tokens live HERE — in the renderer — not in the output files (a
+/// hand-edited output is overwritten by the next apply). The token block, boot, switch and palettes
+/// are identical to every other MissedCall surface (dashboard, admin, mail, the repo-authored public
+/// pages) so `mc_theme` is ONE choice across the whole product.
+const THEME_BOOT_SCRIPT: &str = r#"<script>(function(){try{var t=localStorage.getItem('mc_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();</script>"#;
+
+const THEME_TOKENS_CSS: &str = r#":root{--surface-0:#f6f7fb;--surface-1:#eef0f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#16181d;--text-secondary:#4b5563;--text-muted:#77808f;--accent:#4f46e5;--accent-hover:#4338ca;--border:#dde1ea;--border-light:#c9cfdb;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
+html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#6b7280;--accent:#6366f1;--accent-hover:#818cf8;--border:#2d3148;--border-light:#383c52;--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}"#;
+
+const THEME_TOGGLE_CSS: &str = r#".theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--accent)}"#;
+
+const THEME_TOGGLE_BUTTON: &str = r#"<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode"><span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span></button>"#;
+
+const THEME_TOGGLE_SCRIPT: &str = r#"<script>(function(){var b=document.getElementById('theme-toggle');if(!b)return;function p(){var d=document.documentElement.getAttribute('data-theme')==='dark';var i=document.getElementById('theme-toggle-icon');var l=document.getElementById('theme-toggle-label');if(i)i.textContent=d?'☀️':'🌙';if(l)l.textContent=d?'Day mode':'Night mode';}b.addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);try{localStorage.setItem('mc_theme',n);}catch(e){}p();});p();})();</script>"#;
+
+/// Marketing page recolor: the page is authored dark-on-dark (body `#0b1120`, Tailwind `text-white`,
+/// `bg-[…]` sections, inline-styled plan cards). These rules repoint every surface/text/border at the
+/// shared tokens, so the SAME page renders day (light) and night (dark). Brand gradients and the
+/// colored icon chips stay authored; only surfaces + text + borders are tokenized.
+const INDEX_THEME_REMAP: &str = r#"body{background:var(--surface-0);color:var(--text-primary)}
+#features,#how-it-works,#plans{background:var(--surface-0)}
+.card-hover{background:var(--surface-1);border-color:var(--border)}
+.text-white{color:var(--text-primary)}
+.cta-gradient.text-white,.bg-blue-600.text-white,.bg-purple-600.text-white,.bg-green-600.text-white,.bg-yellow-600.text-white,.bg-red-600.text-white{color:#fff}
+.text-gray-300{color:var(--text-secondary)}
+.text-gray-400{color:var(--text-secondary)}
+nav.hero-gradient{border-color:var(--border)}
+footer{border-color:var(--border)!important}
+footer a{color:var(--text-secondary)!important}
+.suite{background:var(--surface-1)!important;border-bottom:1px solid var(--border)!important}
+.suite-links a{color:var(--text-secondary)!important}
+[data-plan-card]{background:var(--surface-1)!important}
+[data-plan-card="free"],[data-plan-card="enterprise"]{border-color:var(--border)!important}
+[data-plan-card] h3{color:var(--text-primary)!important}
+[data-plan-card] p,[data-plan-card] ul{color:var(--text-secondary)!important}
+[data-plan-card="free"] a,[data-plan-card="enterprise"] a{color:var(--text-primary)!important;border-color:var(--border)!important}
+[data-plan-footnote]{color:var(--text-muted)!important}
+#how-to-pay{background:var(--surface-1)!important;border-color:var(--border)!important;border-left-color:#2563eb!important}
+#how-to-pay h3{color:var(--text-primary)!important}
+#how-to-pay p{color:var(--text-secondary)!important}"#;
+
+/// Legal pages recolor: they hard-code a dark prose page. Only the surfaces/text/border are
+/// tokenized; the emerald headings/links stay (they read fine in both palettes).
+const LEGAL_THEME_REMAP: &str = r#"body{background:var(--surface-0);color:var(--text-primary)}
+h2{color:var(--text-primary)}
+p,li{color:var(--text-secondary)}
+.back{border-top:1px solid var(--border)}"#;
+
+/// Inject the shared day/night theme (pre-paint boot, tokens, switch) plus a page-specific recolor
+/// into an already-rendered page. Marker-managed, so a re-apply removes its own previous blocks and
+/// re-inserts them — idempotent by construction.
+fn inject_theme(r: &mut String, remap: &str) {
+    inject_marked_head(r, "theme-boot", THEME_BOOT_SCRIPT);
+    let css = format!(
+        "<style>\n{}\n{}\n{}\n</style>",
+        THEME_TOKENS_CSS, THEME_TOGGLE_CSS, remap
+    );
+    inject_marked_head(r, "theme-css", &css);
+    inject_marked_body(r, "theme-toggle", THEME_TOGGLE_BUTTON);
+    inject_marked_body(r, "theme-toggle-js", THEME_TOGGLE_SCRIPT);
+}
+
 fn replace_title(r: &mut String, t: &str) {
     if let Some(p) = r.find("<title>") {
         let a = p + 7;
@@ -670,6 +739,59 @@ mod tests {
             "x"
         )
         .is_none());
+    }
+
+    #[test]
+    fn index_render_injects_the_theme() {
+        let out = render_index(PAGE, &settings());
+        assert!(out.contains("mc_theme"), "pre-paint boot missing");
+        assert!(out.contains("--surface-0"), "elevation tokens missing");
+        assert!(out.contains("--shadow-1"), "shadow tokens missing");
+        assert!(
+            out.contains("color-scheme:light"),
+            "light color-scheme missing"
+        );
+        assert!(
+            out.contains("color-scheme:dark"),
+            "dark color-scheme missing"
+        );
+        assert!(
+            out.contains("id=\"theme-toggle\""),
+            "day/night switch missing"
+        );
+        assert!(
+            out.contains("html[data-theme=\"dark\"]"),
+            "dark palette missing"
+        );
+    }
+
+    #[test]
+    fn theme_render_is_idempotent() {
+        // The applier runs every 5 minutes: a second render over the first render's own output MUST
+        // be byte-identical, or the theme markers would grow the page forever.
+        let once = render_index(PAGE, &settings());
+        let twice = render_index(&once, &settings());
+        assert_eq!(once, twice, "a theme re-render changed the bytes");
+        // Each marker block appears exactly once (open + close = 2). `theme-toggle` is a prefix of
+        // `theme-toggle-js`, so count the FULL markers rather than the bare id.
+        assert_eq!(once.matches("<!--mcr:theme-boot-->").count(), 1);
+        assert_eq!(twice.matches("<!--mcr:theme-boot-->").count(), 1);
+        assert_eq!(once.matches("<!--mcr:theme-css-->").count(), 1);
+        assert_eq!(once.matches("<!--mcr:theme-toggle-->").count(), 1);
+        assert_eq!(once.matches("<!--mcr:theme-toggle-js-->").count(), 1);
+    }
+
+    #[test]
+    fn legal_render_injects_and_stabilises_the_theme() {
+        let before = "<html><head><style>body{background:#0f0f0f}</style></head><body>\n<h1>Terms of Service</h1>\nBody.\n<div class=\"back\"><a href=\"/\">← Back</a></div>\n</body></html>";
+        let out = render_legal(before, "Terms of Service", "New body.").unwrap();
+        assert!(out.contains("mc_theme"));
+        assert!(out.contains("--surface-0"));
+        assert!(out.contains("id=\"theme-toggle\""));
+        // The scaffold replacement still holds, and a second pass is stable.
+        assert!(out.contains("<h1>Terms of Service</h1>\nNew body.\n<div class=\"back\">"));
+        let twice = render_legal(&out, "Terms of Service", "New body.").unwrap();
+        assert_eq!(out, twice, "a legal theme re-render changed the bytes");
     }
 
     #[test]
