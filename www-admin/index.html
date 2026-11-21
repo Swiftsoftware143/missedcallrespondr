@@ -727,6 +727,17 @@ const Dashboard = () => {
   const isOps = !!(API.user && API.user.role && PLATFORM_ADMIN_ROLES.indexOf(API.user.role) >= 0);
   if (!st._loaded) { st._loaded = true;
     API.get('/dashboard/stats').then(s => { Object.assign(st, s); renderApp(); }).catch(() => {});
+    // GET /api/v1/dashboard/activity — the route and its writer shipped (src/activity.rs) and the
+    // CUSTOMER dashboard renders the feed, but this console had no caller at all: the admin guide's
+    // Dashboard entry lists "See recent activity" among this screen's actions and there was no such
+    // panel. `undefined` = not answered yet (nothing painted), `null` = the read failed (said out
+    // loud), `[]` = answered and empty.
+    API.get('/dashboard/activity')
+      .then(a => {
+        const rows = Array.isArray(a) ? a : ((a && Array.isArray(a.activity)) ? a.activity : []);
+        st.activity = rows.slice(0, 10); renderApp();
+      })
+      .catch(() => { st.activity = null; renderApp(); });
     if (isOps) API.get('/admin/stats').then(s => { st.platform = s; renderApp(); }).catch(() => {});
     // Is anyone actually TOLD when a customer asks to buy or asks for help? The plan-request and
     // support alerts are mailed to `operator_alert_email`, and the panel's own Email Provider field
@@ -827,6 +838,7 @@ const Dashboard = () => {
           <button class="btn" data-open-plan-requests onClick=${goPlanRequests}>Open the plan requests</button>
         </div>
       </div>
+      ${RecentActivity(st, true)}
       <p class="text-xs text-gray-500 mt-4">These are the whole install's figures, not one workspace's. Calls received counts every workspace's inbound calls.</p>
     </div>`;
   }
@@ -906,6 +918,64 @@ const Dashboard = () => {
       <div class="stat-card"><div class="stat-value">${st.response_rate == null ? '...' : Number(st.response_rate).toFixed(0) + '%'}</div><div class="stat-label">Response Rate</div></div>
     </div>
     <p class="text-xs text-gray-500 mt-4">Counts are this workspace's own. Response Rate is answered calls as a share of all calls received.</p>
+    ${RecentActivity(st, false)}
+  </div>`;
+};
+
+// ---- RECENT ACTIVITY (the panel behind GET /api/v1/dashboard/activity) ----
+// Until this card the console had no caller for that route, while the admin guide's Dashboard entry
+// told the operator to "See recent activity" on this very screen. The writers already exist
+// (src/activity.rs: a missed call, an automatic reply, a captured contact, a campaign created/
+// started/paused) and the API-key handlers log their own four rows, so every action below has a
+// writer in this crate. Values are clipped before printing: a contact name was accepted unbounded
+// until 2026-10 and one 250-character name is already in this table.
+const ACT_LABEL = {
+  'call.received': 'Missed call received',
+  'message.sent': 'Automatic reply sent',
+  'contact.created': 'Contact added',
+  'campaign.created': 'Campaign created',
+  'campaign.activated': 'Campaign started',
+  'campaign.paused': 'Campaign paused',
+  'api_key_created': 'API key created',
+  'api_key_revealed': 'API key viewed',
+  'api_key_revoked': 'API key revoked',
+  'api_key_regenerated': 'API key regenerated'
+};
+const actClip = (v, max) => { const s = (v === null || v === undefined) ? '' : String(v); return s.length > max ? s.slice(0, max - 1) + '…' : s; };
+const actLabel = (a) => ACT_LABEL[a] || String(a || '').replace(/[._]/g, ' ').replace(/^./, c => c.toUpperCase());
+const actDetail = (row) => {
+  const m = (row && row.metadata && typeof row.metadata === 'object') ? row.metadata : {};
+  if (row.action === 'call.received') return m.caller_number ? 'From ' + actClip(m.caller_number, 40) : '';
+  if (row.action === 'message.sent') return (m.to_number ? 'To ' + actClip(m.to_number, 40) : '') + (m.status ? ' · ' + actClip(m.status, 20) : '');
+  if (m.name) return actClip(m.name, 60);
+  return '';
+};
+// A bare "2026-11-15T16:12:10.5" is the database's own UTC clock; without the trailing Z the browser
+// reads it as local time and every row slides by the operator's offset. Same rule as the customer
+// dashboard's utcTime.
+const actWhen = (v) => {
+  if (!v) return '—';
+  const s = String(v);
+  const iso = /[zZ]|[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+};
+const RecentActivity = (st, own) => {
+  const items = st.activity;
+  return html`<div class="card mt-4" data-recent-activity="1">
+    <div class="font-semibold">Recent activity</div>
+    <p class="text-sm text-gray-500" style="margin:4px 0 10px">${own
+      ? "Your own workspace's last events — the install-wide figures above do not include a per-customer feed, so this is what the operator's workspace itself did."
+      : "What this workspace did lately — calls received, replies sent, contacts captured and campaigns, newest first."}</p>
+    ${items === undefined ? html`<p class="text-sm text-gray-400">Loading activity…</p>` : ''}
+    ${items === null ? html`<p class="text-sm" style="color:#b91c1c" data-activity-error="1">The activity could not be read just now — this is a failed read, not an empty workspace. Reload the screen to try again.</p>` : ''}
+    ${items && items.length === 0 ? html`<p class="text-sm text-gray-500">Nothing yet — a missed call, an automatic reply, a captured contact or a campaign you build shows here.</p>` : ''}
+    ${items && items.length ? html`<table class="table"><thead><tr><th>When</th><th>What happened</th><th>Details</th></tr></thead>
+      <tbody>${items.map(r => html`<tr data-activity-action=${r.action}>
+        <td class="text-xs" style="white-space:nowrap">${actWhen(r.created_at)}</td>
+        <td class="font-medium">${actLabel(r.action)}</td>
+        <td class="text-gray-500">${actDetail(r) || '—'}</td></tr>`)}
+      </tbody></table>` : ''}
   </div>`;
 };
 
