@@ -1428,6 +1428,32 @@ async fn send_email_request(
         .await;
         return Ok(());
     }
+    // THE DO-NOT-MAIL GATE (2026-11-21). An address this workspace has been told to stop mailing —
+    // an opt-out clicked in a message, or one the operator watched hard-bounce — is refused HERE, at
+    // the one choke point both the template arm and the inline fallbacks pass through, so no send
+    // path can bypass it. Notice mail is stoppable by a notice opt-out; a blanket stop ('all', used
+    // for an address that bounces) also stops transactional mail, because mail to it can only bounce
+    // again and every bounce is a cost on the sending domain. The gate FAILS OPEN: a read error is
+    // logged and the send proceeds (see `crate::compliance::gate`).
+    let mail_class = crate::compliance::class_of(kind);
+    if let Some(reason) = crate::compliance::gate(pool, tenant_id, to, mail_class).await {
+        tracing::info!(
+            to = %to,
+            kind = %kind,
+            reason = %reason,
+            "send withheld: the recipient is on the do-not-mail list"
+        );
+        record_last_send(
+            pool,
+            kind,
+            to,
+            "suppressed",
+            subject,
+            &Err(format!("do-not-mail list: {reason}")),
+        )
+        .await;
+        return Ok(());
+    }
     // The account's branding opens both parts of the message (kanban t_feab8aff). An account with
     // NO branding of its own gets this app's own wordmark and name instead of an empty space
     // (kanban t_6a8af451): the first mail a brand-new customer receives is the credentials mail, and
@@ -1437,6 +1463,20 @@ async fn send_email_request(
         .await
         .unwrap_or_else(app_default_branding);
     let (text_body, html_body) = apply_branding(Some(&branding), text_body, html_body);
+    // Every NOTIFICATION message carries the opt-out footer for THIS recipient, pointing at the
+    // signed link the gate above records. Transactional mail is left byte-identical to before this
+    // module existed.
+    let (text_body, html_body) = if mail_class == crate::compliance::NOTIFICATION {
+        let (t, h) = crate::compliance::with_unsubscribe_footer(
+            tenant_id,
+            to,
+            Some(text_body),
+            Some(html_body),
+        );
+        (t.unwrap_or_default(), h.unwrap_or_default())
+    } else {
+        (text_body, html_body)
+    };
 
     let cfg = email_provider::resolve(pool).await.ok_or_else(|| {
         "no email provider configured — save the admin panel's Email Provider \

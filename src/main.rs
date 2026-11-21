@@ -8,6 +8,7 @@ mod auth;
 mod billing_instructions;
 mod body_deadline;
 mod branding;
+mod compliance;
 mod config;
 mod credential_watch;
 mod db;

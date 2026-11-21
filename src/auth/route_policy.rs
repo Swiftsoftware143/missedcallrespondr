@@ -38,7 +38,7 @@
 //!       the SendGrid inbound receiver is mounted with `.nest(..)` and is counted in the anonymous
 //!       list, which is why the two numbers do not sum to the `.route(` census)
 //!    21 entries reach the ANONYMOUS `public_routes`:
-//!        18 deliberate public routes  (this module's PUBLIC_ROUTES — re-counted 2026-11-16: the
+//!        19 deliberate public routes  (this module's PUBLIC_ROUTES — re-counted 2026-11-16: the
 //!           tenant plan catalogue `/api/v1/public/plans` joined on 2026-11-12 in aed4070 and the
 //!           pin below was left at 17, so `cargo test` was RED on HEAD until this pass)
 //!         3 machine receivers whose credential is the app's own `x-internal-key`
@@ -158,6 +158,13 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // anything that does not match BOTH answers one neutral 404. Narrow by construction: ONE
     // workspace-less row, returning the subject, the status and the team's own entries.
     "/api/v1/public/support-answer",
+    // --- the one-click opt-out a notice mail carries (2026-11-21) --------------------------------
+    // The recipient of a notice clicks a link in their mail client, which carries no session. The
+    // SIGNED token in the path is the credential: it encodes account + address + class and can only
+    // ever record a refusal for the address it was minted for, so nothing about any tenant is
+    // readable here and no other address can be touched. GET renders the page; POST is the RFC 8058
+    // one-click form (same effect, no page).
+    "/api/v1/public/unsubscribe/:token",
     // --- telephony receiver whose own SIGNATURE is the credential ------------------------------
     // Telnyx posts call-control and message-delivery events here with no session. The receiver is
     // the app's inbound telephony door; it is mounted on the anonymous router because Telnyx cannot
@@ -480,6 +487,9 @@ mod tests {
             "/api/v1/telnyx/webhook",
             "/api/v1/webhooks/stripe",
             "/api/v1/webhooks/paypal",
+            // The one-click opt-out (2026-11-21): a mail client carries no session, and the SIGNED
+            // token in the path is the credential, so this surface must stay anonymous.
+            "/api/v1/public/unsubscribe/token-one",
         ] {
             assert!(is_public_route(path), "{} must stay anonymous", path);
         }
@@ -596,12 +606,12 @@ mod tests {
         // 18 deliberate public routes: the tenant plan catalogue `/api/v1/public/plans` joined on
         // 2026-11-12 (aed4070) and this pin was left at 17, so `cargo test` was RED on HEAD until
         // 2026-11-16 (card t_03c38b20) re-counted it against the list.
-        assert_eq!(super::PUBLIC_ROUTES.len(), 18, "PUBLIC_ROUTES size");
+        assert_eq!(super::PUBLIC_ROUTES.len(), 19, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
         // The 21 anonymous mounts: 18 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            21
+            22
         );
         // 135 entries / 135 distinct paths (the "sign out every other device" door
         // `POST /api/v1/auth/logout-all` joined on 2026-11-01 — a PROTECTED mount beside
@@ -688,11 +698,11 @@ mod tests {
         // operator's portfolio-companies screen) — a PROTECTED `/api/v1/admin/*` mount like its
         // `/tenants` neighbours, so PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing
         // became reachable without a credential. Found by `cargo test`, RED at HEAD before it.
-        assert_eq!(lits.len(), 154, "mounted .route entries");
+        assert_eq!(lits.len(), 158, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 154, "distinct mounted paths");
+        assert_eq!(uniq.len(), 158, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

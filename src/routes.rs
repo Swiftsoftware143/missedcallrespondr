@@ -99,6 +99,14 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/public/support-answer",
             post(crate::handlers::tickets_handler::public_answer),
         )
+        // The one-click opt-out a notice mail carries (2026-11-21). A mail client fetches this with
+        // no session: the signed token in the path IS the credential and it can only ever record a
+        // refusal for the address it was minted for. GET renders the page a person clicks; POST is
+        // the RFC 8058 one-click form, same effect with no page.
+        .route(
+            "/api/v1/public/unsubscribe/:token",
+            get(crate::compliance::show_unsubscribe).post(crate::compliance::one_click),
+        )
         .route(
             "/api/v1/internal/portfolio-companies",
             post(portfolio_handler::internal_create_portfolio_company),
@@ -296,6 +304,22 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/settings/branding/logo",
             post(crate::handlers::branding_handler::upload_logo)
                 .delete(crate::handlers::branding_handler::delete_logo),
+        )
+        // The operator's do-not-mail list (2026-11-21): who has asked this workspace to stop mailing
+        // them, an address added by hand (a request made by phone, or one watched hard-bouncing),
+        // one allowed again, and the same list as a file. Every door is scoped to the caller's own
+        // workspace from the token's `aid` claim.
+        .route(
+            "/api/v1/settings/suppressions",
+            get(crate::compliance::list_suppressions).post(crate::compliance::add_suppression),
+        )
+        .route(
+            "/api/v1/settings/suppressions.csv",
+            get(crate::compliance::suppressions_csv),
+        )
+        .route(
+            "/api/v1/settings/suppressions/:id",
+            axum::routing::delete(crate::compliance::remove_suppression),
         )
         .route(
             "/api/v1/team/members",

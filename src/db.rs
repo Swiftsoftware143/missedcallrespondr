@@ -537,6 +537,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000062_portfolio_company_account",
             include_str!("../migrations/000062_portfolio_company_account.sql"),
         ),
+        // A do-not-mail list this app can actually honour (2026-11-21). The last app in the fleet
+        // without one: an address that asked to stop, or that the operator watched hard-bounce,
+        // kept receiving mail. Idempotent (CREATE TABLE IF NOT EXISTS + IF NOT EXISTS index) because
+        // this runner re-executes every file per boot, and `include_str!` of a brand-new file is
+        // also what forces the rebuild to embed it.
+        (
+            "000063_email_suppressions",
+            include_str!("../migrations/000063_email_suppressions.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {
