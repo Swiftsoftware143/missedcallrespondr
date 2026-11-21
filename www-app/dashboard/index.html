@@ -84,7 +84,7 @@ window.appGuidePages = {
   // except this one, so the guide's round "?" silently disappeared on the MCP tab \u2014 the same
   // defect earlier passes fixed for lists, calendar, team and branding. Measured live in Chromium
   // on app.missedcallrespondr.com: MCP -> #ig-toggle display:none while API Keys/Calendar -> flex.
-  mcp:          { title: "MCP", desc: "Connects an AI tool \u2014 Claude Code, Cursor or your own agent \u2014 to read this workspace. Read-only: the tool can look, not change. The server accepts this workspace's API key as its token, so the key here is the same one the API Keys screen shows; the secret stays hidden until you press Reveal and enter your account password.", actions: ["Copy the endpoint into your AI tool's MCP settings", "Press Reveal and enter your account password to see the key", "Press Copy to put the key on the clipboard", "Press Regenerate to replace a key you think leaked \u2014 any client still using the old one stops"] },
+  mcp:          { title: "MCP", desc: "Connect ChatGPT or Claude to this account so an AI can read your calls, leads, tickets and clients and find things for you. Read-only: the tool can look, never change, and it can only read this workspace. It signs in with this workspace's own API key, so the key here is the same one the API Keys screen shows.", actions: ["Follow the ChatGPT or Claude steps to paste the endpoint", "Press Copy beside the address to put the endpoint on the clipboard", "Press Reveal and enter your account password to see the key", "Press Test connection to confirm the server answers"] },
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
@@ -2515,7 +2515,7 @@ const Billing = () => {
                   payment_link: 'Payment page opened', pending: 'Waiting for payment',
                   created: 'Waiting for payment', open: 'Waiting for payment',
                   failed: 'Did not go through', cancelled: 'Cancelled', canceled: 'Cancelled',
-                  expired: 'Expired', refunded: 'Refunded' };
+                  expired: 'Expired', refunded: 'Refunded', provider_error: 'Could not start the checkout', no_provider: 'No payment method set up' };
     return map[s] || (s ? s.replace(/_/g, ' ') : '\u2014');
   };
   if (!st.sessionsLoaded) {
@@ -2864,7 +2864,7 @@ const Billing = () => {
                 <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payThrough(s.payment_provider || s.provider_type)}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payState(s.status)}</td>
               </tr>`)}</tbody>
-            </table></div>`
+            </table></div>${st.sessions.some(s => String(s.status || '').toLowerCase() === 'provider_error') ? html`<p class="text-sm text-gray-600" id="payment-history-provider-error" style="margin-top:8px">Nothing was charged on the attempts marked &ldquo;Could not start the checkout&rdquo; &mdash; the payment provider rejected this workspace&rsquo;s saved key. Whoever set it up can replace it in Settings &rarr; Payments; until then an upgrade still reaches the team, who can switch the workspace on by hand.</p>` : null}`
         : html`<p class="text-sm text-gray-600" id="payment-history-empty">Nothing has been charged on this workspace yet. When a plan is bought or a payment is attempted, it appears here with its date, amount and outcome.</p>`}
     </div>`}
     <div class="card">
@@ -3568,30 +3568,83 @@ const ApiKeys = () => {
   </div>`;
 };
 
-// ===== MCP (fleet slot directly above the account entry; docs/fleet-mcp-nav-convention.md) =====
-// One nav entry, one panel, same slot relative to the account/settings entry in every app. The
-// token is THIS workspace's own API key — the same row a `Authorization: Bearer mcr_…` call
-// authenticates with — and Reveal / Regenerate reuse the EXACT endpoints the API Keys screen uses,
-// so the two surfaces can never disagree about which key is live. No audit block: the MCP audit
-// log is a file owned by the mcp service and has no read API.
+// ===== MCP (fleet slot at the BOTTOM of the left menu, below the account entry) =====
+// Rebuilt 2026-11-21 to match David's reference screen (docs/fleet-mcp-screen-design-spec.md): the
+// breadcrumb, the promise, the client tabs, the numbered steps with a copyable ADDRESS, the
+// "ready to connect" strip, the prompt columns with Copy buttons, the "don't know what to ask"
+// helper, the capability accordion, "what it will not do", and the collapsed developer drawer.
+// THREE HONEST DIFFERENCES from the reference, because this product is read-only and key-auth:
+//   1. There is no OAuth "connect with one click". MissedCall authenticates with the account's own
+//      API key, so the steps say that instead of "choose OAuth".
+//   2. There is no list of connected apps — the key IS the connection. The connected-apps block says
+//      so and names the one action that disconnects everything (regenerate the key).
+//   3. Every example is a question, because the MCP service is SELECT-only by construction.
 const MCP_ENDPOINT = 'https://hooks.swiftsoftware.net/mcp';
-// The read-only tools a missedcallrespondr key can reach, one line each — generated by the fleet
-// MCP server's AppSpec entries for app "missedcallrespondr" (see /opt/swift/mcp/src/main.rs). Each
-// entity exposes `<key>_summary` and `<key>_search`; `<key>_list_tenants` is operator-only and
-// refused for a workspace credential.
-const MCP_TOOLS = [
-  { name: 'missedcallrespondr_summary / missedcallrespondr_search', desc: 'leads: name, email, phone, status' },
-  { name: 'missedcallrespondr_contacts_summary / _search', desc: 'contacts: name, email, phone, company' },
-  { name: 'missedcallrespondr_tickets_summary / _search', desc: 'tickets: subject, requester email, priority, status' },
-  { name: 'missedcallrespondr_ticket_messages_summary / _search', desc: 'ticket messages: sender, ticket subject, 2,000-char body excerpt, received time' },
-  { name: 'missedcallrespondr_workspaces_summary / _search', desc: 'workspaces: name, default flag' },
-  { name: 'missedcallrespondr_activity_summary / _search', desc: 'activity: action, entity type, entity id' },
-  { name: 'missedcallrespondr_plans_summary / _search', desc: 'plans: status, plan id, billing cycle' },
+// Copy-paste config for any MCP client. `YOUR_API_KEY` is this workspace's own API key from below.
+const MCP_CONFIG_TEXT = JSON.stringify({ mcpServers: { missedcallrespondr: { url: MCP_ENDPOINT, headers: { Authorization: 'Bearer YOUR_API_KEY' } } } }, null, 2);
+// The read-only entities a missedcallrespondr key can reach — generated from the fleet MCP server's
+// AppSpec entries for app "missedcallrespondr" (see /opt/swift/mcp/src/main.rs). Each exposes
+// `<key>_summary` and `<key>_search`; `<key>_list_tenants` is operator-only and refused for a
+// workspace credential. Do NOT edit by hand — scripts/missedcall-mcp-entity-specs.py --check fails
+// the build when this disagrees with the service source.
+const MCP_ENTITIES = [
+  // GENERATED from /opt/swift/mcp/src/main.rs by
+  // scripts/missedcall-mcp-entity-specs.py — do not edit by hand.
+  { key: 'missedcallrespondr', label: 'leads', desc: 'Leads: name, email, phone, status' },
+  { key: 'missedcallrespondr_clients', label: 'clients', desc: 'Clients: name, email, phone, source' },
+  { key: 'missedcallrespondr_leads', label: 'leads', desc: 'Leads: name, email, phone, source, status' },
+  { key: 'missedcallrespondr_deals', label: 'deals', desc: 'Deals: name, value, stage, source' },
+  { key: 'missedcallrespondr_inbound_calls', label: 'inbound calls', desc: 'Inbound calls: caller name, caller number, disposition' },
+  { key: 'missedcallrespondr_call_logs', label: 'call logs', desc: 'Call logs: disposition, caller number, called number, notes' },
+  { key: 'missedcallrespondr_follow_ups', label: 'follow-ups', desc: 'Follow-ups: type, status, notes' },
+  { key: 'missedcallrespondr_campaigns', label: 'campaigns', desc: 'Campaigns: name, kind, status' },
+  { key: 'missedcallrespondr_calendar_events', label: 'calendar events', desc: 'Calendar events: title, type, description' },
+  { key: 'missedcallrespondr_affiliates', label: 'affiliates', desc: 'Affiliates: code, commission rate, active' },
+  { key: 'missedcallrespondr_contacts', label: 'contacts', desc: 'Contacts: name, email, phone, company' },
+  { key: 'missedcallrespondr_tickets', label: 'tickets', desc: 'Tickets: subject, requester email, priority, status' },
+  { key: 'missedcallrespondr_ticket_messages', label: 'ticket messages', desc: 'Ticket messages: sender, ticket subject, body, received time' },
+  { key: 'missedcallrespondr_workspaces', label: 'workspaces', desc: 'Workspaces: name, default flag' },
+  { key: 'missedcallrespondr_activity', label: 'activity', desc: 'Activity: action, entity type, entity id' },
+  { key: 'missedcallrespondr_plans', label: 'plans', desc: 'Plans: status, plan id, billing cycle' },
 ];
-// Copy-paste config for any MCP client. `YOUR_API_KEY` is this workspace's own API key from above.
-const MCP_CONNECT_JSON = JSON.stringify({ mcpServers: { missedcallrespondr: { url: MCP_ENDPOINT, headers: { Authorization: 'Bearer YOUR_API_KEY' } } } }, null, 2);
+// The example questions (David, 2026-11-21): four groups, every prompt answerable by the read-only
+// tools above, every line with its own Copy button and a "See more examples" tail per group.
+const MCP_PROMPT_GROUPS = [
+  { title: 'Build something', hint: 'questions to shape what you set up', items: [
+    'Which of my campaigns are still running?',
+    'Show me my clients and where each came from.',
+    'Which workspaces do I have?',
+    'What leads have I collected so far?',
+    'What deals are open right now?',
+    'Who is in my address book?'
+  ] },
+  { title: 'Change something', hint: 'what needs your attention next', items: [
+    'Which follow-ups are overdue and need moving?',
+    'Which tickets are still open and waiting on me?',
+    'Which affiliates are inactive?',
+    'What is the newest activity on my account?',
+    'What is the current state of my plan?',
+    'Which leads are still marked open?'
+  ] },
+  { title: 'Find & manage', hint: 'find any record, fast', items: [
+    'Which calls came in this week?',
+    'Show my open tickets.',
+    'What follow-ups are scheduled?',
+    'Find the contact with the email jane@example.com.',
+    'What did the last few inbound callers say?',
+    'What does my call log show for this week?'
+  ] },
+  { title: 'Let AI help', hint: 'read across everything and summarise', items: [
+    'Summarise what happened on my account this week.',
+    'Which calls were missed, and which were answered?',
+    'What is coming up on my calendar?',
+    'Summarise the conversation on my open tickets.',
+    'Who is calling me most often?',
+    'Which campaigns are the most active?'
+  ] }
+];
 const Mcp = () => {
-  const st = viewState('mcp', { loaded: false, keys: [], shown: null, error: null, notice: null, busy: false });
+  const st = viewState('mcp', { loaded: false, keys: [], shown: null, error: null, notice: null, busy: false, client: 'chatgpt', checkMsg: null, checking: false, devOpen: false, devTab: 0, goal: '', ideas: null, more: {} });
   const reload = () => {
     API.get('/api-keys').then(d => { st.keys = (d && d.api_keys) || []; renderApp(); })
       .catch(e => { st.error = 'Could not load API keys: ' + e.message; renderApp(); });
@@ -3599,6 +3652,7 @@ const Mcp = () => {
   if (!st.loaded) { st.loaded = true; reload(); }
   const activeKeys = (st.keys || []).filter(k => !k.revoked_at);
   const k = activeKeys[0] || null;
+  const c = API.user || {};
   const copy = async (text, elId) => {
     if (!text) { st.error = 'Reveal the key first'; renderApp(); return; }
     let ok = false;
@@ -3627,21 +3681,131 @@ const Mcp = () => {
     } catch (e) { st.error = e.message; }
     st.busy = false; renderApp();
   };
+  // The check asks the server whether it is there, WITHOUT the key. A 401 means "reachable, and it
+  // wants a key", which is exactly the state a customer is in before they paste one.
+  const testConnection = () => {
+    st.checking = true; st.checkMsg = null; renderApp();
+    fetch(MCP_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) })
+      .then(r => { st.checkMsg = (r.status === 401) ? 'The server answered and asked for a key — that is the right state before you paste one.' : 'The server answered with status ' + r.status + '.'; })
+      .catch(() => { st.checkMsg = 'This browser could not reach the server (it may be blocked on your network). The service itself is up — check from the client.'; })
+      .then(() => { st.checking = false; renderApp(); });
+  };
+  // Ideas come from OUR entities, never a capability we do not have: every suggestion is a question,
+  // because this connection is read-only.
+  const giveIdeas = () => {
+    const goal = (st.goal || '').toLowerCase();
+    let ideas;
+    if (/call/.test(goal)) ideas = ['Which calls came in this week?', 'Which calls were missed, and which were answered?', 'Who is calling me most often?'];
+    else if (/ticket|support/.test(goal)) ideas = ['Show my open tickets.', 'Summarise the conversation on my open tickets.', 'Which tickets are still open and waiting on me?'];
+    else if (/lead|deal|client|contact/.test(goal)) ideas = ['Show me my clients and where each came from.', 'What deals are open right now?', 'Find the contact with the email jane@example.com.'];
+    else if (/follow|overdue/.test(goal)) ideas = ['Which follow-ups are overdue and need moving?', 'What follow-ups are scheduled?'];
+    else if (/calendar|appointment/.test(goal)) ideas = ['What is coming up on my calendar?'];
+    else if (/campaign|affiliate/.test(goal)) ideas = ['Which of my campaigns are still running?', 'Which affiliates are inactive?'];
+    else ideas = ['Which calls came in this week?', 'Show my open tickets.', 'What follow-ups are scheduled?', 'Summarise what happened on my account this week.'];
+    st.ideas = ideas; renderApp();
+  };
+  const step = (n, heading, body, extra) => html`
+    <div style="display:flex;gap:12px;margin-bottom:14px">
+      <div style="flex:0 0 26px;height:26px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">${n}</div>
+      <div style="flex:1"><div style="font-weight:600;margin-bottom:2px">${heading}</div><div style="color:#64748b;font-size:13px">${body}</div>${extra || ''}</div>
+    </div>`;
+  const addressRow = html`
+    <div style="margin-top:6px">
+      <div style="font-size:11px;color:#94a3b8;letter-spacing:.08em;font-weight:700;margin-bottom:4px">ADDRESS</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <code id="mcp-endpoint" style="flex:1;min-width:260px;word-break:break-all;background:#0f172a;color:#7dd3fc;padding:8px 12px;border-radius:8px;font-size:13px">${MCP_ENDPOINT}</code>
+        <button class="btn btn-sm" onClick=${() => copy(MCP_ENDPOINT, 'mcp-endpoint')}>Copy</button>
+      </div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px">The whole address, nothing on the end.</div>
+    </div>`;
+  const chatgptSteps = html`${[
+    step(1, 'Open chatgpt.com on a computer, not your phone.', 'This cannot be set up in the ChatGPT phone app.'),
+    step(2, 'Switch on developer mode in ChatGPT’s settings.', 'On a Plus or Pro account it is under Security and login. On a Business, Enterprise or Education account it is under Apps then Advanced settings, and an administrator may have to allow it first.'),
+    step(3, 'Open Apps and press the plus (+) to add one. Call it MissedCall.', 'Some accounts call these Plugins or Connectors instead.'),
+    step(4, 'Paste this address into the address box.', 'The whole address, exactly as shown.', addressRow),
+    step(5, 'Where it asks how to sign in, choose API key (Bearer token).', 'There is no OAuth approval here. Paste the key from the card below into the token field.'),
+    step(6, 'Press Create, then ask it a question.', 'Try “Which calls came in this week?” If no tools appear, the key was rejected — regenerate it and paste the new one.')
+  ]}`;
+  const claudeSteps = html`${[
+    step(1, 'Open Claude on the web, on a computer.', 'Settings then Connectors then Add custom connector. The Claude phone app cannot add one.'),
+    step(2, 'Name it MissedCall and paste the address below.', 'The whole address, nothing on the end.', addressRow),
+    step(3, 'Choose to authenticate with a token, and paste your API key.', 'The key is on the card below. Claude sends it as a bearer token on every request.'),
+    step(4, 'Save it, then ask a question.', 'Try “Which calls came in this week?” If nothing is offered as a tool, the key is the thing to replace.')
+  ]}`;
+  const promptCard = (q) => html`
+    <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:9px 11px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:7px;background:#fff">
+      <span style="font-size:13px">${q}</span>
+      <button class="btn btn-sm btn-outline" onClick=${() => copy(q)}>Copy</button>
+    </div>`;
+  const group = (g) => {
+    const open = st.more[g.title] === true;
+    const items = open ? g.items : g.items.slice(0, 4);
+    const left = items.filter((_, i) => i % 2 === 0).map(promptCard);
+    const right = items.filter((_, i) => i % 2 === 1).map(promptCard);
+    return html`
+      <div style="margin-bottom:18px">
+        <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px;text-transform:uppercase">${g.title}<span style="font-weight:400;text-transform:none"> — ${g.hint}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div>${left}</div><div>${right}</div></div>
+        ${!open && g.items.length > 4 ? html`<button class="btn btn-sm btn-outline" onClick=${() => { st.more[g.title] = true; renderApp(); }}>See more examples →</button>` : ''}
+      </div>`;
+  };
+  const devTabs = ['How it connects', 'Your API token', 'Claude Code', 'Claude Desktop', 'Codex', 'Cursor', 'Troubleshooting', 'FAQ'];
+  const devBody = () => {
+    const t = st.devTab;
+    const h4 = (s) => html`<h4 style="margin:0 0 8px">${s}</h4>`;
+    const p = (s) => html`<p style="color:#64748b;font-size:13px;margin:0 0 10px">${s}</p>`;
+    const pre = (s) => html`<pre style="background:#0f172a;color:#7dd3fc;padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:0">${s}</pre>`;
+    if (t === 0) return html`${h4('How it connects')}${p('Your AI client sends JSON-RPC over HTTPS to the address above. Every request carries your API key as a bearer token. The server hashes the key, finds the account it belongs to, and applies that account as a filter on every query — there is no parameter that can widen it. The database user behind it can only run SELECT.')}`;
+    if (t === 1) return html`${h4('Your API token')}${p('One key per account. Press Reveal on the card above to see it — it asks for your account password. Regenerating it disconnects every app using the old key.')}`;
+    if (t === 2) return html`${h4('Claude Code')}${pre('claude mcp add --transport http missedcallrespondr \\\n  https://hooks.swiftsoftware.net/mcp \\\n  --header "Authorization: Bearer YOUR_API_KEY"')}`;
+    if (t === 3) return html`${h4('Claude Desktop')}${p('Settings, then Connectors, then Add custom connector. Paste the address and choose to authenticate with a token. Or add it to the config file:')}${pre(MCP_CONFIG_TEXT)}`;
+    if (t === 4) return html`${h4('Codex')}${p('Codex reads the same config shape as Claude Desktop. Add it as an HTTP MCP server with the address above and the Authorization header carrying your key.')}${pre(MCP_CONFIG_TEXT)}`;
+    if (t === 5) return html`${h4('Cursor')}${p('Settings, then MCP, then add a server of type http with the address above and the Authorization header carrying your key.')}${pre(MCP_CONFIG_TEXT)}`;
+    if (t === 6) return html`${h4('Troubleshooting')}<ul style="margin:0;padding-left:20px;color:#64748b;font-size:13px;line-height:1.8">${[
+      html`<li><strong>No tools appear.</strong> The key was rejected. Regenerate it and paste the new one.</li>`,
+      html`<li><strong>It answers but returns nothing.</strong> That is usually correct: a scope that genuinely holds no rows answers zero. Ask for something you know exists.</li>`,
+      html`<li><strong>You want it to add a contact.</strong> It cannot, by design. Reading only.</li>`
+    ]}</ul>`;
+    return html`${h4('FAQ')}<ul style="margin:0;padding-left:20px;color:#64748b;font-size:13px;line-height:1.8">${[
+      html`<li><strong>Does it cost anything?</strong> No. It is your own account reading its own data.</li>`,
+      html`<li><strong>Can I connect more than one app?</strong> Yes, with the same key. Regenerating the key disconnects all of them.</li>`,
+      html`<li><strong>Who can use it?</strong> Anyone holding the key can read the account, so treat it like a password.</li>`,
+      html`<li><strong>Why do I see zero rows?</strong> Because that part of the account is empty. Zero is an answer, not an error.</li>`
+    ]}</ul>`;
+  };
   return html`<div>
-    <h2 class="text-xl font-bold mb-4">MCP</h2>
-    <p class="text-sm text-gray-500 mb-4">Connect an AI tool (Claude Code, Cursor, or your own agent) to read this workspace. Read-only.</p>
+    <div class="text-xs text-gray-400 mb-1">MissedCall Respondr AI › Connect</div>
+    <h2 class="text-xl font-bold mb-1">Connect AI with MissedCall Respondr</h2>
+    <p class="text-sm text-gray-500 mb-4">Ask Claude or ChatGPT about your calls, leads, tickets and clients — and have it find things for you.</p>
     ${st.error && html`<div class="imp-banner"><span>${st.error}</span></div>`}
     ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:#059669;color:#065f46"><span>${st.notice}</span></div>`}
     <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-2">Endpoint</h3>
-      <div class="flex items-center gap-2 flex-wrap">
-        <code id="mcp-endpoint" style="flex:1;min-width:260px;word-break:break-all;background:#0f172a;color:#7dd3fc;padding:10px 14px;border-radius:10px;font-size:13px">${MCP_ENDPOINT}</code>
-        <button class="btn btn-sm" onClick=${() => copy(MCP_ENDPOINT, 'mcp-endpoint')}>Copy</button>
+      <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap">
+        <button class=${st.client === 'chatgpt' ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.client = 'chatgpt'; renderApp(); }}>ChatGPT</button>
+        <button class=${st.client === 'claude' ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.client = 'claude'; renderApp(); }}>Claude</button>
+      </div>
+      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">CONNECT WITH YOUR API KEY</div>
+      <p style="color:#64748b;margin-bottom:14px">For ChatGPT and Claude on the web. There is no token to copy by hand — you paste one address and give it this account’s API key, so every answer is scoped to <strong>your</strong> data and nobody else’s.</p>
+      ${st.client === 'chatgpt' ? chatgptSteps : claudeSteps}
+      <div style="margin-top:6px;padding:12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:4px"><span style="width:8px;height:8px;border-radius:50%;background:#059669;display:inline-block"></span>Ready to connect</div>
+        <div style="font-size:13px;color:#64748b;margin-bottom:10px">Your account: <strong>${c.email || 'this account'}</strong></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-outline" disabled=${st.checking} onClick=${testConnection}>${st.checking ? 'Checking…' : 'Test connection'}</button>
+          <button class="btn btn-sm btn-outline" onClick=${() => copy(MCP_CONFIG_TEXT, 'mcp-config')}>Copy setup</button>
+          <button class="btn btn-sm btn-outline" onClick=${() => { st.devOpen = true; renderApp(); }}>Advanced setup</button>
+        </div>
+        ${st.checkMsg && html`<div style="font-size:12px;color:#94a3b8;margin-top:8px">${st.checkMsg}</div>`}
+      </div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:12px;line-height:1.7">
+        Available on your account — the key is the same one the API Keys screen shows.<br>
+        Be signed in here first, in the same browser, so the key is yours.<br>
+        The approval screen names the account it will act as: your AI client reads exactly what this account can read, nothing more.
       </div>
     </div>
     <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-1">Your token</h3>
-      <p class="text-sm text-gray-500 mb-3">The server accepts this workspace's API key as a Bearer token — the same key the API Keys screen shows. It is listed here by prefix only; the secret is never shown until you Reveal it, which asks for your account password. Treat it like a password: anyone holding it can read this workspace.</p>
+      <h3 class="font-semibold text-gray-800 mb-1">Your API key</h3>
+      <p class="text-sm text-gray-500 mb-3">The server accepts this workspace’s API key as a Bearer token — the same key the API Keys screen shows. It is listed here by prefix only; the secret is never shown until you Reveal it, which asks for your account password. Treat it like a password: anyone holding it can read this workspace.</p>
       ${!k ? html`<p class="text-sm text-gray-400">No active API key yet. Create one on the API Keys screen, then come back.</p>` : html`
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <code style="background:#f1f5f9;color:#334155;padding:8px 12px;border-radius:8px;font-size:13px">${k.key_prefix}…</code>
@@ -3663,19 +3827,63 @@ const Mcp = () => {
         </div>` : ''}
     </div>
     <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-2">What it can read</h3>
-      <ul class="text-sm text-gray-700 list-disc pl-5 space-y-1" style="line-height:1.6">
-        ${MCP_TOOLS.map(t => html`<li><code style="font-size:12px">${t.name}</code> — ${t.desc}</li>`)}
-      </ul>
-      <p class="text-xs text-gray-500 mt-4">Every tool is read-only and tenant-scoped: a workspace token can only ever return this workspace's rows. There is no write tool and no free-form SQL door, and operator-wide tools are refused for a workspace credential.</p>
+      <h3 class="font-semibold text-gray-800 mb-2">Connected apps</h3>
+      <p class="text-sm text-gray-500">We do not keep a list of the apps you have connected — your key is the connection. That means one action disconnects everything at once: regenerate the key above and every client using the old one stops working immediately.</p>
     </div>
     <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-2">Connect</h3>
-      <p class="text-sm text-gray-500 mb-2">Paste this into your client's config — Claude Desktop (<code>claude_desktop_config.json</code>) or Cursor (<code>.cursor/mcp.json</code>). Replace <code>YOUR_API_KEY</code> with the key above.</p>
-      <div class="flex items-start gap-2">
-        <pre id="mcp-connect-config" style="flex:1;margin:0;background:#0f172a;color:#7dd3fc;padding:12px 14px;border-radius:10px;font-size:12px;overflow:auto">${MCP_CONNECT_JSON}</pre>
-        <button class="btn btn-sm" onClick=${() => copy(MCP_CONNECT_JSON, 'mcp-connect-config')}>Copy config</button>
+      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">WHAT CAN I ASK MISSEDCALL RESPONDR?</div>
+      <p style="color:#64748b;margin-bottom:12px">Say any of these — or anything like them — to your AI app. Every one is a question, because this connection reads and never writes.</p>
+      ${MCP_PROMPT_GROUPS.map(group)}
+    </div>
+    <div class="card">
+      <h3 class="font-semibold text-gray-800 mb-2">Don’t know what to ask?</h3>
+      <p class="text-sm text-gray-500 mb-2">Tell us what you are trying to do and we will give you things you can say.</p>
+      <div class="flex gap-2" style="flex-wrap:wrap">
+        <input type="text" class="input" style="flex:1;min-width:220px" placeholder="I want to …" value=${st.goal} onInput=${e => { st.goal = e.target.value; }} />
+        <button class="btn btn-sm" onClick=${giveIdeas}>Give me ideas</button>
       </div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px">We will suggest the prompts that fit your goal.</div>
+      ${st.ideas ? html`<div style="margin-top:10px">${st.ideas.map(promptCard)}</div>` : ''}
+    </div>
+    <div class="card">
+      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">EVERYTHING AI CAN DO WITH MISSEDCALL RESPONDR</div>
+      <p style="color:#64748b;font-size:13px;margin-bottom:8px">Open a section to see what is in it — ${MCP_ENTITIES.length} kinds of record, every one read-only and every one limited to this account.</p>
+      ${MCP_ENTITIES.map(e => html`
+        <details style="border-bottom:1px solid #e2e8f0;padding:10px 0">
+          <summary style="cursor:pointer;display:flex;align-items:center;gap:10px">
+            <span style="font-weight:600;text-transform:capitalize">${e.label}</span>
+            <span style="flex:1"></span>
+            <span style="color:#64748b;font-size:12px;text-align:right">${e.desc}</span>
+          </summary>
+          <div style="color:#64748b;font-size:13px;padding:8px 0 4px 2px">Reads ${e.label} via <code style="font-size:12px">${e.key}_summary</code> and <code style="font-size:12px">${e.key}_search</code>. Read-only and scoped to this workspace.</div>
+        </details>`)}
+    </div>
+    <div class="card">
+      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">WHAT IT WILL NOT DO</div>
+      <ul class="text-sm text-gray-500 pl-5 space-y-1" style="line-height:1.8">
+        <li>It cannot delete anything — not a contact, not a lead, not a ticket. Deleting stays in the app.</li>
+        <li>It cannot add or change anything either, and it cannot send a text or a campaign. Reading only.</li>
+        <li>It cannot read another account’s data. That is enforced at the database, not by instruction, so no wording in a prompt changes it.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="flex items-center gap-2" style="flex-wrap:wrap">
+        <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700">ADVANCED / DEVELOPER SETUP</div>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-outline" onClick=${() => { st.devOpen = !st.devOpen; renderApp(); }}>${st.devOpen ? 'Collapse developer details' : 'Expand developer details'}</button>
+      </div>
+      <div style="color:#64748b;font-size:13px;margin-bottom:10px">Technical details for developers and advanced users. Most people never need this section.</div>
+      ${st.devOpen ? html`
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          ${devTabs.map((t, i) => html`<button class=${st.devTab === i ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.devTab = i; renderApp(); }}>${t}</button>`)}
+        </div>
+        <div id="mcp-dev-panel">${devBody()}</div>
+        <button class="btn btn-sm btn-outline" style="margin-top:12px" onClick=${() => copy(MCP_CONFIG_TEXT, 'mcp-config')}>Copy my setup</button>
+      ` : ''}
+    </div>
+    <div class="card">
+      <h3 class="font-semibold text-gray-800 mb-2">Need help getting connected?</h3>
+      <p class="text-sm text-gray-500">Copy your setup with the button above and paste it to us, or read the step-by-step in the user guide. If your client lists no tools at all, the key is the thing to replace first — that is almost always the cause.</p>
     </div>
   </div>`;
 };
@@ -3714,8 +3922,8 @@ const App = () => {
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
     { id: 'apikeys', label: 'API Keys', icon: '🔑' },
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
-    { id: 'mcp', label: 'MCP', icon: '🤖' },
-    { id: 'profile', label: 'Profile', icon: '👤' }
+    { id: 'profile', label: 'Profile', icon: '👤' },
+    { id: 'mcp', label: 'MCP', icon: '🤖' }
   ].filter(n => !(impTenant && n.id === 'profile'));
   const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, inbox: Inbox, workspaces: Workspaces, integrations: Integrations, team: Team, branding: Branding, apikeys: ApiKeys, mcp: Mcp, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
