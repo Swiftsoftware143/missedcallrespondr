@@ -832,6 +832,15 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/admin/tenants",
             get(crate::handlers::admin_handler::list_all_tenants),
         )
+        // The operator's OWN businesses, apart from the customers (kanban t_bef16030). The Portfolio
+        // screen reads this: one row per company, each carrying the COMPANY'S OWN account id so
+        // "Open" can enter that account — and NULL when the company has none, which is what the
+        // screen renders as "No account". Distinct from `/api/v1/portfolio-companies`, which is the
+        // caller-scoped list of a tenant's own sub-entities.
+        .route(
+            "/api/v1/admin/portfolio-companies",
+            get(crate::handlers::admin_handler::list_admin_portfolio),
+        )
         // The Tenants screen as a file (cron `default`, 2026-11-20): the SAME rows, the same
         // hidden-probe rule, so the operator can take his customer list out of the product without
         // reading it off the screen. A static segment, so it can never be captured by `/tenants/:id`.

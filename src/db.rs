@@ -527,6 +527,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000061_reset_tokens_hashed",
             include_str!("../migrations/000061_reset_tokens_hashed.sql"),
         ),
+        // A portfolio company's OWN account, kept apart from the owner's (kanban t_bef16030). The
+        // single `tenant_id` meant two different things depending on which door wrote the row, so
+        // "open the row's tenant" could enter the operator's own account. Idempotent
+        // (ADD COLUMN IF NOT EXISTS + a backfill that only fills NULLs) because this runner
+        // re-executes every file per boot, and `include_str!` of a brand-new file is also what
+        // forces the rebuild to embed it.
+        (
+            "000062_portfolio_company_account",
+            include_str!("../migrations/000062_portfolio_company_account.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

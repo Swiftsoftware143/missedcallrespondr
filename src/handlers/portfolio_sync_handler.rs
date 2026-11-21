@@ -116,11 +116,16 @@ async fn mirror_tenant(
 }
 
 /// The company row both fallback arms write, sharing the resolved slug with the mirror parent.
+/// `account_tenant_id` carries the COMPANY'S OWN account (kanban t_bef16030) — the same tenant the
+/// row is scoped to here — so the Portfolio screen can open it without ever falling back to the
+/// owner's account.
 const SQL_COMPANY_UPSERT: &str =
-    "INSERT INTO portfolio_companies (id, tenant_id, name, slug, email) \
-     VALUES ($1, $2, $3, $4, $5) \
+    "INSERT INTO portfolio_companies (id, tenant_id, account_tenant_id, name, slug, email) \
+     VALUES ($1, $2, $2, $3, $4, $5) \
      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, \
-     email = EXCLUDED.email, tenant_id = EXCLUDED.tenant_id, updated_at = NOW()";
+     email = EXCLUDED.email, tenant_id = EXCLUDED.tenant_id, \
+     account_tenant_id = COALESCE(portfolio_companies.account_tenant_id, EXCLUDED.account_tenant_id), \
+     updated_at = NOW()";
 
 /// What the provisioning half of a sync did, so the caller can see which rows changed and the
 /// welcome-mail arm can send exactly once (only when the owner user was actually created).

@@ -195,9 +195,12 @@ pub async fn portfolio_sync(
     .execute(&state.pool)
     .await?;
 
-    // Create portfolio company
+    // Create portfolio company.
+    // `account_tenant_id` is the COMPANY'S OWN account (kanban t_bef16030) — the account the
+    // Portfolio screen's Open button enters. It is written here, at the same time as the account
+    // itself is minted, so a row can never be left without the reference the Open button needs.
     sqlx::query(
-        "INSERT INTO portfolio_companies (id, tenant_id, name, slug, email, description, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) ON CONFLICT (id) DO UPDATE SET name = $3, email = $5, description = $6, updated_at = NOW()"
+        "INSERT INTO portfolio_companies (id, tenant_id, account_tenant_id, name, slug, email, description, created_at, updated_at) VALUES ($1, $2, $2, $3, $4, $5, $6, NOW(), NOW()) ON CONFLICT (id) DO UPDATE SET name = $3, email = $5, description = $6, account_tenant_id = COALESCE(portfolio_companies.account_tenant_id, EXCLUDED.account_tenant_id), updated_at = NOW()"
     )
     .bind(sync_id)
     .bind(tenant_id)
@@ -349,6 +352,17 @@ pub async fn list_all_tenants(
         .get("include_probe")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    // Did the operator ask for the PORTFOLIO accounts too (`?include_portfolio=1`)?
+    //
+    // The owner's own businesses are NOT customers (fleet rule, kanban t_bef16030): they live on
+    // their own Portfolio screen, each row opening THAT company's own account. So they are held out
+    // of this customer list by default, and this one flag is the only way they appear here. Judged
+    // on the data (`portfolio_companies.account_tenant_id`), never on the name markers
+    // `row_protected` uses.
+    let include_portfolio = params
+        .get("include_portfolio")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let rows = sqlx::query(
         r#"SELECT 
             t.id, t.name, t.slug, t.created_at, COALESCE(t.probe_harness, '') AS probe_harness,
@@ -396,7 +410,19 @@ pub async fn list_all_tenants(
               ORDER BY CASE WHEN u.role IN ('account_owner','company_admin','admin','super_admin','agency_admin')
                             THEN 0 ELSE 1 END,
                        u.created_at ASC
-              LIMIT 1), false) as owner_credentials_undelivered
+              LIMIT 1), false) as owner_credentials_undelivered,
+             -- IS THIS ROW ONE OF THE OPERATOR'S OWN BUSINESSES? (kanban t_bef16030, 2026-11-20)
+             -- A portfolio company's account is not a customer: it is listed on the Portfolio screen
+             -- and it stays OUT of the customer list unless `?include_portfolio=1` asks for it.
+             -- Judged on DATA (the portfolio row's own account, else its owner-scope reference), not
+             -- on the company name: `row_protected` matches names, so a customer whose name merely
+             -- contains "giraudy" would have been hidden as a portfolio row.
+             EXISTS (SELECT 1 FROM portfolio_companies pc
+                      WHERE pc.account_tenant_id = t.id) as is_portfolio,
+             (SELECT pc.name FROM portfolio_companies pc
+               WHERE pc.account_tenant_id = t.id
+               ORDER BY lower(pc.name)
+               LIMIT 1) as portfolio_company
         FROM tenants t
         LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id AND tp.status = 'active'
         LEFT JOIN plans p ON p.id = tp.plan_id
@@ -447,9 +473,28 @@ pub async fn list_all_tenants(
                         .unwrap_or(0),
                 )
         })
+        // THE CUSTOMER LIST HOLDS CUSTOMERS (kanban t_bef16030). A portfolio company's account is
+        // held back here, next to the probe filter, so the two surfaces (this list and the Portfolio
+        // screen) can never both claim the same row: each account appears on exactly one of them
+        // unless the operator ticks "include portfolio companies".
+        .filter(|r| {
+            include_portfolio
+                || !r
+                    .try_get::<Option<bool>, _>("is_portfolio")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false)
+        })
         .collect();
 
     let tenants: Vec<Value> = rows.iter().map(|r| {
+        // ONE read of the portfolio flag per row: it decides the badge, the `protected` flag and the
+        // two published fields, so they can never disagree (kanban t_bef16030).
+        let is_portfolio = r
+            .try_get::<Option<bool>, _>("is_portfolio")
+            .ok()
+            .flatten()
+            .unwrap_or(false);
         json!({
             "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
             "name": r.try_get::<String,_>("name").unwrap_or_default(),
@@ -490,11 +535,19 @@ pub async fn list_all_tenants(
             "protected": row_protected(
                 &r.try_get::<String,_>("name").unwrap_or_default(),
                 &r.try_get::<String,_>("slug").unwrap_or_default(),
-            ).is_some(),
+            ).is_some() || is_portfolio,
             "protected_reason": row_protected(
                 &r.try_get::<String,_>("name").unwrap_or_default(),
                 &r.try_get::<String,_>("slug").unwrap_or_default(),
-            ).unwrap_or_default(),
+            ).unwrap_or(if is_portfolio { "portfolio company" } else { "" }),
+            // TRUE => this tenant is one of the OPERATOR'S OWN businesses, not a customer
+            // (kanban t_bef16030). It is served only when the caller passes
+            // `?include_portfolio=1`, and the console badges it "portfolio" so the two can never be
+            // confused. `portfolio_company` names the company the account belongs to; a portfolio
+            // company with NO account is not in this list at all — it is on the Portfolio screen
+            // saying so.
+            "is_portfolio": is_portfolio,
+            "portfolio_company": r.try_get::<Option<String>,_>("portfolio_company").ok().flatten(),
             // TRUE => the signup door minted this workspace's first password and the mail carrying
             // it never went out, so nobody has ever read that customer's password (2026-11-05).
             // Published so the Owner cell can badge the row and offer `resend-credentials`; a
@@ -530,6 +583,97 @@ pub async fn list_all_tenants(
     })))
 }
 
+/// GET /api/v1/admin/portfolio-companies — the operator's OWN businesses, apart from customers
+/// (kanban t_bef16030, fleet rule 2026-11-20: portfolio companies are NOT customers).
+///
+/// WHY A SEPARATE ROUTE. `GET /api/v1/portfolio-companies` binds `claims.aid`, so it answers only
+/// the caller's own tenant's rows (`portfolio_companies.tenant_id`) — on this install that is ONE of
+/// the six companies, because the sync doors store the COMPANY'S tenant in that column. The operator
+/// needs the businesses themselves, each one able to open ITS OWN account.
+///
+/// THE TRAP THIS ROUTE REMOVES. A portfolio row carries TWO account references: the one that owns the
+/// row (`tenant_id` — the operator's account, shared by every row) and the company's own
+/// (`account_tenant_id`). A screen that opens `tenant_id` enters the operator's own account for every
+/// company — a button that looks like it does nothing. `account_id` below is the company's OWN, and
+/// it is NULL when the company has no account in this app yet, which is what lets the console say
+/// "No account" instead of offering a button that cannot work.
+pub async fn list_admin_portfolio(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| AppError::Unauthorized("Missing auth token".into()))?;
+
+    let claims = crate::auth::models::validate_token(auth_header, &state.config.jwt_secret)
+        .map_err(|_| AppError::Unauthorized("Invalid token".into()))?;
+
+    if claims.role != "agency_admin" && claims.role != "admin" && claims.role != "super_admin" {
+        return Err(AppError::Unauthorized(
+            "Not authorized to list portfolio companies".into(),
+        ));
+    }
+
+    use sqlx::Row;
+    // The JOIN is the whole point: the account is resolved from the company's OWN reference, so a
+    // company whose account row is gone (or was never created) answers NULL rather than borrowing
+    // the owner's. Read-only, explicit columns.
+    let rows = sqlx::query(
+        r#"SELECT pc.id, pc.name, pc.slug, pc.email, pc.description, pc.is_active,
+                  pc.tenant_id AS owner_account_id,
+                  t.id AS account_id, t.name AS account_name, t.is_active AS account_active,
+                  (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) AS account_user_count
+             FROM portfolio_companies pc
+             LEFT JOIN tenants t ON t.id = pc.account_tenant_id
+            ORDER BY lower(pc.name)"#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let companies: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let account_id: Option<Uuid> = r.try_get("account_id").ok().flatten();
+            json!({
+                "id": r.try_get::<Uuid,_>("id").map(|u| u.to_string()).unwrap_or_default(),
+                "name": r.try_get::<String,_>("name").unwrap_or_default(),
+                "slug": r.try_get::<String,_>("slug").unwrap_or_default(),
+                "email": r.try_get::<Option<String>,_>("email").ok().flatten(),
+                "description": r.try_get::<Option<String>,_>("description").ok().flatten(),
+                "is_active": r.try_get::<Option<bool>,_>("is_active").ok().flatten().unwrap_or(true),
+                // The account that owns the ROW. Published so the console can say which account a
+                // company belongs to without ever using it as the Open target.
+                "owner_account_id": r.try_get::<Option<Uuid>,_>("owner_account_id").ok().flatten().map(|u| u.to_string()),
+                // The COMPANY'S OWN account — the only correct target for "Open".
+                "account_id": account_id.map(|u| u.to_string()),
+                "account_name": r.try_get::<Option<String>,_>("account_name").ok().flatten(),
+                "account_active": r.try_get::<Option<bool>,_>("account_active").ok().flatten(),
+                "account_user_count": r.try_get::<Option<i64>,_>("account_user_count").ok().flatten().unwrap_or(0),
+                // One field the console can branch on, so "no account" is a stated fact rather than
+                // an inference from a nullable column.
+                "has_account": account_id.is_some(),
+            })
+        })
+        .collect();
+
+    let with_account = companies
+        .iter()
+        .filter(|c| {
+            c.get("has_account")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+        .count();
+
+    Ok(Json(json!({
+        "companies": companies,
+        "total": companies.len(),
+        "with_account": with_account,
+    })))
+}
+
 /// GET /api/v1/admin/tenants/export — the Tenants screen as a downloadable CSV file
 /// (cron `default`, 2026-11-20).
 ///
@@ -546,6 +690,7 @@ pub async fn list_all_tenants(
 pub async fn export_tenants_csv(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<impl IntoResponse, AppError> {
     let auth_header = headers
         .get("Authorization")
@@ -561,6 +706,12 @@ pub async fn export_tenants_csv(
     }
 
     use sqlx::Row;
+    // `?include_portfolio=1` puts the operator's own companies back into the file, exactly as it puts
+    // them back on the screen (kanban t_bef16030).
+    let include_portfolio = params
+        .get("include_portfolio")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let rows = sqlx::query(
         r#"SELECT t.name, t.slug, t.is_active,
                   COALESCE(t.probe_harness, '') AS probe_harness,
@@ -574,7 +725,15 @@ pub async fn export_tenants_csv(
                              u.created_at ASC
                     LIMIT 1) AS owner_email,
                   t.created_at,
-                  (SELECT max(u.last_login_at) FROM users u WHERE u.tenant_id = t.id) AS last_sign_in
+                  (SELECT max(u.last_login_at) FROM users u WHERE u.tenant_id = t.id) AS last_sign_in,
+                  -- The SAME portfolio rule the console list applies (kanban t_bef16030): the
+                  -- operator's own companies are not customers and stay out of this file by default,
+                  -- so the download and the screen cannot disagree about who is a customer.
+                  EXISTS (SELECT 1 FROM portfolio_companies pc
+                           WHERE pc.account_tenant_id = t.id) AS is_portfolio,
+                  (SELECT pc.name FROM portfolio_companies pc
+                    WHERE pc.account_tenant_id = t.id
+                    ORDER BY lower(pc.name) LIMIT 1) AS portfolio_company
              FROM tenants t
              LEFT JOIN tenant_plans tp ON tp.tenant_id = t.id AND tp.status = 'active'
              LEFT JOIN plans p ON p.id = tp.plan_id
@@ -583,8 +742,12 @@ pub async fn export_tenants_csv(
     .fetch_all(&state.pool)
     .await?;
 
-    let mut csv =
-        String::from("Workspace,Slug,Plan,Status,Users,Owner,Created,Last sign-in,Protected\n");
+    // "Account", not "Workspace" (kanban t_bef16030): the thing in this column IS the customer's
+    // account — a workspace is something inside an account, and this app has both. The Portfolio
+    // column names the operator's own company when the caller asked for them.
+    let mut csv = String::from(
+        "Account,Slug,Plan,Status,Users,Owner,Created,Last sign-in,Protected,Portfolio\n",
+    );
     let mut written = 0usize;
     for r in rows {
         let name: String = r.try_get("name").unwrap_or_default();
@@ -600,13 +763,27 @@ pub async fn export_tenants_csv(
         if is_hidden_workspace(&harness, owner.as_deref(), users) {
             continue;
         }
+        // ...and neither is one of the operator's own companies (kanban t_bef16030).
+        let is_portfolio = r
+            .try_get::<Option<bool>, _>("is_portfolio")
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        if is_portfolio && !include_portfolio {
+            continue;
+        }
         let plan: Option<String> = r.try_get("plan_name").ok().flatten();
         let active: Option<bool> = r.try_get("is_active").ok().flatten();
         let created: Option<chrono::NaiveDateTime> = r.try_get("created_at").ok();
         let last: Option<chrono::DateTime<Utc>> = r.try_get("last_sign_in").ok().flatten();
         let protected = row_protected(&name, &slug).unwrap_or("");
+        let portfolio = r
+            .try_get::<Option<String>, _>("portfolio_company")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         csv.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{}\n",
             tenant_csv_cell(&name),
             tenant_csv_cell(&slug),
             tenant_csv_cell(plan.as_deref().unwrap_or("")),
@@ -623,6 +800,7 @@ pub async fn export_tenants_csv(
             last.map(|d| d.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_default(),
             protected,
+            tenant_csv_cell(&portfolio),
         ));
         written += 1;
     }
@@ -1036,6 +1214,24 @@ async fn guard_protected(
                 "refusing to delete a portfolio company ({})",
                 hit
             )));
+        }
+        // THE NAME MARKERS ARE NOT THE WHOLE RULE (kanban t_bef16030). `protected_marker` matches a
+        // fixed word list, so two of the operator's own companies ("Xride Drivers" and "BV Premiere
+        // Products") matched no marker at all and were deletable — with their data — from the bulk
+        // door. The list is data now: any account a portfolio row points at is one of the owner's own
+        // businesses and is refused, whatever it is called.
+        // Fails CLOSED: a database error propagates (the delete does not happen) rather than
+        // defaulting to "not a portfolio company".
+        let is_portfolio: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM portfolio_companies WHERE account_tenant_id = $1)",
+        )
+        .bind(tenant_id)
+        .fetch_one(&state.pool)
+        .await?;
+        if is_portfolio {
+            return Err(AppError::BadRequest(
+                "refusing to delete a portfolio company (its own account)".into(),
+            ));
         }
     }
 

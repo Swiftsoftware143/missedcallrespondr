@@ -737,72 +737,75 @@ const Dashboard = () => {
   </div>`;
 };
 
-// ---- PORTFOLIO ----
+// ---- PORTFOLIO (the operator's OWN businesses — never customers) ----
+// kanban t_bef16030 (fleet rule, David 2026-11-20): a portfolio company is NOT a customer. It is
+// listed HERE, with its own account, and the Customers screen holds customers only.
 const Portfolio = () => {
-  const st = viewState('portfolio', { list: [], showModal: false, editItem: null, search: '' });
-  const load = async () => { try { const data = await API.get('/portfolio-companies'); st.list = Array.isArray(data) ? data : []; renderApp(); } catch(e) { console.error(e); } };
-  if (!st._loaded) { st._loaded = true; load(); }
-
-  const show = (item) => { st.editItem = item; st.formSeeded = false; st.showModal = true; renderApp(); };
-  const hide = () => { st.showModal = false; renderApp(); };
-  const save = async (data) => {
-    try { if(st.editItem) await API.put('/portfolio-companies/' + st.editItem.id, data); else await API.post('/portfolio-companies', data); st.showModal = false; load(); } catch(e){ alert(e.message); }
+  const st = viewState('portfolio', { list: [], err: null, busy: null, msg: null, ok: true, search: '' });
+  // `/admin/portfolio-companies`, NOT `/portfolio-companies`: the user-facing route binds claims.aid
+  // and therefore answers the sub-entities of the caller's own tenant (measured live: 1 of 6 rows).
+  // The admin route answers every company plus the COMPANY'S OWN account id.
+  const load = async () => {
+    try {
+      const d = await API.get('/admin/portfolio-companies');
+      st.list = Array.isArray(d) ? d : ((d && d.companies) || []);
+      st.err = null;
+    } catch (e) { st.err = e.message; st.list = null; }
+    st.busy = null; renderApp();
   };
-  const remove = async (id) => { if(!confirm('Delete this portfolio company?')) return; await API.del('/portfolio-companies/' + id); load(); };
-  // kanban t_25b8c662 — the per-row "🔑 Impersonate" button that used to live on this tab is
-  // DELETED, not renamed. It could never work, for four independent reasons measured on the live
-  // bytes (t_d11d4157 browser-portfolio.json: POST /api/v1/admin/impersonate -> 400,
-  // "Impersonation failed: valid account_id is required"):
-  //   1. it posted {account_id} while admin_handler::impersonate reads tenant_id;
-  //   2. GET /portfolio-companies binds claims.aid, so this list is ALWAYS the caller's own tenant,
-  //      and its payload carries no tenant_id -- `company.tenant_id || company.id` resolved to a
-  //      portfolio_companies.id, so even a renamed key would have minted a token for a non-tenant id;
-  //   3. the handler answers `impersonation_token` while the button read `r.token`, so a 2xx would
-  //      have stored the string "undefined" (renaming ONLY the key turns a loud failure into a
-  //      quiet lie);
-  //   4. it wrote sessionStorage on admin.missedcallrespondr.com and then opened a DIFFERENT origin
-  //      (sessionStorage is per-origin) -- no session could cross.
-  // A portfolio row is a sub-entity of your OWN tenant, so there is no account here to sign in as.
-  // The operator control that CAN name a tenant is in the Operator Console (every tenant); the note
-  // rendered below points there instead of leaving a button that 400s for every click.
+  if (!st._loaded) { st._loaded = true; load(); }
+  const reload = async () => { st.busy = 'list'; st.msg = null; renderApp(); await load(); };
+
+  /* OPEN ENTERS THE COMPANY'S OWN ACCOUNT (kanban t_bef16030).
+     THE TRAP, measured on the live rows: a portfolio row carries TWO account references — the
+     account that owns the row (`owner_account_id`, the operator's, shared by every row) and the
+     company's own (`account_id`). Posting the OWNER's id would mint a token for the operator's own
+     account: a button that looks like it does nothing. So `Open` posts `account_id` and NEVER
+     `owner_account_id`, and a company with no account says "No account" instead of offering it. The
+     token travels in the URL FRAGMENT (never sent to a server) into the tenant shell, exactly as the
+     Operator Console's impersonate control does.
+     Add / Edit / Delete are GONE from this screen on purpose: they wrote the user-facing
+     `/portfolio-companies` route, which is scoped to the caller's own tenant — a DIFFERENT dataset
+     from the rows listed here — so each button would have been dead for 5 of the 6 companies (and
+     `Add` could only mint a company with nothing behind it). Companies are provisioned by the
+     cross-app portfolio sync; this screen is where they are opened. */
+  const open = async (c) => {
+    if (!c || !c.has_account || !c.account_id) return;
+    const label = c.account_name || c.name;
+    if (!confirm('Open ' + c.name + ' in its OWN account' + (c.account_name ? ' ("' + c.account_name + '")' : '') + '?\n\nYou land in the customer app signed in as that account for 15 minutes.')) return;
+    st.busy = c.id; st.msg = null; st.ok = true; renderApp();
+    try {
+      const r = await API.post('/admin/impersonate', { tenant_id: c.account_id });
+      const tok = r && (r.impersonation_token || r.token);
+      if (!tok) throw new Error('the API answered without an impersonation_token');
+      window.open(TENANT_APP + '/dashboard/#impersonation_token=' + encodeURIComponent(tok)
+        + '&impersonation_tenant=' + encodeURIComponent(label), '_blank', 'noopener');
+      st.msg = 'Opened ' + label + ' in a new tab — that company\'s own account, not the owner account.';
+    } catch (e) { st.ok = false; st.msg = 'Could not open ' + c.name + ': ' + e.message; }
+    st.busy = null; renderApp();
+  };
 
   const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.slug||'').toLowerCase().includes(st.search.toLowerCase()) || (c.domain||'').toLowerCase().includes(st.search.toLowerCase()));
 
   return html`<div>
-    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Portfolio Companies</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Company</button></div></div>
-    <div class="card" data-portfolio-note="1" style="border-left:4px solid #94a3b8"><p class="text-xs text-gray-600">This list is scoped to <b>your own tenant</b> by the API, and a portfolio company is not an account you can sign in as. To open a customer's tenant, use <b>Operator Console → 🔑 Impersonate a tenant</b> (it lists every tenant).</p></div>
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">🏢 Portfolio Companies</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button></div></div>
+    <div class="card" data-portfolio-note="1" style="border-left:4px solid #94a3b8"><p class="text-xs text-gray-600">These are <b>your own businesses</b>, not customers — not one of them is in the Customers list. <b>Open</b> signs you into that company's <b>own account</b> (15-minute token, new tab), never the shared owner account. A company with no account yet says <b>No account</b> instead of offering a button that cannot work; its account is created by the cross-app portfolio sync.</p></div>
+    ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}" data-portfolio="status">${st.msg}</div>`}
+    ${st.err && html`<div class="text-sm text-red-600 mb-2" data-portfolio="status">Could not list portfolio companies: ${st.err}</div>`}
     <div class="card p-0 overflow-hidden">
-      <table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Actions</th></tr></thead>
-        <tbody>${filtered.map(c => html`<tr>
-          <td class="font-medium">${c.name}</td><td class="text-gray-500">${c.slug || c.domain || '-'}</td>
-          <td><button class="btn btn-sm btn-outline" onClick=${() => { show(c); }}>Edit</button><button class="btn btn-sm btn-red" onClick=${() => remove(c.id)}>Delete</button></td>
+      <table class="table" data-portfolio="table"><thead><tr><th>Company</th><th>Account</th><th style="width:170px">Open</th></tr></thead>
+        <tbody>${filtered.map(c => html`<tr data-portfolio-row=${c.id || ''}>
+          <td class="font-medium">${c.name}<span class="badge badge-yellow ml-1" data-portfolio="badge" title="One of the owner's own businesses — not a customer">portfolio</span><div class="text-xs text-gray-500">${c.email || c.slug || ''}</div></td>
+          <td>${c.has_account
+            ? html`<span data-portfolio="account">${c.account_name || c.slug || c.account_id}</span><span class="badge badge-green ml-1" title=${'The company\'s OWN account (' + (c.account_user_count || 0) + ' user(s)) — Open enters this one'}>own account</span>${c.account_active === false ? html`<span class="badge badge-red ml-1" title="The account exists but its sign-in is suspended">suspended</span>` : null}`
+            : html`<span class="text-gray-400" data-portfolio="no-account">No account</span>`}</td>
+          <td>${c.has_account
+            ? html`<button class="btn btn-sm btn-blue" data-portfolio="open" disabled=${st.busy === c.id} onClick=${() => open(c)}>${st.busy === c.id ? '...' : 'Open'}</button>`
+            : html`<span class="text-xs text-gray-400" data-portfolio="no-account-note" title="There is no account behind this company yet, so there is nothing to open.">No account to open</span>`}</td>
         </tr>`)}
-        ${filtered.length === 0 && html`<tr><td colspan="3" class="text-center ${S.loadError ? 'text-red-500' : 'text-gray-400'} py-8">${S.loadError ? 'Not loaded - the request failed, so this is not a count of your records. The reason is at the top of the screen.' : 'No portfolio companies yet.'}</td></tr>`}
+        ${filtered.length === 0 && html`<tr><td colspan="3" class="text-center ${st.err ? 'text-red-500' : 'text-gray-400'} py-8">${st.err ? 'Not loaded - the request failed, so this is not a count of your companies.' : 'No portfolio companies yet.'}</td></tr>`}
       </tbody></table>
     </div>
-    ${st.showModal && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (hide())}>
-      <div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem ? 'Edit' : 'Add'} Portfolio Company</h3>
-        ${(() => {
-          // kanban t_13330c68 — the draft lives in the SHARED view object (S.views['portfolio_form']), seeded ON
-          // OPEN because show() clears st.formSeeded. The template IIFE re-runs on every renderApp(), so a
-          // per-render local re-initialised the field from the stored ROW and wiped what the operator
-          // typed (guard rule 4); a re-render can no longer do that.
-          const f = viewState('portfolio_form', { name: '', slug: '' });
-          if (!st.formSeeded) {
-            f.name = st.editItem?.name||'';
-            f.slug = st.editItem?.slug||'';
-            st.formSeeded = true;
-          }
-          return html`<div class="space-y-3">
-            <div><label class="text-sm font-medium block mb-1">Company Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
-            <div><label class="text-sm font-medium block mb-1">Slug</label><input class="input" value=${f.slug} onInput=${e => { f.slug = e.target.value; }} /></div>
-            <div class="flex gap-2 justify-end mt-4">
-              <button class="btn btn-outline" onClick=${() => { hide(); }}>Cancel</button>
-              <button class="btn" onClick=${() => save({name: f.name, slug: f.slug})}>${st.editItem ? 'Save' : 'Add'}</button>
-            </div>
-          </div>`; })()}
-      </div>
-    </div>`}
   </div>`;
 };
 
@@ -2754,7 +2757,7 @@ const ownerCell = (t) => {
     ? html` <span class="badge badge-yellow" title=${tag
         ? 'minted by the "' + tag + '" test harness — a probe, not a customer'
         : ownerless
-          ? 'no user can sign into this workspace — a leftover, not a customer'
+          ? 'no user can sign into this account — a leftover, not a customer'
           : 'a reserved or fleet-probe address — a probe, not a customer'}>probe</span>`
     : '';
   if (!oe) return html`<span class="text-gray-400">—</span>${badge}`;
@@ -2822,7 +2825,7 @@ const ImpersonateTenants = () => {
    are signed in as, a portfolio company) keeps its reason on screen instead of vanishing behind a
    generic failure. The button is inert until a row is picked and is armed with the count. */
 const TenantsScreen = () => {
-  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true, plans: [], showProbes: false });
+  const st = viewState('tenants', { list: null, err: null, picked: {}, busy: null, msg: null, ok: true, plans: [], showProbes: false, showPortfolio: false });
   // PROBE VISIBILITY (cron 2026-10-25). `list_all_tenants` holds harness-tagged workspaces back
   // unless the caller passes `?include_probe=1` (it binds exactly that bool; `~* '^CNRY'` rows stay
   // visible because the nightly canary is the proof the sweep works). This console never sent the
@@ -2830,7 +2833,15 @@ const TenantsScreen = () => {
   // ADDRESS happened to look like a probe — a row tagged `probe_harness` with a blank or ordinary
   // owner was absent from this table and therefore unselectable, i.e. impossible to clear. The
   // switch re-fetches the SAME listing so rows, badges and the button's count agree.
-  const listPath = () => '/admin/tenants' + (st.showProbes ? '?include_probe=1' : '');
+  const listPath = () => {
+    const q = [];
+    if (st.showProbes) q.push('include_probe=1');
+    // Portfolio visibility (kanban t_bef16030): the owner's own companies are NOT customers, so the
+    // server holds them out of this list and this switch is the only way to see them here — badged,
+    // and never pickable for delete.
+    if (st.showPortfolio) q.push('include_portfolio=1');
+    return '/admin/tenants' + (q.length ? '?' + q.join('&') : '');
+  };
   const load = async () => {
     try {
       const d = await API.get(listPath());
@@ -2887,14 +2898,14 @@ const TenantsScreen = () => {
   const del = async () => {
     const ids = list.filter(t => st.picked[t.id]).map(t => t.id);
     if (!ids.length) return;
-    if (!confirm('Delete ' + ids.length + ' workspace(s)? This cannot be undone.')) return;
+    if (!confirm('Delete ' + ids.length + ' account(s)? This cannot be undone.')) return;
     st.busy = 'del'; st.msg = null; st.ok = true; renderApp();
     try {
       const r = await API.post('/admin/tenants/bulk-delete', { ids });
       const n = (r && typeof r.deleted === 'number') ? r.deleted : 0;
       const refused = (r && r.failed) || [];
       st.ok = refused.length === 0;
-      st.msg = n + ' workspace(s) deleted'
+      st.msg = n + ' account(s) deleted'
         + (refused.length ? ' — ' + refused.length + ' refused: ' + refused.map(f => f.error).join('; ') : '');
       st.picked = {};
     } catch (e) { st.ok = false; st.msg = 'Delete failed: ' + e.message; }
@@ -2912,7 +2923,7 @@ const TenantsScreen = () => {
     const label = t.name || t.slug || t.id;
     const sentence = suspended
       ? 'Suspend "' + label + '"?\n\nTheir users are signed out immediately and cannot sign in until you re-open it. Nothing is deleted.'
-      : 'Re-open "' + label + '"? Their workspace works again and their users can sign in.';
+      : 'Re-open "' + label + '"? Their account works again and their users can sign in.';
     if (!confirm(sentence)) return;
     st.busy = 'susp:' + t.id; st.msg = null; st.ok = true; renderApp();
     try {
@@ -2935,7 +2946,7 @@ const TenantsScreen = () => {
     const who = String((t && (t.owner_email || t.email)) || '').trim();
     if (!confirm('Send ' + label + ' a new password?\n\n'
       + (who ? 'The new password replaces the old one immediately and is emailed to ' + who + '. ' : '')
-      + 'Anyone signed in to that workspace is signed out.')) return;
+      + 'Anyone signed in to that account is signed out.')) return;
     st.busy = 'creds:' + t.id; st.msg = null; st.ok = true; renderApp();
     try {
       const r = await API.post('/admin/tenants/' + encodeURIComponent(t.id) + '/resend-credentials', {});
@@ -2959,7 +2970,7 @@ const TenantsScreen = () => {
     return html`<span class="badge badge-red ml-1" data-tenants="creds-undelivered"
         title="The signup door minted this owner's first password and the mail carrying it never went out — nobody has ever read it, so they cannot sign in.">no password delivered</span>
       <button class="btn btn-sm btn-outline ml-1" data-tenants="resend-creds" disabled=${busy}
-        title="Mint a new password for this workspace's owner, email it, and end their existing sessions."
+        title="Mint a new password for this account's owner, email it, and end their existing sessions."
         onClick=${() => resendCreds(t)}>${busy ? '...' : 'send new password'}</button>`;
   };
 
@@ -2970,7 +2981,7 @@ const TenantsScreen = () => {
   // its own), then mails that owner a generated password exactly as a re-issue does.
   const noLogin = async (t) => {
     const label = t.name || t.slug || t.id;
-    const email = prompt('This workspace has no login yet.\n\n'
+    const email = prompt('This account has no login yet.\n\n'
       + 'Give it the owner\'s email address. They are emailed a generated password and can sign in '
       + 'straight away.', '');
     if (email === null) return;
@@ -2996,9 +3007,9 @@ const TenantsScreen = () => {
     if (!(t && t.user_count === 0)) return '';
     const busy = st.busy === 'creds:' + t.id;
     return html`<span class="badge badge-yellow ml-1" data-tenants="no-login"
-        title="This workspace holds no user row, so nobody can sign in to it. This action gives it its first owner login.">no login yet</span>
+        title="This account holds no user row, so nobody can sign in to it. This action gives it its first owner login.">no login yet</span>
       <button class="btn btn-sm btn-blue ml-1" data-tenants="create-login" disabled=${busy}
-        title="Give this workspace its first owner login, with a generated password emailed to the address you enter."
+        title="Give this account its first owner login, with a generated password emailed to the address you enter."
         onClick=${() => noLogin(t)}>${busy ? '...' : 'create login'}</button>`;
   };
 
@@ -3023,7 +3034,7 @@ const TenantsScreen = () => {
     await load();
   };
   const planCell = (t) => html`<select class="input plan-pick" data-tenant=${t.id || ''} style="min-width:140px"
-      title="This workspace's active plan. Changing it assigns the plan — the customer's limits and mail follow."
+      title="This account's active plan. Changing it assigns the plan — the customer's limits and mail follow."
       value=${t.plan_id || ''}
       disabled=${st.busy === 'plan:' + t.id}
       onChange=${e => assignPlan(t, e.target.value)}>
@@ -3034,26 +3045,27 @@ const TenantsScreen = () => {
 
   return html`<div class="card" data-tenants="screen">
     <div class="flex items-center justify-between mb-1">
-      <h2 class="text-base font-bold text-gray-800">🗂️ Tenants</h2>
+      <h2 class="text-base font-bold text-gray-800">👥 Customers</h2>
       <div class="flex items-center gap-2">
-        <label class="flex items-center gap-1 text-xs text-gray-600" data-tenants="show-probes-label" title="Probe workspaces a test harness minted. Hidden by default because they are not customers; tick this and they are listed so Select probes can reach them."><input type="checkbox" id="tnShowProbes" data-tenants="show-probes" checked=${st.showProbes ? true : false} onChange=${e => { st.showProbes = !!e.target.checked; st.picked = {}; st.list = null; renderApp(); load(); }} /> show probe workspaces</label>
+        <label class="flex items-center gap-1 text-xs text-gray-600" data-tenants="show-portfolio-label" title="Your own businesses are not customers (kanban t_bef16030). They live on the Portfolio screen, each row opening that company's own account; tick this to view them here as well, badged and never pickable."><input type="checkbox" id="tnShowPortfolio" data-tenants="show-portfolio" checked=${st.showPortfolio ? true : false} onChange=${e => { st.showPortfolio = !!e.target.checked; st.picked = {}; st.list = null; renderApp(); load(); }} /> include portfolio companies</label>
+        <label class="flex items-center gap-1 text-xs text-gray-600" data-tenants="show-probes-label" title="Probe accounts a test harness minted. Hidden by default because they are not customers; tick this and they are listed so Select probes can reach them."><input type="checkbox" id="tnShowProbes" data-tenants="show-probes" checked=${st.showProbes ? true : false} onChange=${e => { st.showProbes = !!e.target.checked; st.picked = {}; st.list = null; renderApp(); load(); }} /> show probe accounts</label>
         <button class="btn btn-sm btn-outline" data-tenants="select-probes" disabled=${probes.length === 0 ? true : false} onClick=${pickProbes}>Select probes (${probes.length})</button>
-        <button class="btn btn-sm btn-outline" data-tenants="export-csv" title="Download this list as a CSV file — the same rows, held-back probe workspaces excluded" disabled=${st.busy === 'csv'} onClick=${exportCsv}>${st.busy === 'csv' ? '...' : '⬇ CSV'}</button>
+        <button class="btn btn-sm btn-outline" data-tenants="export-csv" title="Download this list as a CSV file — the same rows, held-back probe accounts excluded" disabled=${st.busy === 'csv'} onClick=${exportCsv}>${st.busy === 'csv' ? '...' : '⬇ CSV'}</button>
         <button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button>
         <button class="btn btn-sm btn-red" id="tnDel" data-tenants="delete" disabled=${(picked.length === 0 || st.busy === 'del') ? true : false} onClick=${del}>${picked.length ? 'Delete selected (' + picked.length + ')' : 'Delete selected'}</button>
       </div>
     </div>
-    <p class="text-xs text-gray-500 mb-2">Every customer workspace on the platform — probe workspaces a test harness minted stay hidden until you tick <b>show probe workspaces</b>. Tick the rows to retire, then delete them in one call. The workspace you are signed in as and the portfolio companies are refused by the API. A probe row carries a <span class="badge badge-yellow">probe</span> badge — "Select probes" ticks exactly those (the recorded harness tag OR a reserved test address), so clearing test workspaces out does not mean guessing from the owner's address.</p>
+    <p class="text-xs text-gray-500 mb-2">Every customer <b>account</b> on the platform — probe accounts a test harness minted stay hidden until you tick <b>show probe accounts</b>, and your own companies stay out of this list (they are on the <b>Portfolio</b> screen) until you tick <b>include portfolio companies</b>. Tick the rows to retire, then delete them in one call. The account you are signed in as and the portfolio companies are refused by the API. A portfolio row carries a <span class="badge badge-yellow">portfolio</span> badge; a probe row carries a <span class="badge badge-yellow">probe</span> badge — "Select probes" ticks exactly those (the recorded harness tag OR a reserved test address), so clearing test accounts out does not mean guessing from the owner's address.</p>
     ${st.msg && html`<div class="text-sm mb-2 ${st.ok ? 'text-green-700' : 'text-red-600'}" data-tenants="status">${st.msg}</div>`}
     ${st.err && html`<div class="text-sm text-red-600 mb-2" data-tenants="status">Could not list tenants: ${st.err}</div>`}
     ${Array.isArray(st.list) ? html`<div class="overflow-auto" style="max-height:520px"><table class="table" id="tenantsTable" data-tenants="table">
       <thead><tr>
         <th style="width:36px"><input type="checkbox" id="tnAll" data-tenants="select-all" checked=${allPicked ? true : false} onChange=${e => toggleAll(e.target.checked)} /></th>
-        <th>Workspace</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Credits</th><th>Last sign-in</th><th>Created</th><th>Access</th>
+        <th>Account</th><th>Owner</th><th>Slug</th><th>Users</th><th>Plan</th><th>Credits</th><th>Last sign-in</th><th>Created</th><th>Access</th>
       </tr></thead>
       <tbody>${list.map(t => html`<tr>
         <td><input type="checkbox" class="tn-chk" value=${t.id || ''} disabled=${!!t.protected} checked=${st.picked[t.id] ? true : false} title=${t.protected ? 'Protected — ' + (t.protected_reason || 'sister company') + ' account: it is never deleted from any panel' : ''} onChange=${e => toggle(t.id, e.target.checked)} /></td>
-        <td class="font-medium">${t.name || '-'}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.protected ? html`<span class="badge badge-yellow ml-1" data-tenants="protected-badge" title=${'A sister company / operator account matched on "' + (t.protected_reason || '') + '". Every delete door refuses it, so it is not pickable here.'}>Protected</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this workspace">suspended</span>` : null}</td>
+        <td class="font-medium">${t.name || '-'}${t.is_portfolio ? html`<span class="badge badge-yellow ml-1" data-tenants="portfolio-badge" title=${'One of your own businesses, not a customer' + (t.portfolio_company ? ' (' + t.portfolio_company + ')' : '') + '. Open it from the Portfolio screen, which enters its OWN account.'}>portfolio${t.portfolio_company ? ' · ' + t.portfolio_company : ''}</span>` : null}${t.probe_harness ? html`<span class="badge badge-yellow ml-1" data-tenants="probe-badge" title=${'minted by a probe run: ' + t.probe_harness}>probe</span>` : null}${t.protected ? html`<span class="badge badge-yellow ml-1" data-tenants="protected-badge" title=${'A sister company / operator account matched on "' + (t.protected_reason || '') + '". Every delete door refuses it, so it is not pickable here.'}>Protected</span>` : null}${t.suspended ? html`<span class="badge badge-red ml-1" data-tenants="suspended-badge" title="Sign-in is refused and live sessions are ended until you re-open this account">suspended</span>` : null}</td>
         <td>${ownerCell(t)}${credsCell(t)}${noLoginCell(t)}</td>
         <td class="text-gray-500">${t.slug || '-'}</td>
         <td>${t.user_count == null ? '-' : t.user_count}</td>
@@ -3169,7 +3181,7 @@ const EmailProviderScreen = () => {
           <input class="input" value=${st.from_address} placeholder="no-reply@mail.missedcallrespondr.com" onInput=${e => { st.from_address = e.target.value; }} /></div>
         <div><label class="text-sm font-medium text-gray-600 block mb-1">Where plan-request alerts go</label>
           <input class="input" data-email-provider="operator-alert" value=${st.operator_alert_email} placeholder="you@yourcompany.com (blank = no alerts)" onInput=${e => { st.operator_alert_email = e.target.value; }} />
-          <div class="text-xs text-gray-400 mt-1">When a customer asks to buy a plan and no payment provider can charge them, this address gets one email naming the workspace, the plan and who asked. Blank means no alerts are sent.</div></div>
+          <div class="text-xs text-gray-400 mt-1">When a customer asks to buy a plan and no payment provider can charge them, this address gets one email naming the account, the plan and who asked. Blank means no alerts are sent.</div></div>
       </div>
       <div class="flex gap-2 mt-4"><button class="btn" data-email-provider="save" disabled=${st.busy} onClick=${save}>Save email provider</button></div>
       <div class="mt-4 pt-3" style="border-top:1px solid #e5e7eb">
