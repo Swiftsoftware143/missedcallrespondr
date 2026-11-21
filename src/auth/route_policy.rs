@@ -684,11 +684,15 @@ mod tests {
         // `.route(..)` literal is `GET /api/v1/admin/tenants/export` (9e435cd, the operator's
         // workspace-list CSV), mounted under `/api/v1/admin/` so the platform-admin gate covers it
         // like its `/tenants` neighbours.
-        assert_eq!(lits.len(), 153, "mounted .route entries");
+        // 153 → 154 on 2026-11-21: `GET|POST /api/v1/admin/portfolio-companies` (a0c54a8, the
+        // operator's portfolio-companies screen) — a PROTECTED `/api/v1/admin/*` mount like its
+        // `/tenants` neighbours, so PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing
+        // became reachable without a credential. Found by `cargo test`, RED at HEAD before it.
+        assert_eq!(lits.len(), 154, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 153, "distinct mounted paths");
+        assert_eq!(uniq.len(), 154, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
