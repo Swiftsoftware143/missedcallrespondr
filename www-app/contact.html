@@ -6,38 +6,51 @@
 <title>Contact us — MissedCall Respondr</title>
 <meta name="description" content="Locked out, missing your password email, or have a question? Send the MissedCall Respondr team a message — no sign-in needed.">
 <style>
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f8fafc;color:#0f172a}
+:root{--surface-0:#f6f7fb;--surface-1:#eef0f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#16181d;--text-secondary:#4b5563;--text-muted:#77808f;--accent:#4f46e5;--accent-hover:#4338ca;--accent-soft:#eef2ff;--accent-border:#c7d2fe;--border:#dde1ea;--border-light:#c9cfdb;--danger:#dc2626;--danger-soft:#fee2e2;--success:#166534;--success-soft:#dcfce7;--success-border:#a7f3d0;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
+html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#6b7280;--accent:#6366f1;--accent-hover:#818cf8;--accent-soft:rgba(99,102,241,.16);--accent-border:rgba(99,102,241,.4);--border:#2d3148;--border-light:#383c52;--danger:#fca5a5;--danger-soft:rgba(239,68,68,.15);--success:#4ade80;--success-soft:rgba(34,197,94,.15);--success-border:rgba(34,197,94,.3);--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}
+.theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--accent)}
+
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--surface-0);color:var(--text-primary)}
 .wrap{max-width:520px;margin:0 auto;padding:40px 20px}
-.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.card{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:var(--shadow-1)}
 h1{font-size:20px;margin:0 0 6px}
-p.sub{margin:0 0 20px;color:#475569;font-size:14px;line-height:1.5}
+p.sub{margin:0 0 20px;color:var(--text-secondary);font-size:14px;line-height:1.5}
 label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
-input,textarea{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;font-family:inherit;color:#0f172a}
+input,textarea{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--border-light);border-radius:8px;font-size:14px;font-family:inherit;color:var(--text-primary)}
 input:focus,textarea:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,.18)}
 textarea{min-height:120px;resize:vertical}
-button{width:100%;margin-top:18px;padding:12px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
-button:hover{background:#4f46e5}
+button{width:100%;margin-top:18px;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
+button:hover{background:var(--accent-hover)}
 button:disabled{opacity:.6;cursor:default}
 .msg{margin-top:14px;font-size:14px;display:none;line-height:1.5}
-.msg.ok{display:block;color:#4338ca}
-.msg.err{display:block;color:#b91c1c}
+.msg.ok{display:block;color:var(--accent)}
+.msg.err{display:block;color:var(--danger)}
 .back{margin-top:18px;font-size:13px;text-align:center}
 .back a{color:#6366f1;text-decoration:none}
 .card+.card{margin-top:18px}
-.ref{margin-top:16px;padding:12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;font-size:13px;line-height:1.5;color:#312e81;display:none}
+.ref{margin-top:16px;padding:12px;background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:8px;font-size:13px;line-height:1.5;color:var(--accent);display:none}
 .ref code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all}
-.ans{margin-top:14px;padding:12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:14px;line-height:1.55;display:none}
-.ans .who{font-size:12px;color:#64748b;margin-bottom:6px}
+.ans{margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-0);font-size:14px;line-height:1.55;display:none}
+.ans .who{font-size:12px;color:var(--text-secondary);margin-bottom:6px}
 .ans .txt{white-space:pre-wrap}
 </style>
+<script>
+(function(){try{var t=localStorage.getItem('mc_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+</script>
 </head>
 <body>
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode"><span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span></button>
+<script>
+(function(){var b=document.getElementById('theme-toggle');if(!b)return;function p(){var d=document.documentElement.getAttribute('data-theme')==='dark';var i=document.getElementById('theme-toggle-icon');var l=document.getElementById('theme-toggle-label');if(i)i.textContent=d?'☀️':'🌙';if(l)l.textContent=d?'Day mode':'Night mode';}b.addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);try{localStorage.setItem('mc_theme',n);}catch(e){}p();});p();})();
+</script>
+
 <div class="wrap">
   <div class="card">
     <h1>Contact us</h1>
     <p class="sub">Locked out, missing your password email, or just have a question? Send us a message and we will reply to the address you give — no sign-in needed.</p>
     <form id="f" novalidate>
-      <label for="nm">Your name <span style="font-weight:400;color:#64748b">(optional)</span></label>
+      <label for="nm">Your name <span style="font-weight:400;color:var(--text-secondary)">(optional)</span></label>
       <input id="nm" type="text" autocomplete="name" maxlength="120">
       <label for="em">Email we should reply to</label>
       <input id="em" type="email" autocomplete="email" required maxlength="254">

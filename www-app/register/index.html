@@ -6,47 +6,60 @@
 <title>MissedCall Respondr — Sign Up</title>
 <link rel="stylesheet" href="/tailwind-base.css">
 <style>
-body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0}
-.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:32px;width:100%;max-width:420px}
-.btn{background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;cursor:pointer;border:none;font-weight:500;width:100%;font-size:15px;transition:background .2s}
-.btn:hover{background:#1d4ed8}
+:root{--surface-0:#f6f7fb;--surface-1:#eef0f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#16181d;--text-secondary:#4b5563;--text-muted:#77808f;--accent:#4f46e5;--accent-hover:#4338ca;--accent-soft:#eef2ff;--accent-border:#c7d2fe;--border:#dde1ea;--border-light:#c9cfdb;--danger:#dc2626;--danger-soft:#fee2e2;--success:#166534;--success-soft:#dcfce7;--success-border:#a7f3d0;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
+html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#6b7280;--accent:#6366f1;--accent-hover:#818cf8;--accent-soft:rgba(99,102,241,.16);--accent-border:rgba(99,102,241,.4);--border:#2d3148;--border-light:#383c52;--danger:#fca5a5;--danger-soft:rgba(239,68,68,.15);--success:#4ade80;--success-soft:rgba(34,197,94,.15);--success-border:rgba(34,197,94,.3);--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}
+.theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--accent)}
+
+body{font-family:Inter,system-ui,sans-serif;background:var(--surface-0);min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0}
+.card{background:var(--surface-2);border-radius:16px;box-shadow:var(--shadow-1);padding:32px;width:100%;max-width:420px}
+.btn{background:var(--accent);color:#fff;padding:12px 20px;border-radius:8px;cursor:pointer;border:none;font-weight:500;width:100%;font-size:15px;transition:background .2s}
+.btn:hover{background:var(--accent-hover)}
 .btn:disabled{opacity:.6;cursor:not-allowed}
-.input{border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px;width:100%;font-size:14px;outline:0;box-sizing:border-box;transition:border-color .2s}
-.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
-.error{background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;font-size:13px;display:none}
-.success{background:#dcfce7;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;display:none}
+.input{border:1px solid var(--border-light);border-radius:8px;padding:10px 14px;width:100%;font-size:14px;outline:0;box-sizing:border-box;transition:border-color .2s}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.error{background:var(--danger-soft);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;display:none}
+.success{background:var(--success-soft);color:var(--success);padding:10px 14px;border-radius:8px;font-size:13px;display:none}
 </style>
+<script>
+(function(){try{var t=localStorage.getItem('mc_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+</script>
 </head>
 <body>
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode"><span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span></button>
+<script>
+(function(){var b=document.getElementById('theme-toggle');if(!b)return;function p(){var d=document.documentElement.getAttribute('data-theme')==='dark';var i=document.getElementById('theme-toggle-icon');var l=document.getElementById('theme-toggle-label');if(i)i.textContent=d?'☀️':'🌙';if(l)l.textContent=d?'Day mode':'Night mode';}b.addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);try{localStorage.setItem('mc_theme',n);}catch(e){}p();});p();})();
+</script>
+
 <div class="card">
   <div style="text-align:center;margin-bottom:28px">
-    <h1 style="font-size:24px;font-weight:700;color:#1e293b;margin:0">📞 MissedCall Respondr</h1>
-    <p style="color:#64748b;font-size:14px;margin:6px 0 0">Create your free account</p>
+    <h1 style="font-size:24px;font-weight:700;color:var(--text-primary);margin:0">📞 MissedCall Respondr</h1>
+    <p style="color:var(--text-secondary);font-size:14px;margin:6px 0 0">Create your free account</p>
   </div>
   <div class="error" id="error"></div>
   <div class="success" id="success"></div>
-  <div id="planNote" style="display:none;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.5;margin-bottom:16px"></div>
+  <div id="planNote" style="display:none;background:var(--success-soft);color:var(--success);border:1px solid var(--success-border);border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.5;margin-bottom:16px"></div>
   <form id="regForm" style="display:flex;flex-direction:column;gap:16px">
     <div>
-      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Full name</label>
+      <label style="font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px">Full name</label>
       <input type="text" class="input" id="name" placeholder="Your name" required autocomplete="name" aria-label="Full name">
     </div>
     <div>
-      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Workspace name <span style="font-weight:400;color:#64748b">(optional)</span></label>
+      <label style="font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px">Workspace name <span style="font-weight:400;color:var(--text-secondary)">(optional)</span></label>
       <input type="text" class="input" id="workspace" placeholder="Your company or team — we'll name it for you" autocomplete="organization" aria-label="Workspace name (optional)">
     </div>
     <div>
-      <label style="font-size:13px;font-weight:500;color:#475569;display:block;margin-bottom:6px">Work email</label>
+      <label style="font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px">Work email</label>
       <input type="email" class="input" id="email" placeholder="you@company.com" required autocomplete="email" aria-label="Work email">
     </div>
-    <p style="font-size:12px;color:#64748b;margin:0">No password to choose — we'll email your login details so you can confirm your address by signing in.</p>
-    <p style="font-size:12px;color:#64748b;margin:0">By creating an account you agree to our
-      <a href="https://missedcallrespondr.com/terms" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:none">Terms of Service</a> and
-      <a href="https://missedcallrespondr.com/privacy" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:none">Privacy Policy</a>.</p>
+    <p style="font-size:12px;color:var(--text-secondary);margin:0">No password to choose — we'll email your login details so you can confirm your address by signing in.</p>
+    <p style="font-size:12px;color:var(--text-secondary);margin:0">By creating an account you agree to our
+      <a href="https://missedcallrespondr.com/terms" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Terms of Service</a> and
+      <a href="https://missedcallrespondr.com/privacy" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Privacy Policy</a>.</p>
     <button type="submit" class="btn" id="submitBtn">Create Free Account</button>
   </form>
-  <p style="text-align:center;color:#64748b;font-size:13px;margin-top:16px">
-    Already have an account? <a href="/login" style="color:#2563eb;text-decoration:none;font-weight:500">Sign in</a>
+  <p style="text-align:center;color:var(--text-secondary);font-size:13px;margin-top:16px">
+    Already have an account? <a href="/login" style="color:var(--accent);text-decoration:none;font-weight:500">Sign in</a>
   </p>
 </div>
 
@@ -123,13 +136,13 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
         + (mailed
             ? '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);font-size:13px">'
               + 'Nothing in your inbox after a minute? Check your spam folder, then '
-              + '<a href="/forgot-password.html?email=' + initQEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>'
-              + ' or <a href="/login" style="color:#2563eb;font-weight:600">sign in</a>.'
+              + '<a href="/forgot-password.html?email=' + initQEmail + '" style="color:var(--accent);font-weight:600">send yourself a reset code</a>'
+              + ' or <a href="/login" style="color:var(--accent);font-weight:600">sign in</a>.'
               + '</div>'
             : '<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,.08)">'
               + '<label for="initPw" style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Choose your password (at least 8 characters)</label>'
-              + '<input id="initPw" type="password" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:15px">'
-              + '<button type="button" id="initPwBtn" style="margin-top:10px;width:100%;padding:11px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:15px;cursor:pointer">Save my password</button>'
+              + '<input id="initPw" type="password" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border-light);border-radius:8px;font-size:15px">'
+              + '<button type="button" id="initPwBtn" style="margin-top:10px;width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:15px;cursor:pointer">Save my password</button>'
               + '<div id="initPwMsg" style="margin-top:8px;font-size:13px"></div>'
               + '</div>');
       ok.style.display = 'block';
@@ -169,7 +182,7 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
             var d = await r.json().catch(function () { return {}; });
             if (r.ok) {
               msg.style.color = '#15803d';
-              msg.innerHTML = 'Password saved. <a href="/login" style="color:#15803d;font-weight:700;text-decoration:underline">Sign in with ' + escEmail + '</a>.';
+              msg.innerHTML = 'Password saved. <a href="/login" style="color:var(--success);font-weight:700;text-decoration:underline">Sign in with ' + escEmail + '</a>.';
               pwBtn.textContent = 'Saved';
               document.getElementById('initPw').disabled = true;
             } else {
@@ -199,8 +212,8 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
       err.innerHTML = msg.replace(/[<>&"]/g, '')
         + (alreadyRegistered
           ? '<div style="margin-top:8px;font-size:13px">'
-            + '<a href="/login?email=' + qEmail + '" style="color:#2563eb;font-weight:600">Sign in to that account</a>'
-            + ' or <a href="/forgot-password.html?email=' + qEmail + '" style="color:#2563eb;font-weight:600">send yourself a reset code</a>.'
+            + '<a href="/login?email=' + qEmail + '" style="color:var(--accent);font-weight:600">Sign in to that account</a>'
+            + ' or <a href="/forgot-password.html?email=' + qEmail + '" style="color:var(--accent);font-weight:600">send yourself a reset code</a>.'
             + (pickedPlan && PLAN_LABELS[pickedPlan]
               ? ' Once you are in, open Plan &amp; Billing and ask for ' + PLAN_LABELS[pickedPlan]
                 + ' there \u2014 that files the same request this page would have filed.'

@@ -5,12 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MissedCall Respondr — Admin Guide</title>
 <style>
+:root{--surface-0:#f9fafb;--surface-1:#f3f4f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#111827;--text-secondary:#374151;--text-muted:#9ca3af;--brand:#e11d48;--brand-soft:#fff1f2;--border:#e5e7eb;--code-fg:#e5e7eb;--code-bg:#1f2937;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
+html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#6b7280;--brand:#fb7185;--brand-soft:rgba(225,29,72,.14);--border:#2d3148;--code-fg:#e5e7eb;--code-bg:#0b0e14;--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}
+html[data-theme="dark"] .callout.info{background:rgba(16,185,129,.12)}
+html[data-theme="dark"] .callout.warning{background:rgba(245,158,11,.12)}
+html[data-theme="dark"] .callout.tip{background:rgba(59,130,246,.12)}
+html[data-theme="dark"] .callout.danger{background:rgba(225,29,72,.12)}
+html[data-theme="dark"] .callout.example{background:var(--surface-1)}
+html[data-theme="dark"] nav.sidebar li a:hover,html[data-theme="dark"] nav.sidebar li a.active{background:var(--brand-soft)}
+html[data-theme="dark"] table th{background:var(--brand-soft);color:#fda4af}
+html[data-theme="dark"] pre code{background:var(--code-bg)}
+html[data-theme="dark"] code{color:#fda4af}
+.theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--brand)}
+
     /* ─── Reset & Base ─── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; font-size: 16px; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      color: #1f2937; background: #f9fafb; line-height: 1.65;
+      color: var(--text-primary); background: var(--surface-0); line-height: 1.65;
     }
     a { color: #e11d48; text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -32,20 +46,20 @@
     /* ─── Layout ─── */
     .wrapper { display: flex; min-height: calc(100vh - 3.2rem); }
     nav.sidebar {
-      width: 250px; flex-shrink: 0; background: #fff; border-right: 1px solid #e5e7eb;
+      width: 250px; flex-shrink: 0; background: var(--surface-2); border-right: 1px solid var(--border);
       padding: 1.25rem 0; overflow-y: auto; position: sticky; top: 3.2rem; align-self: flex-start; max-height: calc(100vh - 3.2rem);
     }
     nav.sidebar ul { list-style: none; }
     nav.sidebar li a {
-      display: block; padding: .5rem 1.25rem; font-size: .9rem; color: #374151;
+      display: block; padding: .5rem 1.25rem; font-size: .9rem; color: var(--text-secondary);
       border-left: 3px solid transparent; transition: .15s;
     }
     nav.sidebar li a:hover, nav.sidebar li a.active {
-      background: #fff1f2; color: #e11d48; border-left-color: #e11d48; text-decoration: none;
+      background: var(--brand-soft); color: #e11d48; border-left-color: #e11d48; text-decoration: none;
     }
     nav.sidebar .section-label {
       padding: .6rem 1.25rem .25rem; font-size: .7rem; text-transform: uppercase;
-      letter-spacing: .06em; color: #9ca3af; font-weight: 600;
+      letter-spacing: .06em; color: var(--text-muted); font-weight: 600;
     }
 
     main.content { flex: 1; padding: 2rem 2.5rem; max-width: 900px; }
@@ -53,11 +67,11 @@
     /* ─── Typography ─── */
     main h2 {
       font-size: 1.6rem; font-weight: 700; margin: 2rem 0 .75rem; padding-bottom: .4rem;
-      border-bottom: 3px solid #e11d48; color: #111827;
+      border-bottom: 3px solid #e11d48; color: var(--text-primary);
     }
     main h2:first-of-type { margin-top: 0; }
-    main h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: #1f2937; }
-    main p, main li { margin-bottom: .65rem; color: #374151; }
+    main h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: var(--text-primary); }
+    main p, main li { margin-bottom: .65rem; color: var(--text-secondary); }
     main ul, main ol { padding-left: 1.5rem; margin-bottom: 1rem; }
     main ul li::marker { color: #e11d48; }
 
@@ -67,18 +81,18 @@
       border-left: 4px solid; font-size: .92rem;
     }
     .callout.info    { background: #ecfdf5; border-color: #10b981; }
-    .callout.warning { background: #fffbeb; border-color: #f59e0b; }
+    .callout.warning { background: var(--surface-2)beb; border-color: #f59e0b; }
     .callout.tip     { background: #eff6ff; border-color: #3b82f6; }
     .callout.danger  { background: #fef2f2; border-color: #e11d48; }
     .callout strong:first-child { display: block; margin-bottom: .25rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
 
     /* ─── Code / Inline ─── */
     code {
-      background: #f3f4f6; padding: .15rem .4rem; border-radius: 4px;
+      background: var(--surface-1); padding: .15rem .4rem; border-radius: 4px;
       font-size: .85em; color: #be123c; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
     }
     pre code {
-      display: block; background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px;
+      display: block; background: var(--code-bg); color: var(--code-fg); padding: 1rem; border-radius: 8px;
       overflow-x: auto; font-size: .85rem; margin: 1rem 0;
     }
 
@@ -86,13 +100,13 @@
     table {
       width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem;
     }
-    th, td { padding: .6rem .75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
-    th { background: #fff1f2; color: #9f1239; font-weight: 600; }
+    th, td { padding: .6rem .75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: var(--brand-soft); color: #9f1239; font-weight: 600; }
 
     /* ─── Screenshot placeholder ─── */
     .screenshot {
-      border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 1.5rem;
-      margin: 1.25rem 0; text-align: center; color: #9ca3af; font-size: .85rem;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); padding: 1.5rem;
+      margin: 1.25rem 0; text-align: center; color: var(--text-muted); font-size: .85rem;
     }
     .screenshot .icon { font-size: 2rem; margin-bottom: .25rem; }
 
@@ -101,20 +115,20 @@
       display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 1rem; margin: 1.25rem 0;
     }
     .feature-card {
-      background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem;
       text-align: center; transition: box-shadow .15s;
     }
     .feature-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
     .feature-card .icon { font-size: 1.8rem; margin-bottom: .35rem; }
-    .feature-card strong { display: block; font-size: .95rem; color: #111827; }
-    .feature-card span { font-size: .82rem; color: #6b7280; }
+    .feature-card strong { display: block; font-size: .95rem; color: var(--text-primary); }
+    .feature-card span { font-size: .82rem; color: var(--text-muted); }
 
     /* ─── Responsive ─── */
     @media (max-width: 768px) {
       .wrapper { flex-direction: column; }
       nav.sidebar {
         width: 100%; position: static; max-height: none; border-right: none;
-        border-bottom: 1px solid #e5e7eb; padding: .5rem 0;
+        border-bottom: 1px solid var(--border); padding: .5rem 0;
       }
       nav.sidebar ul { display: flex; flex-wrap: wrap; gap: 0; }
       nav.sidebar li a { padding: .4rem .8rem; font-size: .82rem; border-left: none; }
@@ -135,8 +149,16 @@
   code { overflow-wrap: anywhere; }
 }
 </style>
+<script>
+(function(){try{var t=localStorage.getItem('mc_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+</script>
 </head>
 <body>
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode"><span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span></button>
+<script>
+(function(){var b=document.getElementById('theme-toggle');if(!b)return;function p(){var d=document.documentElement.getAttribute('data-theme')==='dark';var i=document.getElementById('theme-toggle-icon');var l=document.getElementById('theme-toggle-label');if(i)i.textContent=d?'☀️':'🌙';if(l)l.textContent=d?'Day mode':'Night mode';}b.addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);try{localStorage.setItem('mc_theme',n);}catch(e){}p();});p();})();
+</script>
+
 <a id="back-to-console" href="/" title="Back to the admin console" style="position:fixed;left:16px;bottom:16px;z-index:99998;background:#111827;color:#fff;padding:10px 14px;border-radius:999px;font:600 13px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.25)">&larr; Back to the console</a><style>@media print{#back-to-console{display:none}}</style>
 
 
@@ -638,7 +660,7 @@ the MissedCall Respondr deploy script --verify   # parity + health only</code></
   no audit block on purpose &mdash; the MCP service keeps its own audit log and exposes no route to read it, and a guide
   should never describe a panel that cannot be backed.</p>
 
-  <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid #e5e7eb;">
+  <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid var(--border);">
   <p style="text-align:center; color:#9ca3af; font-size:.82rem;">
     MissedCall Respondr &mdash; Admin Guide &mdash; Built by SwiftSoftware<br>
     © 2026 SwiftSoftware. All rights reserved.

@@ -3,6 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<script>
+/* Theme read BEFORE paint — no flash of the wrong theme on load. The shared localStorage key
+   `mc_theme` carries the choice across every MissedCall surface; with no stored choice the OS
+   preference decides (light for a light OS, dark for a dark one, light as the fallback). */
+(function () {
+  try {
+    var t = localStorage.getItem('mc_theme');
+    if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+  } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+})();
+</script>
 <!-- IMPERSONATION HAND-OFF (kanban t_25b8c662). The operator console on admin.missedcallrespondr.com
      mints a 15-minute `impersonated` token and opens THIS url with the token in the FRAGMENT.
      A fragment is never sent to the server, so it cannot land in an access log or a Referer; we
@@ -37,11 +49,125 @@
 }();
 </script>
 <title>MissedCall Respondr — Dashboard</title>
-<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc;margin:0}.sidebar{width:230px;background:#fff;border-right:1px solid #e2e8f0;min-height:100vh;padding:18px 12px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}.main{margin-left:230px;padding:24px;min-height:100vh;min-width:0;overflow-wrap:anywhere}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:#334155}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500;width:100%;border:0;background:transparent;text-align:left;font-family:inherit;line-height:1.2}.nav-item:focus-visible{outline:2px solid #2563eb;outline-offset:2px}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:#b91c1c;font-weight:600}</style>
+<style>
+/* ===== MissedCall Respondr — shared theme tokens (day + night) =====
+   DAY is the default branch. html[data-theme="dark"] swaps every token to the night palette;
+   no rule below knows which theme is active. Elevation: surface-0 (page) < surface-1 (panels,
+   sidebar, tables, and the SUNKEN reference surface) < surface-2 (task cards + anything clickable)
+   < surface-3 (overlays). Day expresses depth by shadow; night by surface lightness. One shared
+   localStorage key `mc_theme` carries the choice across every MissedCall surface. */
+:root{
+  --surface-0:#f6f7fb; --surface-1:#eef0f6; --surface-2:#ffffff; --surface-3:#ffffff;
+  --text-primary:#16181d; --text-secondary:#4b5563; --text-muted:#77808f;
+  --accent:#4f46e5; --accent-hover:#4338ca;
+  --border:#dde1ea; --border-light:#c9cfdb;
+  --code-bg:#0f172a; --code-fg:#7dd3fc;
+  --danger:#dc2626; --success:#059669; --warn:#b45309;
+  --shadow-1:0 1px 3px rgba(16,24,40,.08); --shadow-2:0 8px 32px rgba(16,24,40,.16);
+  --z-sticky:10; --z-dropdown:20; --z-modal:30; --z-toast:40;
+  color-scheme:light;
+}
+html[data-theme="dark"]{
+  --surface-0:#0f1117; --surface-1:#1a1d27; --surface-2:#222532; --surface-3:#2a2d3a;
+  --text-primary:#e8eaed; --text-secondary:#9aa0a6; --text-muted:#6b7280;
+  --accent:#6366f1; --accent-hover:#818cf8;
+  --border:#2d3148; --border-light:#383c52;
+  --code-bg:#0b0e14; --code-fg:#7dd3fc;
+  --danger:#ef4444; --success:#22c55e; --warn:#f59e0b;
+  --shadow-1:0 1px 3px rgba(0,0,0,.35); --shadow-2:0 8px 32px rgba(0,0,0,.5);
+  color-scheme:dark;
+}
+/* ===== Elevation utilities (design tokens — task raised, reference sunken) ===== */
+.surf-2{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-1)}
+.sunken{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:none}
+.sunken h3,.sunken .sunken-title{font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em}
+.sunken p,.sunken li{font-size:13px;color:var(--text-secondary)}
+/* ===== Type tokens ===== */
+.eyebrow{font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px;text-transform:uppercase}
+.task-title{font-size:18px;font-weight:700;margin-bottom:4px}
+.task-sub{font-size:13px;color:var(--text-secondary);margin-bottom:14px;max-width:70ch}
+.ref-body{font-size:13px;color:var(--text-secondary)}
+/* ===== Base chrome ===== */
+body{font-family:Inter,system-ui,sans-serif;background:var(--surface-0);color:var(--text-primary);margin:0}
+a{color:var(--accent)}
+.sidebar{width:230px;background:var(--surface-1);border-right:1px solid var(--border);min-height:100vh;padding:18px 12px 72px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0}
+.main{margin-left:230px;padding:24px;min-height:100vh;min-width:0;overflow-wrap:anywhere}
+.card{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-1);padding:20px;margin-bottom:16px}
+.btn{background:var(--accent);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:var(--accent-hover)}
+.btn-sm{padding:5px 12px;font-size:13px}
+.btn-red{background:var(--danger)}.btn-red:hover{background:#b91c1c}
+.btn-green{background:var(--success)}.btn-green:hover{background:#047857}
+.btn-outline{background:transparent;border:1px solid var(--border-light);color:var(--text-secondary)}.btn-outline:hover{background:var(--surface-1);color:var(--text-primary)}
+.input{border:1px solid var(--border-light);border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0;background:var(--surface-2);color:var(--text-primary)}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:var(--z-modal)}
+.modal-content{background:var(--surface-3);border:1px solid var(--border);border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-2)}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}
+.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-gray{background:#e2e8f0;color:var(--text-secondary)}
+html[data-theme="dark"] .badge-green{background:rgba(34,197,94,.15);color:#4ade80}
+html[data-theme="dark"] .badge-red{background:rgba(239,68,68,.15);color:#fca5a5}
+html[data-theme="dark"] .badge-yellow{background:rgba(245,158,11,.15);color:#fbbf24}
+html[data-theme="dark"] .badge-blue{background:rgba(99,102,241,.2);color:#a5b4fc}
+html[data-theme="dark"] .badge-gray{background:#2a2d3a;color:#9aa0a6}
+.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:14px;font-weight:500;width:100%;border:0;background:transparent;text-align:left;font-family:inherit;line-height:1.2}
+.nav-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nav-item:hover{background:var(--surface-2);color:var(--text-primary)}
+.nav-item.active{background:var(--accent);color:#fff}
+.table{width:100%;border-collapse:collapse}
+.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid var(--border)}
+.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid var(--border);color:var(--text-primary)}
+.table tr:hover td{background:var(--surface-1)}
+.stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:var(--shadow-1)}
+.stat-value{font-size:28px;font-weight:700;color:var(--text-primary)}.stat-label{font-size:13px;color:var(--text-muted);margin-top:4px}
+@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-txt{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:60px!important}}
+.imp-banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+html[data-theme="dark"] .imp-banner{background:rgba(245,158,11,.12);border-color:#b45309;color:#fbbf24}
+.imp-banner button{background:#92400e;color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500}.imp-banner .imp-error{color:var(--danger);font-weight:600}
+html[data-theme="dark"] .imp-banner .imp-error{color:#fca5a5}
+/* ===== Tailwind utility recolours for the night branch ===== */
+html[data-theme="dark"] .text-gray-800{color:#e8eaed}
+html[data-theme="dark"] .text-gray-700{color:#d1d5db}
+html[data-theme="dark"] .text-gray-600,html[data-theme="dark"] .text-gray-500{color:#9aa0a6}
+html[data-theme="dark"] .text-gray-400{color:#6b7280}
+html[data-theme="dark"] .text-gray-300{color:#4b5563}
+html[data-theme="dark"] .text-blue-600,html[data-theme="dark"] .text-blue-700{color:#818cf8}
+html[data-theme="dark"] .text-red-500,html[data-theme="dark"] .text-red-600,html[data-theme="dark"] .text-red-700{color:#fca5a5}
+html[data-theme="dark"] .text-green-700{color:#4ade80}
+html[data-theme="dark"] .text-amber-700,html[data-theme="dark"] .text-amber-800{color:#fbbf24}
+html[data-theme="dark"] .bg-red-50{background:rgba(239,68,68,.12)}
+html[data-theme="dark"] .bg-gray-50{background:var(--surface-1)}
+html[data-theme="dark"] .bg-amber-50{background:rgba(245,158,11,.12)}
+/* ===== Day/Night switch (fixed bottom-left, every surface) ===== */
+.theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--accent);transform:translateY(-1px)}
+</style>
 <link rel="stylesheet" href="/dashboard/tw.css">
 </head>
 <body>
 <div id="app"></div>
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode">
+  <span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span>
+</button>
+<script>
+(function () {
+  var btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  function paint() {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var icon = document.getElementById('theme-toggle-icon');
+    var label = document.getElementById('theme-toggle-label');
+    if (icon) icon.textContent = dark ? '☀️' : '🌙';
+    if (label) label.textContent = dark ? 'Day mode' : 'Night mode';
+  }
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('mc_theme', next); } catch (e) {}
+    paint();
+  });
+  paint();
+})();
+</script>
 <script>
 /* Inline guide content (fleet standard; the app-ui counterpart of the /guide.html page). One entry
    per console screen. This console is a preact SPA that switches views in JS WITHOUT touching the
@@ -355,9 +481,9 @@ const Overview = () => {
       // (admin_handler's manual add) — no screen of this app sells them.
       const declared = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al['included_credits']) : NaN;
       if (isFinite(declared) && declared > 0) {
-        return html`<p class="text-sm" style="color:#b91c1c;margin:8px 0 0" id="credit-note">You have used all ${declared} call credit${declared === 1 ? '' : 's'} this plan includes, so incoming calls are being refused. Credits are added by our team, not from this screen: message us from <a href="/contact.html" style="color:#b91c1c;text-decoration:underline">our contact page</a> to top them up.</p>`;
+        return html`<p class="text-sm" style="color:var(--danger);margin:8px 0 0" id="credit-note">You have used all ${declared} call credit${declared === 1 ? '' : 's'} this plan includes, so incoming calls are being refused. Credits are added by our team, not from this screen: message us from <a href="/contact.html" style="color:var(--danger);text-decoration:underline">our contact page</a> to top them up.</p>`;
       }
-      return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">This workspace has no call credits, so a missed call cannot be answered yet. Credits are added by our team, not from this screen \u2014 message us from <a href="/contact.html" style="color:#2563eb;text-decoration:underline">our contact page</a> and we will switch them on. <a href="#" style="color:#2563eb;text-decoration:underline" onClick=${(e) => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>Plan & Billing</a> shows what each plan includes.</p>`;
+      return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">This workspace has no call credits, so a missed call cannot be answered yet. Credits are added by our team, not from this screen \u2014 message us from <a href="/contact.html" style="color:var(--accent);text-decoration:underline">our contact page</a> and we will switch them on. <a href="#" style="color:var(--accent);text-decoration:underline" onClick=${(e) => { e.preventDefault(); S.view = 'billing'; renderApp(); }}>Plan & Billing</a> shows what each plan includes.</p>`;
     }
     const cap = Object.prototype.hasOwnProperty.call(al, 'included_credits') ? Number(al.included_credits) : null;
     // A balance ABOVE the plan's included number is normal (a top-up, or the plan's own bonus credits
@@ -427,7 +553,7 @@ const Overview = () => {
     return html`<div class="card" data-first-steps="1" data-first-setup="${state}" style="margin-bottom:16px">
       <h3 class="font-semibold" style="margin:0 0 2px">${state === 'both' ? 'Get set up' : 'Finish setting up'}</h3>
       <p class="text-sm text-gray-500" style="margin:0 0 10px">${headline}</p>
-      ${steps.map((s, i) => html`<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0${i ? ';border-top:1px solid #e2e8f0' : ''}">
+      ${steps.map((s, i) => html`<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0${i ? ';border-top:1px solid var(--border)' : ''}">
         <div style="flex:0 0 24px;height:24px;border-radius:50%;background:#eef2ff;color:#4338ca;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center">${i + 1}</div>
         <div style="flex:1">
           <div class="font-semibold text-sm">${s[0]}</div>
@@ -846,8 +972,8 @@ const Profile = () => {
       <div class="flex items-start gap-5">
         <div class="text-center">
           ${pic
-            ? html`<img id="profile-picture" src=${pic} alt="Profile picture" class="w-24 h-24 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
-            : html`<div id="profile-picture" class="w-24 h-24 rounded-full flex items-center justify-center text-3xl" style="background:#f1f5f9;border:1px solid #e2e8f0">👤</div>`}
+            ? html`<img id="profile-picture" src=${pic} alt="Profile picture" class="w-24 h-24 rounded-full object-cover" style="border:1px solid var(--border)" />`
+            : html`<div id="profile-picture" class="w-24 h-24 rounded-full flex items-center justify-center text-3xl" style="background:var(--surface-1);border:1px solid var(--border)">👤</div>`}
           <label class="btn btn-sm btn-outline" style="display:inline-block;margin-top:8px;cursor:pointer">
             ${pic ? 'Change picture' : 'Upload picture'}
             <input id="picture-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onChange=${upload} />
@@ -933,13 +1059,13 @@ const Profile = () => {
         ${st.caErr && html`<p class="text-sm text-red-700" id="close-account-msg" role="status" aria-live="polite">${st.caErr}</p>`}
         ${!st.caErr && st.caMsg && html`<p class="text-sm" style="color:#15803d" id="close-account-msg" role="status" aria-live="polite">${st.caMsg}</p>`}
         ${!st.caArm
-          ? html`<button id="close-account-arm" class="btn btn-sm btn-outline" style="color:#b91c1c;border-color:#fca5a5" onClick=${() => { st.caArm = true; renderApp(); }}>Close my account</button>`
+          ? html`<button id="close-account-arm" class="btn btn-sm btn-outline" style="color:var(--danger);border-color:#fca5a5" onClick=${() => { st.caArm = true; renderApp(); }}>Close my account</button>`
           : html`<div id="close-account-form" class="space-y-3">
               <div><label class="text-sm font-medium block mb-1" for="ca-pw">Your password (proves it is you)</label>
                 <input id="ca-pw" class="input" type="password" autocomplete="current-password" value=${st.caPw} onInput=${e => { st.caPw = e.target.value; }} /></div>
               <div><label class="text-sm font-medium block mb-1" for="ca-word">Type CLOSE to confirm</label>
                 <input id="ca-word" class="input" autocomplete="off" placeholder="CLOSE" value=${st.caWord} onInput=${e => { st.caWord = e.target.value; }} /></div>
-              <button id="close-account-do" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:#b91c1c" disabled=${st.caBusy} onClick=${closeAcct}>Close my account permanently</button>
+              <button id="close-account-do" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:var(--danger)" disabled=${st.caBusy} onClick=${closeAcct}>Close my account permanently</button>
             </div>`}
       </div>
     </div>
@@ -962,7 +1088,7 @@ const Profile = () => {
 // the send-only arm could not, because nothing read the result back.
 const mailDoc = (st) => '<!doctype html><meta charset="utf-8">'
   + '<body style="margin:0;padding:16px;background:#fff;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827">'
-  + (st.mailHtml || '<p style="color:#64748b">The sender returned an empty body.</p>')
+  + (st.mailHtml || '<p style="color:var(--text-secondary)">The sender returned an empty body.</p>')
   + '</body>';
 const Branding = () => {
   const st = viewState('branding', {
@@ -1115,8 +1241,8 @@ const Branding = () => {
       <div class="flex items-start gap-5">
         <div class="text-center">
           ${logo
-            ? html`<img id="brand-logo-preview" src=${logo} alt="Brand logo" style="max-height:72px;max-width:200px;border:1px solid #e2e8f0;border-radius:8px;padding:6px;background:#fff" />`
-            : html`<div id="brand-logo-preview" class="w-24 h-24 rounded flex items-center justify-center text-3xl" style="background:#f1f5f9;border:1px solid #e2e8f0">🎨</div>`}
+            ? html`<img id="brand-logo-preview" src=${logo} alt="Brand logo" style="max-height:72px;max-width:200px;border:1px solid var(--border);border-radius:8px;padding:6px;background:var(--surface-2)" />`
+            : html`<div id="brand-logo-preview" class="w-24 h-24 rounded flex items-center justify-center text-3xl" style="background:var(--surface-1);border:1px solid var(--border)">🎨</div>`}
           <div class="mt-2 space-x-2">
             <label class="btn btn-sm btn-outline" id="brand-upload-btn" style="display:inline-block;cursor:pointer">
               ${logo ? 'Change logo' : 'Upload logo'}
@@ -1135,17 +1261,17 @@ const Branding = () => {
         </div>
       </div>
       <p class="text-xs text-gray-500 mt-3">Your logo and business name open every transactional email we send for your account (welcome, password reset, receipts). Leave them blank to keep our default look.</p>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e2e8f0">
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
         <div class="flex items-center gap-2" style="margin-bottom:6px">
           <div class="text-xs text-gray-500" style="flex:1">How your customers see it — the email your sender really produces</div>
           <button id="brand-mail-refresh" class="btn btn-sm btn-outline" onClick=${loadMailBody}>Refresh</button>
         </div>
         ${st.mailSubject ? html`<div id="brand-mail-subject" class="text-xs text-gray-400" style="margin:0 0 6px">Subject: ${st.mailSubject}</div>` : ''}
         ${st.mailHtml
-          ? html`<iframe id="brand-mail-frame" title="Preview of the email this account sends" sandbox="" srcdoc=${mailDoc(st)} style="width:100%;height:260px;border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>`
-          : html`<div id="brand-mail-empty" class="text-xs text-gray-500" style="padding:14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff">Loading the email your sender produces…</div>`}
+          ? html`<iframe id="brand-mail-frame" title="Preview of the email this account sends" sandbox="" srcdoc=${mailDoc(st)} style="width:100%;height:260px;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>`
+          : html`<div id="brand-mail-empty" class="text-xs text-gray-500" style="padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)">Loading the email your sender produces…</div>`}
         ${st.mailHint ? html`<div id="brand-mail-hint" class="text-xs text-gray-500" style="margin-top:6px">${st.mailHint}</div>` : ''}
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e2e8f0">
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
           <div class="text-xs text-gray-500 mb-2">See it in your own inbox</div>
           <p class="text-xs text-gray-500" style="margin:0 0 8px">The box above shows the message your sender builds from the branding you have SAVED. The button mails the same sample to your own address — save your branding first, or it carries the default MissedCall Respondr header.</p>
           <button id="brand-preview-btn" class="btn btn-sm btn-outline" disabled=${st.previewBusy} onClick=${sendPreview}>${st.previewBusy ? 'Sending…' : 'Send me a preview email'}</button>
@@ -1944,7 +2070,7 @@ const Lists = () => {
           <button type="button" class="btn btn-sm btn-outline" onClick=${() => { st.selected = null; st.leads = null; st.addOpen = false; st.leadsErr = null; renderApp(); }}>Close</button>
         </div>
       </div>
-      ${st.renaming && html`<div class="mb-4" id="list-rename-box" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+      ${st.renaming && html`<div class="mb-4" id="list-rename-box" style="border:1px solid var(--border);border-radius:8px;padding:12px">
         <label class="text-sm font-medium block mb-1">List name</label>
         <div class="flex gap-2" style="flex-wrap:wrap;align-items:center">
           <input class="input" id="list-rename-input" style="max-width:420px" value=${st.renameDraft || ''} onInput=${e => { st.renameDraft = e.target.value; }} placeholder="After-hours callers" />
@@ -1953,7 +2079,7 @@ const Lists = () => {
         </div>
         <p class="text-xs text-gray-400 mt-2">Renaming keeps the list's link and everyone already in it.</p>
       </div>`}
-      ${st.addOpen && html`<div class="mb-4" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+      ${st.addOpen && html`<div class="mb-4" style="border:1px solid var(--border);border-radius:8px;padding:12px">
         <label class="text-sm font-medium block mb-1">Which lead?</label>
         ${st.pickList === null
           ? html`<p class="text-sm text-gray-400">Loading your leads…</p>`
@@ -2215,7 +2341,7 @@ const Tickets = () => {
         <button class="btn btn-sm btn-outline" onClick=${closeThread}>Close</button>
       </div>
       <div class="space-y-2 mb-3">
-        ${((st.thread && st.thread.messages) || []).map(m => html`<div class="p-2 rounded" style="background:#f9fafb">
+        ${((st.thread && st.thread.messages) || []).map(m => html`<div class="p-2 rounded" style="background:var(--surface-1)">
           <div class="text-xs text-gray-500 mb-1">${m.sender_type === 'customer' ? 'You' : 'The team'} · ${m.created_at ? new Date(m.created_at).toLocaleString() : ''}</div>
           <div style="white-space:pre-wrap">${m.body}</div>
         </div>`)}
@@ -2827,7 +2953,7 @@ const Billing = () => {
     </div>`}
     ${howToPay ? html`<div class="card" id="billing-how-to-pay" data-how-to-pay="1" style="border-left:4px solid #2563eb;background:#eff6ff">
       <h3 class="font-semibold mb-1" style="color:#1e3a8a">How to pay now</h3>
-      <div data-how-to-pay-text="1" style="white-space:pre-wrap;font-size:14px;line-height:1.5;color:#1e293b">${howToPay}</div>
+      <div data-how-to-pay-text="1" style="white-space:pre-wrap;font-size:14px;line-height:1.5;color:var(--text-primary)">${howToPay}</div>
       <p class="text-sm text-gray-600 mt-2">Request a plan below and the same words are emailed to you. Nothing is charged until a person on the team confirms your payment.</p>
     </div>` : null}
     ${st.requestsLoaded && st.requests.length ? html`<div class="card" id="plan-requests">
@@ -2851,11 +2977,11 @@ const Billing = () => {
         ? html`<p class="text-sm text-gray-600 mb-2">Newest first. The amount and the outcome are the ones the payment record carries.</p>
             <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
               <thead><tr>
-                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">Date</th>
-                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">What for</th>
-                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">Amount</th>
-                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">Paid through</th>
-                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600">What happened</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:#475569;font-weight:600">Date</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:#475569;font-weight:600">What for</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:#475569;font-weight:600">Amount</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:#475569;font-weight:600">Paid through</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:#475569;font-weight:600">What happened</th>
               </tr></thead>
               <tbody>${st.sessions.map(s => html`<tr data-billing-row=${s.id}>
                 <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">${payDate(s.created_at)}</td>
@@ -3400,8 +3526,8 @@ const wsDelete = async (w) => {
   }
 };
 
-const wsMenuBtn = (danger) => 'background:#fff;color:' + (danger ? '#b91c1c' : '#1e1b4b')
-  + ';border:1px solid ' + (danger ? '#fecaca' : '#e2e8f0')
+const wsMenuBtn = (danger) => 'background:var(--surface-2);color:' + (danger ? '#b91c1c' : 'var(--text-primary)')
+  + ';border:1px solid ' + (danger ? '#fecaca' : 'var(--border)')
   + ';border-radius:8px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer';
 
 const WsSwitcher = () => {
@@ -3409,17 +3535,17 @@ const WsSwitcher = () => {
   return html`<div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:16px">
     <div style="position:relative">
       <button type="button" id="ws-switcher-btn" title="Workspaces" onClick=${() => { WS.open = !WS.open; renderApp(); }}
-        style="background:#fff;color:#1e1b4b;border:1px solid #e2e8f0;border-radius:100px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🗂️ <span id="wsCurrentName">${WS.current ? WS.current.name : 'Workspace'}</span> <span style="font-size:10px">▾</span></button>
+        style="background:var(--surface-2);color:var(--text-primary);border:1px solid var(--border);border-radius:100px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🗂️ <span id="wsCurrentName">${WS.current ? WS.current.name : 'Workspace'}</span> <span style="font-size:10px">▾</span></button>
       ${WS.open && html`<div style="position:fixed;inset:0;z-index:999" onClick=${() => { WS.open = false; renderApp(); }}></div>`}
-      ${WS.open && html`<div id="wsMenu" style="position:absolute;right:0;top:calc(100% + 6px);min-width:280px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:1000;padding:4px 0;text-align:left">
-        <div style="padding:8px 14px 4px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.4px">Workspaces</div>
-        ${WS.items.length === 0 && html`<div style="padding:6px 14px;font-size:13px;color:#64748b">No workspaces yet.</div>`}
+      ${WS.open && html`<div id="wsMenu" style="position:absolute;right:0;top:calc(100% + 6px);min-width:280px;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-2);z-index:var(--z-dropdown);padding:4px 0;text-align:left">
+        <div style="padding:8px 14px 4px;font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px">Workspaces</div>
+        ${WS.items.length === 0 && html`<div style="padding:6px 14px;font-size:13px;color:var(--text-secondary)">No workspaces yet.</div>`}
         ${WS.items.map(w => {
           const cur = WS.current && WS.current.id === w.id;
           return html`<div key=${w.id}>
             <div style="display:flex;align-items:center;gap:6px;padding:6px 14px 2px">
               <span style="flex:1;font-weight:${cur ? '600' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.name}</span>
-              ${w.is_default ? html`<span style="font-size:10px;color:#64748b">default</span>` : null}
+              ${w.is_default ? html`<span style="font-size:10px;color:var(--text-secondary)">default</span>` : null}
               ${cur ? html`<span style="font-size:12px">✓</span>` : null}
             </div>
             <div style="display:flex;gap:4px;padding:2px 14px 8px;border-bottom:1px solid #eef2f7">
@@ -3431,7 +3557,7 @@ const WsSwitcher = () => {
           </div>`;
         })}
         <div style="border-top:1px solid #eef2f7;margin:4px 0 0"></div>
-        <button type="button" onClick=${() => wsAdd()} style="width:100%;text-align:left;background:none;border:none;padding:8px 14px;font-size:13px;font-weight:600;color:#1e1b4b;cursor:pointer">➕ Add workspace</button>
+        <button type="button" onClick=${() => wsAdd()} style="width:100%;text-align:left;background:none;border:none;padding:8px 14px;font-size:13px;font-weight:600;color:var(--text-primary);cursor:pointer">➕ Add workspace</button>
       </div>`}
     </div>
   </div>`;
@@ -3515,7 +3641,7 @@ const ApiKeys = () => {
     <h2 class="text-xl font-bold mb-4">API Keys</h2>
     <p class="text-sm text-gray-500 mb-4">A key lets other software (or our AI assistant) reach this workspace on your behalf. It stays viewable — press View and enter your account password to see it again any time.</p>
     ${st.error && html`<div class="imp-banner"><span>${st.error}</span></div>`}
-    ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:#059669;color:#065f46"><span>${st.notice}</span></div>`}
+    ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:var(--success);color:#065f46"><span>${st.notice}</span></div>`}
     ${st.regenError && html`<div class="imp-banner"><span>Regenerate failed: ${st.regenError}</span></div>`}
     <div class="card">
       <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap">
@@ -3706,17 +3832,17 @@ const Mcp = () => {
   };
   const step = (n, heading, body, extra) => html`
     <div style="display:flex;gap:12px;margin-bottom:14px">
-      <div style="flex:0 0 26px;height:26px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">${n}</div>
-      <div style="flex:1"><div style="font-weight:600;margin-bottom:2px">${heading}</div><div style="color:#64748b;font-size:13px">${body}</div>${extra || ''}</div>
+      <div style="flex:0 0 26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">${n}</div>
+      <div style="flex:1"><div style="font-weight:600;margin-bottom:2px">${heading}</div><div style="color:var(--text-secondary);font-size:13px">${body}</div>${extra || ''}</div>
     </div>`;
   const addressRow = html`
     <div style="margin-top:6px">
-      <div style="font-size:11px;color:#94a3b8;letter-spacing:.08em;font-weight:700;margin-bottom:4px">ADDRESS</div>
+      <div style="font-size:11px;color:var(--text-muted);letter-spacing:.08em;font-weight:700;margin-bottom:4px">ADDRESS</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <code id="mcp-endpoint" style="flex:1;min-width:260px;word-break:break-all;background:#0f172a;color:#7dd3fc;padding:8px 12px;border-radius:8px;font-size:13px">${MCP_ENDPOINT}</code>
+        <code id="mcp-endpoint" style="flex:1;min-width:260px;word-break:break-all;background:var(--code-bg);color:var(--code-fg);padding:8px 12px;border-radius:8px;font-size:13px">${MCP_ENDPOINT}</code>
         <button class="btn btn-sm" onClick=${() => copy(MCP_ENDPOINT, 'mcp-endpoint')}>Copy</button>
       </div>
-      <div style="font-size:12px;color:#94a3b8;margin-top:6px">The whole address, nothing on the end.</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px">The whole address, nothing on the end.</div>
     </div>`;
   const chatgptSteps = html`${[
     step(1, 'Open chatgpt.com on a computer, not your phone.', 'This cannot be set up in the ChatGPT phone app.'),
@@ -3733,7 +3859,7 @@ const Mcp = () => {
     step(4, 'Save it, then ask a question.', 'Try “Which calls came in this week?” If nothing is offered as a tool, the key is the thing to replace.')
   ]}`;
   const promptCard = (q) => html`
-    <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:9px 11px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:7px;background:#fff">
+    <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:9px 11px;border:1px solid var(--border);border-radius:8px;margin-bottom:7px;background:var(--surface-2)">
       <span style="font-size:13px">${q}</span>
       <button class="btn btn-sm btn-outline" onClick=${() => copy(q)}>Copy</button>
     </div>`;
@@ -3744,7 +3870,7 @@ const Mcp = () => {
     const right = items.filter((_, i) => i % 2 === 1).map(promptCard);
     return html`
       <div style="margin-bottom:18px">
-        <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px;text-transform:uppercase">${g.title}<span style="font-weight:400;text-transform:none"> — ${g.hint}</span></div>
+        <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px;text-transform:uppercase">${g.title}<span style="font-weight:400;text-transform:none"> — ${g.hint}</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div>${left}</div><div>${right}</div></div>
         ${!open && g.items.length > 4 ? html`<button class="btn btn-sm btn-outline" onClick=${() => { st.more[g.title] = true; renderApp(); }}>See more examples →</button>` : ''}
       </div>`;
@@ -3753,20 +3879,20 @@ const Mcp = () => {
   const devBody = () => {
     const t = st.devTab;
     const h4 = (s) => html`<h4 style="margin:0 0 8px">${s}</h4>`;
-    const p = (s) => html`<p style="color:#64748b;font-size:13px;margin:0 0 10px">${s}</p>`;
-    const pre = (s) => html`<pre style="background:#0f172a;color:#7dd3fc;padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:0">${s}</pre>`;
+    const p = (s) => html`<p style="color:var(--text-secondary);font-size:13px;margin:0 0 10px">${s}</p>`;
+    const pre = (s) => html`<pre style="background:var(--code-bg);color:var(--code-fg);padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:0">${s}</pre>`;
     if (t === 0) return html`${h4('How it connects')}${p('Your AI client sends JSON-RPC over HTTPS to the address above. Every request carries your API key as a bearer token. The server hashes the key, finds the account it belongs to, and applies that account as a filter on every query — there is no parameter that can widen it. The database user behind it can only run SELECT.')}`;
     if (t === 1) return html`${h4('Your API token')}${p('One key per account. Press Reveal on the card above to see it — it asks for your account password. Regenerating it disconnects every app using the old key.')}`;
     if (t === 2) return html`${h4('Claude Code')}${pre('claude mcp add --transport http missedcallrespondr \\\n  https://hooks.swiftsoftware.net/mcp \\\n  --header "Authorization: Bearer YOUR_API_KEY"')}`;
     if (t === 3) return html`${h4('Claude Desktop')}${p('Settings, then Connectors, then Add custom connector. Paste the address and choose to authenticate with a token. Or add it to the config file:')}${pre(MCP_CONFIG_TEXT)}`;
     if (t === 4) return html`${h4('Codex')}${p('Codex reads the same config shape as Claude Desktop. Add it as an HTTP MCP server with the address above and the Authorization header carrying your key.')}${pre(MCP_CONFIG_TEXT)}`;
     if (t === 5) return html`${h4('Cursor')}${p('Settings, then MCP, then add a server of type http with the address above and the Authorization header carrying your key.')}${pre(MCP_CONFIG_TEXT)}`;
-    if (t === 6) return html`${h4('Troubleshooting')}<ul style="margin:0;padding-left:20px;color:#64748b;font-size:13px;line-height:1.8">${[
+    if (t === 6) return html`${h4('Troubleshooting')}<ul style="margin:0;padding-left:20px;color:var(--text-secondary);font-size:13px;line-height:1.8">${[
       html`<li><strong>No tools appear.</strong> The key was rejected. Regenerate it and paste the new one.</li>`,
       html`<li><strong>It answers but returns nothing.</strong> That is usually correct: a scope that genuinely holds no rows answers zero. Ask for something you know exists.</li>`,
       html`<li><strong>You want it to add a contact.</strong> It cannot, by design. Reading only.</li>`
     ]}</ul>`;
-    return html`${h4('FAQ')}<ul style="margin:0;padding-left:20px;color:#64748b;font-size:13px;line-height:1.8">${[
+    return html`${h4('FAQ')}<ul style="margin:0;padding-left:20px;color:var(--text-secondary);font-size:13px;line-height:1.8">${[
       html`<li><strong>Does it cost anything?</strong> No. It is your own account reading its own data.</li>`,
       html`<li><strong>Can I connect more than one app?</strong> Yes, with the same key. Regenerating the key disconnects all of them.</li>`,
       html`<li><strong>Who can use it?</strong> Anyone holding the key can read the account, so treat it like a password.</li>`,
@@ -3778,26 +3904,26 @@ const Mcp = () => {
     <h2 class="text-xl font-bold mb-1">Connect AI with MissedCall Respondr</h2>
     <p class="text-sm text-gray-500 mb-4">Ask Claude or ChatGPT about your calls, leads, tickets and clients — and have it find things for you.</p>
     ${st.error && html`<div class="imp-banner"><span>${st.error}</span></div>`}
-    ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:#059669;color:#065f46"><span>${st.notice}</span></div>`}
+    ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:var(--success);color:#065f46"><span>${st.notice}</span></div>`}
     <div class="card">
       <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap">
         <button class=${st.client === 'chatgpt' ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.client = 'chatgpt'; renderApp(); }}>ChatGPT</button>
         <button class=${st.client === 'claude' ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.client = 'claude'; renderApp(); }}>Claude</button>
       </div>
-      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">CONNECT WITH YOUR API KEY</div>
-      <p style="color:#64748b;margin-bottom:14px">For ChatGPT and Claude on the web. There is no token to copy by hand — you paste one address and give it this account’s API key, so every answer is scoped to <strong>your</strong> data and nobody else’s.</p>
+      <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px">CONNECT WITH YOUR API KEY</div>
+      <p style="color:var(--text-secondary);margin-bottom:14px">For ChatGPT and Claude on the web. There is no token to copy by hand — you paste one address and give it this account’s API key, so every answer is scoped to <strong>your</strong> data and nobody else’s.</p>
       ${st.client === 'chatgpt' ? chatgptSteps : claudeSteps}
-      <div style="margin-top:6px;padding:12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">
+      <div style="margin-top:6px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-1)">
         <div style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:4px"><span style="width:8px;height:8px;border-radius:50%;background:#059669;display:inline-block"></span>Ready to connect</div>
-        <div style="font-size:13px;color:#64748b;margin-bottom:10px">Your account: <strong>${c.email || 'this account'}</strong></div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Your account: <strong>${c.email || 'this account'}</strong></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-sm btn-outline" disabled=${st.checking} onClick=${testConnection}>${st.checking ? 'Checking…' : 'Test connection'}</button>
           <button class="btn btn-sm btn-outline" onClick=${() => copy(MCP_CONFIG_TEXT, 'mcp-config')}>Copy setup</button>
           <button class="btn btn-sm btn-outline" onClick=${() => { st.devOpen = true; renderApp(); }}>Advanced setup</button>
         </div>
-        ${st.checkMsg && html`<div style="font-size:12px;color:#94a3b8;margin-top:8px">${st.checkMsg}</div>`}
+        ${st.checkMsg && html`<div style="font-size:12px;color:var(--text-muted);margin-top:8px">${st.checkMsg}</div>`}
       </div>
-      <div style="font-size:12px;color:#94a3b8;margin-top:12px;line-height:1.7">
+      <div style="font-size:12px;color:var(--text-muted);margin-top:12px;line-height:1.7">
         Available on your account — the key is the same one the API Keys screen shows.<br/>
         Be signed in here first, in the same browser, so the key is yours.<br/>
         The approval screen names the account it will act as: your AI client reads exactly what this account can read, nothing more.
@@ -3808,7 +3934,7 @@ const Mcp = () => {
       <p class="text-sm text-gray-500 mb-3">The server accepts this workspace’s API key as a Bearer token — the same key the API Keys screen shows. It is listed here by prefix only; the secret is never shown until you Reveal it, which asks for your account password. Treat it like a password: anyone holding it can read this workspace.</p>
       ${!k ? html`<p class="text-sm text-gray-400">No active API key yet. Create one on the API Keys screen, then come back.</p>` : html`
         <div class="flex items-center gap-2 flex-wrap mb-3">
-          <code style="background:#f1f5f9;color:#334155;padding:8px 12px;border-radius:8px;font-size:13px">${k.key_prefix}…</code>
+          <code style="background:var(--surface-1);color:var(--text-secondary);padding:8px 12px;border-radius:8px;font-size:13px">${k.key_prefix}…</code>
           <span class="text-xs text-gray-500">${k.name || 'default'}</span>
           ${k.recoverable === false ? html`<span class="text-xs text-gray-500">(minted before keys were stored recoverably — Regenerate to get a viewable key)</span>` : html`<button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${reveal}>Reveal</button>`}
           <button class="btn btn-sm btn-outline" onClick=${() => copy(st.shown && st.shown.id === k.id ? st.shown.token : '', 'mcp-revealed-key')}>Copy</button>
@@ -3820,19 +3946,19 @@ const Mcp = () => {
         <div style="border:2px solid #16a34a;border-radius:10px;padding:12px 14px;margin-top:12px">
           <p class="text-sm text-gray-500 mb-2">Your key (${st.shown.id === (k && k.id) ? 'current' : 'newly generated'}):</p>
           <div class="flex items-center gap-2 flex-wrap">
-            <code id="mcp-revealed-key" style="flex:1;min-width:260px;word-break:break-all;background:#0f172a;color:#7dd3fc;padding:10px 14px;border-radius:10px;font-size:13px">${st.shown.token}</code>
+            <code id="mcp-revealed-key" style="flex:1;min-width:260px;word-break:break-all;background:var(--code-bg);color:var(--code-fg);padding:10px 14px;border-radius:10px;font-size:13px">${st.shown.token}</code>
             <button class="btn btn-sm" onClick=${() => copy(st.shown.token, 'mcp-revealed-key')}>Copy</button>
             <button class="btn btn-sm btn-outline" onClick=${() => { st.shown = null; renderApp(); }}>Hide</button>
           </div>
         </div>` : ''}
     </div>
-    <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-2">Connected apps</h3>
-      <p class="text-sm text-gray-500">We do not keep a list of the apps you have connected — your key is the connection. That means one action disconnects everything at once: regenerate the key above and every client using the old one stops working immediately.</p>
+    <div class="sunken">
+      <h3 class="sunken-title">Connected apps</h3>
+      <p class="ref-body">We do not keep a list of the apps you have connected — your key is the connection. That means one action disconnects everything at once: regenerate the key above and every client using the old one stops working immediately.</p>
     </div>
     <div class="card">
-      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">WHAT CAN I ASK MISSEDCALL RESPONDR?</div>
-      <p style="color:#64748b;margin-bottom:12px">Say any of these — or anything like them — to your AI app. Every one is a question, because this connection reads and never writes.</p>
+      <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px">WHAT CAN I ASK MISSEDCALL RESPONDR?</div>
+      <p style="color:var(--text-secondary);margin-bottom:12px">Say any of these — or anything like them — to your AI app. Every one is a question, because this connection reads and never writes.</p>
       ${MCP_PROMPT_GROUPS.map(group)}
     </div>
     <div class="card">
@@ -3842,37 +3968,37 @@ const Mcp = () => {
         <input type="text" class="input" style="flex:1;min-width:220px" placeholder="I want to …" value=${st.goal} onInput=${e => { st.goal = e.target.value; }} />
         <button class="btn btn-sm" onClick=${giveIdeas}>Give me ideas</button>
       </div>
-      <div style="font-size:12px;color:#94a3b8;margin-top:6px">We will suggest the prompts that fit your goal.</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px">We will suggest the prompts that fit your goal.</div>
       ${st.ideas ? html`<div style="margin-top:10px">${st.ideas.map(promptCard)}</div>` : ''}
     </div>
-    <div class="card">
-      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">EVERYTHING AI CAN DO WITH MISSEDCALL RESPONDR</div>
-      <p style="color:#64748b;font-size:13px;margin-bottom:8px">Open a section to see what is in it — ${MCP_ENTITIES.length} kinds of record, every one read-only and every one limited to this account.</p>
+    <div class="sunken">
+      <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px">EVERYTHING AI CAN DO WITH MISSEDCALL RESPONDR</div>
+      <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px">Open a section to see what is in it — ${MCP_ENTITIES.length} kinds of record, every one read-only and every one limited to this account.</p>
       ${MCP_ENTITIES.map(e => html`
-        <details style="border-bottom:1px solid #e2e8f0;padding:10px 0">
+        <details style="border-bottom:1px solid var(--border);padding:10px 0">
           <summary style="cursor:pointer;display:flex;align-items:center;gap:10px">
             <span style="font-weight:600;text-transform:capitalize">${e.label}</span>
             <span style="flex:1"></span>
-            <span style="color:#64748b;font-size:12px;text-align:right">${e.desc}</span>
+            <span style="color:var(--text-secondary);font-size:12px;text-align:right">${e.desc}</span>
           </summary>
-          <div style="color:#64748b;font-size:13px;padding:8px 0 4px 2px">Reads ${e.label} via <code style="font-size:12px">${e.key}_summary</code> and <code style="font-size:12px">${e.key}_search</code>. Read-only and scoped to this workspace.</div>
+          <div style="color:var(--text-secondary);font-size:13px;padding:8px 0 4px 2px">Reads ${e.label} via <code style="font-size:12px">${e.key}_summary</code> and <code style="font-size:12px">${e.key}_search</code>. Read-only and scoped to this workspace.</div>
         </details>`)}
     </div>
-    <div class="card">
-      <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700;margin-bottom:8px">WHAT IT WILL NOT DO</div>
-      <ul class="text-sm text-gray-500 pl-5 space-y-1" style="line-height:1.8">
+    <div class="sunken">
+      <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px">WHAT IT WILL NOT DO</div>
+      <ul class="pl-5 space-y-1" style="line-height:1.8">
         <li>It cannot delete anything — not a contact, not a lead, not a ticket. Deleting stays in the app.</li>
         <li>It cannot add or change anything either, and it cannot send a text or a campaign. Reading only.</li>
         <li>It cannot read another account’s data. That is enforced at the database, not by instruction, so no wording in a prompt changes it.</li>
       </ul>
     </div>
-    <div class="card">
+    <div class="sunken">
       <div class="flex items-center gap-2" style="flex-wrap:wrap">
-        <div style="font-size:11px;letter-spacing:.09em;color:#94a3b8;font-weight:700">ADVANCED / DEVELOPER SETUP</div>
+        <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700">ADVANCED / DEVELOPER SETUP</div>
         <span style="flex:1"></span>
         <button class="btn btn-sm btn-outline" onClick=${() => { st.devOpen = !st.devOpen; renderApp(); }}>${st.devOpen ? 'Collapse developer details' : 'Expand developer details'}</button>
       </div>
-      <div style="color:#64748b;font-size:13px;margin-bottom:10px">Technical details for developers and advanced users. Most people never need this section.</div>
+      <div style="color:var(--text-secondary);font-size:13px;margin-bottom:10px">Technical details for developers and advanced users. Most people never need this section.</div>
       ${st.devOpen ? html`
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
           ${devTabs.map((t, i) => html`<button class=${st.devTab === i ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.devTab = i; renderApp(); }}>${t}</button>`)}
@@ -3881,9 +4007,9 @@ const Mcp = () => {
         <button class="btn btn-sm btn-outline" style="margin-top:12px" onClick=${() => copy(MCP_CONFIG_TEXT, 'mcp-config')}>Copy my setup</button>
       ` : ''}
     </div>
-    <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-2">Need help getting connected?</h3>
-      <p class="text-sm text-gray-500">Copy your setup with the button above and paste it to us, or read the step-by-step in the user guide. If your client lists no tools at all, the key is the thing to replace first — that is almost always the cause.</p>
+    <div class="sunken">
+      <h3 class="sunken-title">Need help getting connected?</h3>
+      <p class="ref-body">Copy your setup with the button above and paste it to us, or read the step-by-step in the user guide. If your client lists no tools at all, the key is the thing to replace first — that is almost always the cause.</p>
     </div>
   </div>`;
 };
@@ -3932,7 +4058,7 @@ const App = () => {
     <aside class="sidebar">
       <div class="flex items-center gap-2 px-3 py-4 mb-2">
         ${c.avatar_url
-          ? html`<img id="header-avatar" src=${avatarSrc(c.avatar_url, S.avatarBust)} alt="Profile" class="w-8 h-8 rounded-full object-cover" style="border:1px solid #e2e8f0" />`
+          ? html`<img id="header-avatar" src=${avatarSrc(c.avatar_url, S.avatarBust)} alt="Profile" class="w-8 h-8 rounded-full object-cover" style="border:1px solid var(--border)" />`
           : html`<span class="text-2xl">📞</span>`}
         <span class="nav-txt font-bold text-gray-800">MissedCall</span>
       </div>
@@ -3978,10 +4104,10 @@ const renderApp = () => {
 };
 renderApp();
 </script>
-<div style="max-width:1100px;margin:8px auto 32px;padding:0 24px;text-align:center;font-size:12px;color:#94a3b8">
-  <a href="https://missedcallrespondr.com/privacy" style="color:#64748b;text-decoration:none">Privacy Policy</a>
-  &middot; <a href="https://missedcallrespondr.com/terms" style="color:#64748b;text-decoration:none">Terms of Service</a>
-  &middot; <a href="/guide.html" target="_blank" rel="noopener" style="color:#64748b;text-decoration:none">User Guide</a>
+<div style="max-width:1100px;margin:8px auto 32px;padding:0 24px;text-align:center;font-size:12px;color:var(--text-muted)">
+  <a href="https://missedcallrespondr.com/privacy" style="color:var(--text-secondary);text-decoration:none">Privacy Policy</a>
+  &middot; <a href="https://missedcallrespondr.com/terms" style="color:var(--text-secondary);text-decoration:none">Terms of Service</a>
+  &middot; <a href="/guide.html" target="_blank" rel="noopener" style="color:var(--text-secondary);text-decoration:none">User Guide</a>
 </div>
 
 <!--B209-FEEDBACK-APP-->
@@ -4081,7 +4207,7 @@ renderApp();
   overlay.id = 'fbOverlay';
 
   var panel = el('div',
-    'background:#fff;color:#111827;border-radius:12px;max-width:520px;width:100%;' +
+    'background:var(--surface-3);color:var(--text-primary);border-radius:12px;max-width:520px;width:100%;' +
     'box-shadow:0 18px 48px rgba(0,0,0,.35);font-family:inherit;overflow:hidden');
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
@@ -4108,7 +4234,7 @@ renderApp();
   var kindRow = el('div', 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px');
   var kindBtns = KINDS.map(function (k) {
     var b = el('button',
-      'border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:8px;padding:8px 12px;' +
+      'border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-secondary);border-radius:8px;padding:8px 12px;' +
       'font-size:13px;font-weight:600;cursor:pointer;font-family:inherit', k.label);
     b.type = 'button';
     b.setAttribute('data-fb-kind', k.id);
@@ -4152,7 +4278,7 @@ renderApp();
 
   var actions = el('div', 'display:flex;gap:8px');
   var cancel = el('button',
-    'background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:9px 14px;' +
+    'background:var(--surface-2);border:1px solid var(--border-light);border-radius:8px;padding:9px 14px;' +
     'font-size:13px;font-weight:600;cursor:pointer;color:#374151;font-family:inherit', 'Cancel');
   cancel.type = 'button';
   var send = el('button',

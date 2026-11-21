@@ -11,15 +11,112 @@
 }();
 </script>
 
+<script>
+(function(){try{var t=localStorage.getItem('mc_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MissedCall Respondr — Admin Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" href="/favicon.ico">
-<style>body{font-family:Inter,system-ui,sans-serif;background:#f8fafc}.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:16px}.btn{background:#2563eb;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:#1d4ed8}.btn-sm{padding:5px 12px;font-size:13px}.btn-red{background:#dc2626}.btn-red:hover{background:#b91c1c}.btn-green{background:#059669}.btn-green:hover{background:#047857}.btn-outline{background:0 0;border:1px solid #cbd5e1;color:#475569}.btn-outline:hover{background:#f1f5f9}.btn-blue{background:#7c3aed}.btn-blue:hover{background:#6d28d9}.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0}.input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:#991b1b}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-purple{background:#ede9fe;color:#6d28d9}.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#64748b;font-size:14px;font-weight:500}.nav-item:hover{background:#f1f5f9;color:#1e293b}.nav-item.active{background:#2563eb;color:#fff}.table{width:100%;border-collapse:collapse}.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e2e8f0}.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid #f1f5f9}.table tr:hover td{background:#f8fafc}.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.stat-value{font-size:28px;font-weight:700;color:#1e293b}.stat-label{font-size:13px;color:#64748b;margin-top:4px}.dropdown-item{padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px}.dropdown-item:hover{background:#f1f5f9}.text-red-500{color:#ef4444}.upgrade-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999}.upgrade-box{background:#fff;border-radius:20px;padding:32px;text-align:center;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2)}.upgrade-box h2{font-size:20px;color:#1e293b;margin:0 0 8px}.upgrade-box p{color:#64748b;margin:0 0 20px;line-height:1.5}.upgrade-box .btn-upgrade{background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:600;border:none;cursor:pointer}@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-text{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:0!important}}</style>
+<style>
+/* ===== MissedCall Respondr — shared theme tokens (day + night), admin console =====
+   Same token names and palette as the customer dashboard and mail client. Day is default. */
+:root{
+  --surface-0:#f6f7fb; --surface-1:#eef0f6; --surface-2:#ffffff; --surface-3:#ffffff;
+  --text-primary:#16181d; --text-secondary:#4b5563; --text-muted:#77808f;
+  --accent:#4f46e5; --accent-hover:#4338ca; --accent-2:#7c3aed; --accent-2-hover:#6d28d9;
+  --border:#dde1ea; --border-light:#c9cfdb;
+  --code-bg:#0f172a; --code-fg:#e2e8f0;
+  --danger:#dc2626; --success:#059669; --warn:#b45309;
+  --danger-soft:#fef2f2; --success-soft:#dcfce7; --accent-soft:#eff6ff;
+  --shadow-1:0 1px 3px rgba(16,24,40,.08); --shadow-2:0 8px 32px rgba(16,24,40,.16);
+  --z-sticky:10; --z-dropdown:20; --z-modal:30; --z-toast:40;
+  color-scheme:light;
+}
+html[data-theme="dark"]{
+  --surface-0:#0f1117; --surface-1:#1a1d27; --surface-2:#222532; --surface-3:#2a2d3a;
+  --text-primary:#e8eaed; --text-secondary:#9aa0a6; --text-muted:#6b7280;
+  --accent:#6366f1; --accent-hover:#818cf8; --accent-2:#a78bfa; --accent-2-hover:#c4b5fd;
+  --border:#2d3148; --border-light:#383c52;
+  --code-bg:#0b0e14; --code-fg:#e2e8f0;
+  --danger:#ef4444; --success:#22c55e; --warn:#f59e0b;
+  --danger-soft:rgba(239,68,68,.15); --success-soft:rgba(34,197,94,.15); --accent-soft:rgba(99,102,241,.15);
+  --shadow-1:0 1px 3px rgba(0,0,0,.35); --shadow-2:0 8px 32px rgba(0,0,0,.5);
+  color-scheme:dark;
+}
+/* Elevation + type tokens */
+.surf-2{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-1)}
+.sunken{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:none}
+.sunken h3,.sunken .sunken-title{font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em}
+.sunken p,.sunken li{font-size:13px;color:var(--text-secondary)}
+.eyebrow{font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px;text-transform:uppercase}
+.task-title{font-size:18px;font-weight:700;margin-bottom:4px}
+.task-sub{font-size:13px;color:var(--text-secondary);margin-bottom:14px;max-width:70ch}
+.ref-body{font-size:13px;color:var(--text-secondary)}
+/* Base chrome */
+body{font-family:Inter,system-ui,sans-serif;background:var(--surface-0);color:var(--text-primary)}
+a{color:var(--accent)}
+.card{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-1);padding:20px;margin-bottom:16px}
+.btn{background:var(--accent);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;border:none;font-weight:500}.btn:hover{background:var(--accent-hover)}
+.btn-sm{padding:5px 12px;font-size:13px}
+.btn-red{background:var(--danger)}.btn-red:hover{background:#b91c1c}
+.btn-green{background:var(--success)}.btn-green:hover{background:#047857}
+.btn-outline{background:transparent;border:1px solid var(--border-light);color:var(--text-secondary)}.btn-outline:hover{background:var(--surface-1);color:var(--text-primary)}
+.btn-blue{background:var(--accent-2)}.btn-blue:hover{background:var(--accent-2-hover)}
+.input{border:1px solid var(--border-light);border-radius:8px;padding:8px 12px;width:100%;font-size:14px;outline:0;background:var(--surface-2);color:var(--text-primary)}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:var(--z-modal)}
+.modal-content{background:var(--surface-3);border:1px solid var(--border);border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-2)}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}
+.badge-green{background:#d1fae5;color:#065f46}.badge-red{background:#fee2e2;color:var(--danger)}.badge-yellow{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.badge-purple{background:#ede9fe;color:var(--accent-2)}
+html[data-theme="dark"] .badge-green{background:rgba(34,197,94,.15);color:#4ade80}
+html[data-theme="dark"] .badge-red{background:rgba(239,68,68,.15);color:#fca5a5}
+html[data-theme="dark"] .badge-yellow{background:rgba(245,158,11,.15);color:#fbbf24}
+html[data-theme="dark"] .badge-blue{background:rgba(99,102,241,.2);color:#a5b4fc}
+html[data-theme="dark"] .badge-purple{background:rgba(167,139,250,.18);color:#c4b5fd}
+.nav-item{padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:14px;font-weight:500;width:100%;border:0;background:transparent;text-align:left;font-family:inherit;line-height:1.2}
+.nav-item:hover{background:var(--surface-2);color:var(--text-primary)}
+.nav-item.active{background:var(--accent);color:#fff}
+.table{width:100%;border-collapse:collapse}
+.table th{text-align:left;padding:10px 12px;font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid var(--border)}
+.table td{padding:10px 12px;font-size:14px;border-bottom:1px solid var(--border);color:var(--text-primary)}
+.table tr:hover td{background:var(--surface-1)}
+.stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:var(--shadow-1)}
+.stat-value{font-size:28px;font-weight:700;color:var(--text-primary)}.stat-label{font-size:13px;color:var(--text-muted);margin-top:4px}
+.dropdown-item{padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-primary)}.dropdown-item:hover{background:var(--surface-1)}
+.text-red-500{color:var(--danger)}
+.upgrade-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:var(--z-toast)}
+.upgrade-box{background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:32px;text-align:center;max-width:420px;width:90%;box-shadow:var(--shadow-2)}
+.upgrade-box h2{font-size:20px;color:var(--text-primary);margin:0 0 8px}
+.upgrade-box p{color:var(--text-secondary);margin:0 0 20px;line-height:1.5}
+.upgrade-box .btn-upgrade{background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:600;border:none;cursor:pointer}
+@media(max-width:768px){.sidebar{width:60px!important}.sidebar .nav-text{display:none}.sidebar .nav-item{justify-content:center;padding:10px}.main{margin-left:0!important}}
+/* Tailwind utility recolours for night */
+html[data-theme="dark"] .text-gray-800{color:#e8eaed}
+html[data-theme="dark"] .text-gray-700{color:#d1d5db}
+html[data-theme="dark"] .text-gray-600,html[data-theme="dark"] .text-gray-500{color:#9aa0a6}
+html[data-theme="dark"] .text-gray-400{color:#6b7280}
+html[data-theme="dark"] .text-gray-300{color:#4b5563}
+html[data-theme="dark"] .text-blue-600,html[data-theme="dark"] .text-blue-700{color:#818cf8}
+html[data-theme="dark"] .text-red-600,html[data-theme="dark"] .text-red-700{color:#fca5a5}
+html[data-theme="dark"] .text-green-700{color:#4ade80}
+html[data-theme="dark"] .text-amber-700,html[data-theme="dark"] .text-amber-800{color:#fbbf24}
+html[data-theme="dark"] .bg-red-50{background:rgba(239,68,68,.12)}
+html[data-theme="dark"] .bg-gray-50{background:var(--surface-1)}
+html[data-theme="dark"] .bg-amber-50{background:rgba(245,158,11,.12)}
+/* Day/Night switch */
+.theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--accent)}
+</style>
 <link rel="stylesheet" href="/tw.css">
 </head>
 <body class="min-h-screen">
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode"><span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span></button>
+<script>
+(function(){var b=document.getElementById('theme-toggle');if(!b)return;function p(){var d=document.documentElement.getAttribute('data-theme')==='dark';var i=document.getElementById('theme-toggle-icon');var l=document.getElementById('theme-toggle-label');if(i)i.textContent=d?'☀️':'🌙';if(l)l.textContent=d?'Day mode':'Night mode';}b.addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);try{localStorage.setItem('mc_theme',n);}catch(e){}p();});p();})();
+</script>
+
 <div id="app" class="flex min-h-screen"></div>
 
 <script>
@@ -478,7 +575,7 @@ const Branding = () => {
             <input class="input" maxlength="60" value=${st.brand_name} placeholder="e.g. Acme Plumbing" onInput=${e => { st.brand_name = e.target.value; syncPreview(); }} /></div>
           <div><label class="text-sm font-medium text-gray-600 block mb-1">Brand colour</label>
             <div class="flex items-center gap-2">
-              <input type="color" value=${st.brand_color} style="width:44px;height:34px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;background:#fff" onInput=${e => { st.brand_color = e.target.value; syncPreview(); }} />
+              <input type="color" value=${st.brand_color} style="width:44px;height:34px;padding:2px;border:1px solid var(--border-light);border-radius:8px;background:var(--surface-2)" onInput=${e => { st.brand_color = e.target.value; syncPreview(); }} />
               <input class="input" value=${st.brand_color} placeholder="#4f46e5" onInput=${e => { st.brand_color = e.target.value; syncPreview(); }} />
             </div>
             <div class="text-xs text-gray-400 mt-1">A hex colour such as #4f46e5. It draws the rule under your logo.</div></div>
@@ -486,7 +583,7 @@ const Branding = () => {
         </div>
         <div>
           <label class="text-sm font-medium text-gray-600 block mb-1">Logo</label>
-          <div style="border:1px dashed #cbd5e1;border-radius:10px;height:110px;display:flex;align-items:center;justify-content:center;background:#f8fafc;overflow:hidden">
+          <div style="border:1px dashed #cbd5e1;border-radius:10px;height:110px;display:flex;align-items:center;justify-content:center;background:var(--surface-0);overflow:hidden">
             ${st.logo_url ? html`<img src=${st.logo_url} alt=${st.brand_name || 'Your logo'} style="max-width:100%;max-height:100%" />` : html`<span class="text-xs text-gray-400">No logo yet</span>`}
           </div>
           <input type="file" id="mc-brand-logo-file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onChange=${e => { const f = e.target.files && e.target.files[0]; if (f) upload(f); e.target.value = ''; }} />
@@ -497,10 +594,10 @@ const Branding = () => {
           <div class="text-xs text-gray-400 mt-2">PNG, JPEG, WebP or GIF, up to 2 MB.</div>
         </div>
       </div>
-      <div class="mt-5 pt-4" style="border-top:1px solid #e2e8f0">
+      <div class="mt-5 pt-4" style="border-top:1px solid var(--border)">
         <div class="font-semibold mb-1">What your callers see</div>
         <p class="text-xs text-gray-500 mb-3">The header block the app puts at the top of every email this account sends. This preview sends nothing.</p>
-        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:22px;background:#fff;max-width:560px">
+        <div style="border:1px solid var(--border);border-radius:12px;padding:22px;background:var(--surface-2);max-width:560px">
           <div style="text-align:center;padding:18px 0 6px">
             <img id="bp-logo-img" alt=${st.brand_name || 'Your logo'} src=${st.logo_url || ''} style="max-height:56px;max-width:240px;${st.logo_url ? 'display:inline-block' : 'display:none'}" />
             <span id="bp-title" style="font:700 20px/1.3 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;${st.logo_url ? 'display:none' : 'display:inline-block'}">${(st.brand_name || '').trim() || 'MissedCall Respondr'}</span>
@@ -519,8 +616,8 @@ const Branding = () => {
           <span class="text-xs text-gray-400">Renders the real message the app would send — same template, same header — and sends nothing.</span>
         </div>
         ${st.bodyMsg && html`<div class="mt-2 text-sm text-gray-600">${st.bodyMsg}</div>`}
-        ${st.bodyHtml !== null && html`<div class="mt-2" style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#fff">
-          <div class="text-xs text-gray-500" style="padding:6px 10px;border-bottom:1px solid #e2e8f0">Subject: ${st.bodySubject}</div>
+        ${st.bodyHtml !== null && html`<div class="mt-2" style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2)">
+          <div class="text-xs text-gray-500" style="padding:6px 10px;border-bottom:1px solid var(--border)">Subject: ${st.bodySubject}</div>
           <iframe title="The exact email" style="width:100%;height:420px;border:0;background:#fff" srcdoc=${st.bodyHtml}></iframe>
         </div>`}
       </div>
@@ -609,7 +706,7 @@ const Dashboard = () => {
       ${st.payGap && st.payGap.rows === 0 && st.payGap.canPurchase === false && html`<div class="card" data-console="payments-closed" data-payment-provider-missing="1" style="border-left:4px solid #dc2626">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
           <div>
-            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em">Checkout is switched off</div>
+            <div style="font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em">Checkout is switched off</div>
             <div style="font-size:20px;font-weight:800">Buyers cannot pay</div>
             <div style="color:#475569;font-size:13px;margin-top:2px">No payment provider is connected to MissedCall Respondr and no plan carries its own payment page, so a buyer who presses Upgrade on any paid plan is turned away before a charge is made — the press is recorded as a plan request for you to switch by hand. Add a Stripe or PayPal key under Payment Providers and buyers can pay again.</div>
           </div>
@@ -619,7 +716,7 @@ const Dashboard = () => {
       ${st.answerGap && st.answerGap.ready === false && html`<div class="card" data-console="calls-refused" data-telephony-not-ready="1" style="border-left:4px solid #dc2626">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
           <div>
-            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em">Calls and texts are being refused</div>
+            <div style="font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em">Calls and texts are being refused</div>
             <div style="font-size:20px;font-weight:800">MissedCall cannot answer anybody</div>
             <div style="color:#475569;font-size:13px;margin-top:2px">No calling provider is connected, so every inbound call and text is turned away before it is read: no missed caller gets a reply and the call is not even recorded. A customer sees a normal setup and a queue of zeros. Save the Telnyx credential - or paste the account signing key - under Telnyx Config and Numbers and the receiver starts accepting calls again.</div>
           </div>
@@ -703,18 +800,18 @@ const Dashboard = () => {
   return html`<div>
     <h2 class="text-xl font-bold mb-4">Dashboard</h2>
     ${(st.wsList && st.wsList.length > 1) ? html`<div data-ws-switcher="1" class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
-      <span style="font-size:13px;color:#64748b">Workspace</span>
+      <span style="font-size:13px;color:var(--text-secondary)">Workspace</span>
       <select class="input" data-ws-select="1" style="max-width:260px;padding:6px 10px" onChange=${e => wsSwitch(e.target.value)}>
         ${st.wsList.map(w => html`<option value=${w.id} selected=${String(w.id) === String(st.wsCurrent)}>${w.name}${w.is_default ? ' (default)' : ''}</option>`)}
       </select>
       <button type="button" class="btn btn-outline btn-sm" data-ws-manage="1" onClick=${() => go('workspaces')}>Manage workspaces</button>
-      <span style="font-size:12px;color:#94a3b8">You are signed in to ${wsCurrentName || 'this workspace'} — picking another re-opens every screen on it.</span>
+      <span style="font-size:12px;color:var(--text-muted)">You are signed in to ${wsCurrentName || 'this workspace'} — picking another re-opens every screen on it.</span>
     </div>` : null}
     ${fresh && html`<div class="card" data-console="get-set-up" style="border-left:4px solid #2563eb;margin-bottom:16px">
       <div style="display:flex;gap:12px;align-items:flex-start">
         <div style="font-size:26px;line-height:1">🚀</div>
         <div>
-          <h3 style="margin:0 0 4px;font-size:16px;font-weight:700;color:#1e293b">Get set up</h3>
+          <h3 style="margin:0 0 4px;font-size:16px;font-weight:700;color:var(--text-primary)">Get set up</h3>
           <p style="margin:0;font-size:14px;color:#475569;line-height:1.5">Nothing has been answered yet, so every figure below is still zero. A response rule is the text this workspace sends when a call goes unanswered — write one, point your phone number at it, and the first missed call fills in the counts and the response rate.</p>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
             <button type="button" class="btn" data-step="rules" onClick=${() => go('rules')}>Write your first auto-reply</button>
@@ -856,7 +953,7 @@ const ResponseRules = () => {
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Response Rules</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-green" onClick=${() => { show(null); }}>+ Add Rule</button></div></div>
     <p class="text-sm text-gray-500 mb-4">Rules are evaluated on every inbound call, in priority order (lowest number first): the first matching rule acts. A text leaves through Telnyx, so the Telnyx API key and messaging profile must be saved first — they live in the Operator Console, panel <b>5. Telnyx Config &amp; Numbers</b>.</p>
-    ${st.sms && st.sms.configured === false && html`<div class="card mb-4" data-sms-status="unconfigured" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b">
+    ${st.sms && st.sms.configured === false && html`<div class="card mb-4" data-sms-status="unconfigured" style="border:1px solid #fecaca;background:var(--danger-soft);color:var(--danger)">
       <div class="font-semibold">No text can leave this install yet — the SMS provider has no key saved.</div>
       <div class="text-sm" style="margin-top:4px">A rule marked <b>Active</b> is still evaluated on every missed call, but its text has nowhere to go: with no Telnyx credential the app logs the send as NOT sent and writes nothing. So a texting rule that reads Active is not texting anyone. Save the API key and messaging profile, then it will. Until then a <b>callback</b> rule is the only action that can complete.</div>
       <button class="btn btn-outline btn-sm" style="margin-top:8px" data-sms-status="open-config" onClick=${() => { S.view = 'ops'; renderApp(); setTimeout(() => { const el = document.getElementById('ops-panel-5-telnyx-config-numbers'); if (el) el.scrollIntoView({ block: 'center' }); }, 60); }}>Open the SMS provider settings</button>
@@ -1514,7 +1611,7 @@ const Tickets = () => {
         <button class="btn btn-sm btn-outline" onClick=${closeThread}>Close</button>
       </div>
       <div class="space-y-2 mb-3">
-        ${((st.thread && st.thread.messages) || []).map(m => html`<div class="p-2 rounded" style="background:#f9fafb">
+        ${((st.thread && st.thread.messages) || []).map(m => html`<div class="p-2 rounded" style="background:var(--surface-1)">
           <div class="text-xs text-gray-500 mb-1">${m.sender_type === 'customer' ? 'Customer' : 'Your team'} · ${m.created_at ? new Date(m.created_at).toLocaleString() : ''}</div>
           <div style="white-space:pre-wrap">${m.body}</div>
         </div>`)}
@@ -3846,7 +3943,7 @@ const App = () => {
       <div class="card">
         <h3 class="font-semibold text-gray-700 mb-1">Endpoint</h3>
         <div class="flex items-center gap-2 flex-wrap">
-          <code style="background:#f1f5f9;padding:6px 10px;border-radius:6px;font-size:13px">${MCP_ENDPOINT}</code>
+          <code style="background:var(--surface-1);padding:6px 10px;border-radius:6px;font-size:13px">${MCP_ENDPOINT}</code>
           <button class="btn btn-sm btn-outline" onClick=${() => mcpCopy(MCP_ENDPOINT)}>Copy</button>
         </div>
       </div>
@@ -3865,7 +3962,7 @@ const App = () => {
                 <button class="btn btn-sm btn-outline" style="margin-left:6px;color:#b45309" onClick=${regen}>Regenerate</button>
               </span>
             </div>
-            ${(st.revealed && st.revealedId === k.id) ? html`<div class="flex items-center gap-2 flex-wrap" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px;margin-top:8px">
+            ${(st.revealed && st.revealedId === k.id) ? html`<div class="flex items-center gap-2 flex-wrap" style="background:var(--accent-soft);border:1px solid #bfdbfe;border-radius:6px;padding:8px;margin-top:8px">
               <input class="input font-mono" style="flex:1;min-width:220px;font-size:12px" readonly value=${st.revealed} onFocus=${e => e.target.select()} />
               <button class="btn btn-sm" onClick=${() => mcpCopy(st.revealed)}>Copy key</button>
             </div>` : null}
@@ -3875,7 +3972,7 @@ const App = () => {
       <div class="card">
         <h3 class="font-semibold text-gray-700 mb-1">What it can read</h3>
         <p class="text-xs text-gray-500 mb-3">The real tool names this app exposes to a workspace credential — each scoped to this workspace.</p>
-        <ul style="font-size:13px;color:#334155;line-height:1.9;padding-left:18px;margin:0">
+        <ul style="font-size:13px;color:var(--text-secondary);line-height:1.9;padding-left:18px;margin:0">
           ${MCP_TOOL_SPECS.map(([name, desc]) => html`<li><code>${name}_summary</code> / <code>${name}_search</code> — ${desc}</li>`)}
         </ul>
         <p class="text-xs text-gray-400" style="margin:10px 0 0">There is no write tool and no free-form SQL door. Operator-wide tools are refused for a workspace credential.</p>
@@ -3884,7 +3981,7 @@ const App = () => {
       <div class="card">
         <h3 class="font-semibold text-gray-700 mb-1">Connect</h3>
         <p class="text-xs text-gray-500 mb-3">Paste this into your MCP client config (Claude Desktop / Cursor). Replace YOUR_API_KEY with this workspace's key.</p>
-        <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;font-size:11px;overflow-x:auto;margin:0">${MCP_CONFIG_TEXT}</pre>
+        <pre style="background:var(--code-bg);color:var(--code-fg);padding:12px;border-radius:8px;font-size:11px;overflow-x:auto;margin:0">${MCP_CONFIG_TEXT}</pre>
         <button class="btn btn-sm btn-outline" style="margin-top:8px" onClick=${() => mcpCopy(MCP_CONFIG_TEXT)}>Copy config</button>
       </div>
     </div>`;
@@ -4091,7 +4188,7 @@ const App = () => {
         <div class="font-semibold mb-3">Profile picture</div>
         <div class="flex items-center gap-4 flex-wrap">
           ${av
-            ? html`<img id="mc-acct-av" alt="Your profile picture" src=${av} style="width:72px;height:72px;border-radius:50%;object-fit:cover;background:#f1f5f9" />`
+            ? html`<img id="mc-acct-av" alt="Your profile picture" src=${av} style="width:72px;height:72px;border-radius:50%;object-fit:cover;background:var(--surface-1)" />`
             : html`<span style="width:72px;height:72px;border-radius:50%;background:#4f46e5;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700">${initial}</span>`}
           <div>
             <input type="file" id="mc-acct-file" accept="image/png,image/jpeg,image/gif,image/webp" style="font-size:12px"
@@ -4367,7 +4464,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
         <button class="btn btn-outline" disabled=${f.busy} onClick=${() => test(f.provider_type, f.api_key, f)}>Test key</button>
         <button class="btn btn-outline" disabled=${f.busy} onClick=${() => closeForm()}>Cancel</button>
         <button class="btn" disabled=${f.busy} onClick=${() => save()}>${f.busy ? 'Saving...' : (f.edit ? 'Save changes' : 'Add provider')}</button>
-        <span style="font-size:12px;color:#64748b">Test key asks Stripe whether the key in the box works, without saving it.</span>
+        <span style="font-size:12px;color:var(--text-secondary)">Test key asks Stripe whether the key in the box works, without saving it.</span>
       </div>
     </div>
   </div>`;
@@ -4581,7 +4678,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       </div>
       ${st.msg ? html`<div class="card" id="team-msg" style=${'border-left:4px solid ' + (st.msg.ok ? '#059669' : '#dc2626') + ';color:' + (st.msg.ok ? '#065f46' : '#991b1b') + ';font-size:14px'}>${st.msg.text}</div>` : null}
       <div class="card">
-        <div style="font-size:13px;color:#64748b;margin-bottom:12px">Everyone who can sign in to this workspace. The owner is the login the workspace was created with and cannot be removed here.</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Everyone who can sign in to this workspace. The owner is the login the workspace was created with and cannot be removed here.</div>
         <table class="table" id="team-table">
           <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Added</th><th></th></tr></thead>
           <tbody>
@@ -4599,13 +4696,13 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       </div>
       ${st.can_manage ? html`<div class="card" id="team-invite-card">
         <div style="font-weight:600;margin-bottom:4px">Add a teammate</div>
-        <div style="font-size:13px;color:#64748b;margin-bottom:12px">They get their own login and password by email \u2014 no shared password. Their role is Teammate: they answer calls and work the queue, but they cannot add or remove people.</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">They get their own login and password by email \u2014 no shared password. Their role is Teammate: they answer calls and work the queue, but they cannot add or remove people.</div>
         <div class="flex gap-2" style="align-items:flex-end;flex-wrap:wrap">
-          <div style="flex:1;min-width:180px"><label style="font-size:12px;color:#64748b">Their name (optional)</label><input class="input" id="team-name" value=${st.name || ''} onInput=${(e) => { st.name = e.target.value; }} placeholder="Dana Ruiz" /></div>
-          <div style="flex:1;min-width:220px"><label style="font-size:12px;color:#64748b">Their email</label><input class="input" id="team-email" value=${st.email || ''} onInput=${(e) => { st.email = e.target.value; }} placeholder="dana@yourcompany.com" /></div>
+          <div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--text-secondary)">Their name (optional)</label><input class="input" id="team-name" value=${st.name || ''} onInput=${(e) => { st.name = e.target.value; }} placeholder="Dana Ruiz" /></div>
+          <div style="flex:1;min-width:220px"><label style="font-size:12px;color:var(--text-secondary)">Their email</label><input class="input" id="team-email" value=${st.email || ''} onInput=${(e) => { st.email = e.target.value; }} placeholder="dana@yourcompany.com" /></div>
           <button class="btn" id="team-invite" disabled=${st.busy} onClick=${invite}>${st.busy ? 'Adding...' : 'Add teammate'}</button>
         </div>
-      </div>` : html`<div class="card" style="font-size:14px;color:#64748b">Only the workspace owner or a company admin can add or remove people.</div>`}
+      </div>` : html`<div class="card" style="font-size:14px;color:var(--text-secondary)">Only the workspace owner or a company admin can add or remove people.</div>`}
     </div>`;
   };
 
@@ -4709,13 +4806,13 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
         <button class="btn btn-sm ${term === 'yearly' ? '' : 'btn-outline'}" data-plan-term="yearly" disabled=${busy} onClick=${() => setTerm('yearly')}>Yearly &mdash; 2 months free</button>
         <span class="text-xs text-gray-500">${term === 'yearly' ? 'Prices below are for a whole year. A tier with no yearly price is sold monthly only.' : 'Prices below are per month.'}</span>
       </div>
-      ${err && html`<div class="card" style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca">The plan catalogue could not be loaded: ${err.message}</div>`}
+      ${err && html`<div class="card" style="color:var(--danger);background:var(--danger-soft);border:1px solid #fecaca">The plan catalogue could not be loaded: ${err.message}</div>`}
       <div class="card">
         <table class="table" id="my-plan-table">
           <thead><tr><th>Plan</th><th>Monthly</th><th>Yearly</th><th>What's included</th><th></th></tr></thead>
           <tbody>
             ${plans.map(p => html`<tr data-plan-row=${p.slug || ''}>
-              <td class="font-medium">${p.name}${p.description ? html`<div style="font-size:12px;color:#64748b">${p.description}</div>` : null}</td>
+              <td class="font-medium">${p.name}${p.description ? html`<div style="font-size:12px;color:var(--text-secondary)">${p.description}</div>` : null}</td>
               <td class="text-gray-500">${fmt(p.price_monthly)}</td>
               <td class="text-gray-500">${Number(p.price_yearly) > 0 ? fmt(p.price_yearly) : '\u2014'}</td>
               <td class="text-gray-500" style="font-size:12px">${featureText(p)}</td>
@@ -4760,17 +4857,17 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     return html`<div>
       <div class="mb-4"><h2 class="text-xl font-bold">Feedback</h2>
         <p class="text-sm text-gray-500">What customers told us — idea, bug or complaint, with the account, person, app and screen it came from.</p></div>
-      ${st.err ? html`<div class="card" style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca">Failed to load feedback: ${st.err}</div>` : null}
-      ${!st.err && st.items.length === 0 ? html`<div class="card" style="text-align:center;padding:40px;color:#64748b">No feedback yet.</div>` : null}
+      ${st.err ? html`<div class="card" style="color:var(--danger);background:var(--danger-soft);border:1px solid #fecaca">Failed to load feedback: ${st.err}</div>` : null}
+      ${!st.err && st.items.length === 0 ? html`<div class="card" style="text-align:center;padding:40px;color:var(--text-secondary)">No feedback yet.</div>` : null}
       ${st.items.map(f => {
         const who = [f.name, f.email].filter(Boolean).join(' \u00b7 ') || 'unknown';
         return html`<div class="card" style="margin-bottom:12px">
           <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:6px;flex-wrap:wrap">
             <strong>${f.kind}</strong>
-            <span style="color:#64748b;font-size:12px">${f.app} \u00b7 ${f.screen} \u00b7 ${f.created_at}</span>
+            <span style="color:var(--text-secondary);font-size:12px">${f.app} \u00b7 ${f.screen} \u00b7 ${f.created_at}</span>
           </div>
           <p style="margin:0 0 6px;white-space:pre-wrap">${f.message}</p>
-          <div style="color:#64748b;font-size:12px">${who}</div>
+          <div style="color:var(--text-secondary);font-size:12px">${who}</div>
         </div>`;
       })}
     </div>`;
@@ -4846,7 +4943,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     return html`<div>
       <h2 class="text-xl font-bold mb-1">API Keys</h2>
       <p class="text-sm text-gray-500 mb-4">This workspace's key for the MissedCall Respondr API and MCP server. It is created with your account, it never expires, and you can view it again at any time — each view asks for your password and is recorded.</p>
-      ${st.err ? html`<div class="text-sm mb-3" style="color:#991b1b">${st.err}</div>` : null}
+      ${st.err ? html`<div class="text-sm mb-3" style="color:var(--danger)">${st.err}</div>` : null}
       ${st.list === null ? html`<div class="text-sm text-gray-400 py-4">Loading…</div>` : null}
       ${st.list && !st.list.length ? html`<div class="card p-4">
         <div class="text-sm text-gray-600 mb-3">This workspace has no key yet — minting one makes the API usable from your own tools.</div>
@@ -4897,10 +4994,10 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       <div class="flex items-center gap-2 px-3 pb-3 mb-2" style="border-bottom:1px solid #f1f5f9">
         <span id="me-avatar" style="width:28px;height:28px;border-radius:50%;background:#0ea5e9;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px;flex-shrink:0">${meInitial}</span>
         <div style="min-width:0">
-          <div class="nav-text" id="me-name" title=${meName} style="font-size:13px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meName}</div>
+          <div class="nav-text" id="me-name" title=${meName} style="font-size:13px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meName}</div>
           <div class="nav-text" id="me-plan" style="margin-top:3px">${mePlan
             ? html`<span class="badge" style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500">${mePlan}</span>`
-            : html`<span style="color:#94a3b8;font-size:11px">\u2014</span>`}</div>
+            : html`<span style="color:var(--text-muted);font-size:11px">\u2014</span>`}</div>
         </div>
       </div>
       <div class="flex-1 space-y-1">
@@ -4936,9 +5033,9 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
       </button>
     </div>
     <div class="main flex-1 p-6 overflow-auto">
-      ${S.loadError && html`<div data-load-error="1" style="margin-bottom:12px;padding:10px 14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:10px;font-size:13px;display:flex;gap:10px;align-items:flex-start">
+      ${S.loadError && html`<div data-load-error="1" style="margin-bottom:12px;padding:10px 14px;border:1px solid #fecaca;background:var(--danger-soft);color:var(--danger);border-radius:10px;font-size:13px;display:flex;gap:10px;align-items:flex-start">
         <span style="flex:1"><strong>This screen could not load.</strong> The panel was not told what is on it, so any empty list below may be empty because the request failed, not because you have no records. (${S.loadError})</span>
-        <button type="button" style="background:#fff;border:1px solid #fecaca;border-radius:8px;padding:2px 10px;color:#991b1b;cursor:pointer" onClick=${() => { S.loadError = null; renderApp(); }}>Dismiss</button>
+        <button type="button" style="background:var(--surface-2);border:1px solid #fecaca;border-radius:8px;padding:2px 10px;color:var(--danger);cursor:pointer" onClick=${() => { S.loadError = null; renderApp(); }}>Dismiss</button>
       </div>`}
       <${CurrentView} />
     </div>
@@ -4971,15 +5068,15 @@ function openFeedbackModal() {
     return '<button type="button" class="btn btn-sm ' + (k === 'idea' ? '' : 'btn-outline') + '" data-fbk="' + k + '">' + label + '</button>';
   };
   overlay.innerHTML =
-    '<div style="background:#fff;border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;font-family:Inter,system-ui,sans-serif">'
+    '<div style="background:var(--surface-3);color:var(--text-primary);border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;font-family:Inter,system-ui,sans-serif">'
     + '<h2 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Submit Feedback</h2>'
-    + '<p style="color:#64748b;font-size:13px;margin:0 0 12px">Tell us what is on your mind — an idea, a bug, or a complaint. It is sent with your account and the screen you are on, so we can follow up.</p>'
+    + '<p style="color:var(--text-secondary);font-size:13px;margin:0 0 12px">Tell us what is on your mind — an idea, a bug, or a complaint. It is sent with your account and the screen you are on, so we can follow up.</p>'
     + '<div id="feedbackKinds" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
     + kindBtn('idea', '💡 Idea')
     + kindBtn('bug', '🐞 Bug')
     + kindBtn('complaint', '⚠️ Complaint')
     + '</div>'
-    + '<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">Screen: ' + screen + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Screen: ' + screen + '</div>'
     + '<textarea id="feedbackMsg" rows="5" class="input" style="resize:vertical;box-sizing:border-box" placeholder="What happened, or what should we build?"></textarea>'
     + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
     + '<button type="button" class="btn btn-outline" id="feedbackCancel">Cancel</button>'
@@ -5021,7 +5118,7 @@ function openFeedbackModal() {
   btn.type = 'button';
   btn.id = 'feedbackFab';
   btn.setAttribute('aria-label', 'Submit feedback');
-  btn.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9000;display:flex;align-items:center;gap:8px;background:#2563eb;color:#fff;border:none;border-radius:28px;padding:12px 18px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.25);font-family:Inter,system-ui,sans-serif';
+  btn.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9000;display:flex;align-items:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:28px;padding:12px 18px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.25);font-family:Inter,system-ui,sans-serif';
   btn.innerHTML = '💬 Feedback';
   btn.addEventListener('click', openFeedbackModal);
   document.body.appendChild(btn);
