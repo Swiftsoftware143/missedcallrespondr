@@ -142,6 +142,38 @@ html[data-theme="dark"] .bg-amber-50{background:rgba(245,158,11,.12)}
 .theme-toggle:hover{border-color:var(--accent);transform:translateY(-1px)}
 </style>
 <link rel="stylesheet" href="/dashboard/tw.css">
+<style id="wcag-aa-mc-dashboard">
+/* Customer dashboard — WCAG AA contrast, day AND night.
+   Measured 2026-11-22 against app.missedcallrespondr.com/dashboard/ with axe-core
+   (wcag2a/2aa/21a/21aa), walking all 21 sidebar views: day 0 after the fix (was 32+8),
+   night 0 (was 34 + 55 across the views the landing-only pass never rendered).
+   Day: --text-muted #77808f sat at 3.9:1 on the #eef0f6 sidebar and #f6f7fb page; the Logout label
+   was #ef4444 on #f6f7fb; white on #6366f1 chips was 4.47:1; and the filled "+ Add …" buttons
+   painted --success #059669 under white text at 3.77:1.
+   Night: --text-muted #6b7280 was 3.2:1 on the #222532 card and 3.76:1 on the sidebar, the accent
+   #6366f1 carried white text at 4.47:1, and outline buttons must stay transparent (a blanket
+   .btn background would paint them the accent colour and invert their grey label). */
+:root{--text-muted:#566578}
+html[data-theme="dark"]{--text-muted:#a2acbd}
+.text-gray-400{color:#566578!important}
+html[data-theme="dark"] .text-gray-400{color:#a2acbd!important}
+.text-red-500{color:#b91c1c!important}
+html[data-theme="dark"] .text-red-500{color:#fca5a5!important}
+[style*="color:#6366f1"]{color:#4338ca!important}
+html[data-theme="dark"] [style*="color:#6366f1"]{color:#a5b4fc!important}
+html[data-theme="dark"] [style*="color:#4338ca"],html[data-theme="dark"] [style*="color: rgb(67, 56, 202)"]{color:#a5b4fc!important}
+html[data-theme="dark"] a:not(.btn){color:#a5b4fc}
+#fbFab{background:#4f46e5!important}
+/* Filled buttons: white text needs a darker surface than the accent chip uses for text. */
+.btn-green{background:#047857!important}
+.btn-green:hover{background:#065f46!important}
+html[data-theme="dark"] .btn:not(.btn-outline):not(.btn-green):not(.btn-red),html[data-theme="dark"] .nav-item.active{background:#4f46e5!important}
+html[data-theme="dark"] .btn:not(.btn-outline):not(.btn-green):not(.btn-red):hover{background:#4338ca!important}
+html[data-theme="dark"] .btn.btn-green{background:#065f46!important}
+html[data-theme="dark"] .btn.btn-green:hover{background:#047857!important}
+html[data-theme="dark"] .btn.btn-red{background:#7f1d1d!important}
+html[data-theme="dark"] #close-account-arm{color:#fca5a5!important}
+</style>
 </head>
 <body>
 <div id="app"></div>
