@@ -249,13 +249,22 @@ const REJECTION_BODY_LIMIT: usize = 64 * 1024;
 ///    it is the extractor's, and this app's bad-request convention is
 ///    `400 {"error": "<field> is required"}` (see `handlers/email_templates_handler.rs`).
 ///    Collapsing 415/422 onto 400 gives the whole API one readable bad-request shape.
-///  * **Nothing else is touched.** Only a 400/415/422 whose `Content-Type` is *not* JSON is
-///    rewritten, so handler-written errors (already JSON) and every successful response
-///    pass through byte-identical, with no body buffering on the success path.
+///  * **Nothing else is touched.** Only a 400/415/422 whose `Content-Type` is neither JSON nor
+///    `text/html` is rewritten, so handler-written errors (already JSON), handler-written PAGES
+///    (already HTML) and every successful response pass through byte-identical, with no body
+///    buffering on the success path.
 pub async fn rejection_as_json(req: Request, next: Next) -> Response {
     let res = next.run(req).await;
 
-    if !REJECTION_STATUSES.contains(&res.status()) || is_json_response(&res) {
+    // A 4xx is a candidate only while it is still an EXTRACTOR refusal. A handler that already
+    // wrote a page has nothing to reformat: the public unsubscribe link answers `400 text/html`
+    // ("That link did not work"), and wrapping that body in `{"error": "<!doctype html>…"}` is
+    // what showed a customer raw markup instead of the sentence to copy the whole link
+    // (kanban t_54c1d7fb, measured live 2026-11-22 on :8088).
+    if !REJECTION_STATUSES.contains(&res.status())
+        || is_json_response(&res)
+        || is_page_response(&res)
+    {
         return res;
     }
 
@@ -297,6 +306,15 @@ fn is_json_response(res: &Response<Body>) -> bool {
                 .to_ascii_lowercase()
                 .starts_with("application/json")
         })
+}
+
+/// Did the handler answer a PAGE? An HTML body is a finished response to a person, not the
+/// framework's plain-text complaint about their request, so it is never rewritten.
+fn is_page_response(res: &Response<Body>) -> bool {
+    res.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("text/html"))
 }
 
 fn extractor_message(bytes: &[u8], status: StatusCode) -> String {
@@ -489,6 +507,36 @@ mod tests {
             }
             other => panic!("a database failure must map to Internal, got {other:?}"),
         }
+    }
+
+    /// The unsubscribe page is a 400 by design; what must never happen again is that the
+    /// rejection layer rewrites its body. Pin the classification that decides it.
+    #[test]
+    fn a_handler_written_page_is_never_reformatted_as_json() {
+        let html = (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            "<!doctype html><h1>That link did not work</h1>",
+        )
+            .into_response();
+        assert!(is_page_response(&html));
+        assert!(!is_json_response(&html));
+
+        // The console's extractor refusal is still the layer's business: text/plain is rewritten.
+        let plain = (
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            "Failed to parse the request body as JSON",
+        )
+            .into_response();
+        assert!(!is_page_response(&plain));
+        assert!(!is_json_response(&plain));
+
+        let json = (
+            [(header::CONTENT_TYPE, "application/json")],
+            "{\"error\":\"x\"}",
+        )
+            .into_response();
+        assert!(!is_page_response(&json));
+        assert!(is_json_response(&json));
     }
 
     #[test]
