@@ -19,8 +19,8 @@
   <meta name="twitter:description" content="Connect your number, set the text-back message, work the call-back queue, read the reports.">
   <meta name="twitter:image" content="https://missedcallrespondr.com/assets/og-missedcall.png">
   <style>
-:root{--surface-0:#f9fafb;--surface-1:#f3f4f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#111827;--text-secondary:#374151;--text-muted:#9ca3af;--brand:#e11d48;--brand-soft:#fff1f2;--border:#e5e7eb;--code-fg:#e5e7eb;--code-bg:#1f2937;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
-html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#6b7280;--brand:#fb7185;--brand-soft:rgba(225,29,72,.14);--border:#2d3148;--code-fg:#e5e7eb;--code-bg:#0b0e14;--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}
+:root{--surface-0:#f9fafb;--surface-1:#f3f4f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#111827;--text-secondary:#374151;--text-muted:#6b7280;--brand:#be123c;--brand-soft:#fff1f2;--border:#e5e7eb;--code-fg:#e5e7eb;--code-bg:#1f2937;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
+html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#9aa0a6;--brand:#fb7185;--brand-soft:rgba(225,29,72,.14);--border:#2d3148;--code-fg:#e5e7eb;--code-bg:#0b0e14;--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}
 html[data-theme="dark"] .callout.info{background:rgba(16,185,129,.12)}
 html[data-theme="dark"] .callout.warning{background:rgba(245,158,11,.12)}
 html[data-theme="dark"] .callout.tip{background:rgba(59,130,246,.12)}
@@ -30,6 +30,8 @@ html[data-theme="dark"] nav.sidebar li a:hover,html[data-theme="dark"] nav.sideb
 html[data-theme="dark"] table th{background:var(--brand-soft);color:#fda4af}
 html[data-theme="dark"] pre code{background:var(--code-bg)}
 html[data-theme="dark"] code{color:#fda4af}
+html[data-theme="dark"] a[href]{color:#fb7185}
+html[data-theme="dark"] .meta,html[data-theme="dark"] .badge{color:#fff}
 .theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
 .theme-toggle:hover{border-color:var(--brand)}
 
@@ -40,7 +42,7 @@ html[data-theme="dark"] code{color:#fda4af}
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       color: var(--text-primary); background: var(--surface-0); line-height: 1.65;
     }
-    a { color: #e11d48; text-decoration: none; }
+    a { color: var(--brand); text-decoration: none; }
     a:hover { text-decoration: underline; }
     img { max-width: 100%; }
 
@@ -52,10 +54,10 @@ html[data-theme="dark"] code{color:#fda4af}
     }
     .topbar h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; }
     .topbar .badge {
-      margin-left: auto; font-size: .75rem; background: rgba(255,255,255,.2);
+      margin-left: auto; font-size: .75rem; background: rgba(0,0,0,.30);
       padding: .25rem .6rem; border-radius: 4px; white-space: nowrap;
     }
-    .topbar .meta { font-size: .8rem; opacity: .85; }
+    .topbar .meta { font-size: .8rem; opacity: 1; color: #fff; }
 
     /* ─── Layout ─── */
     .wrapper { display: flex; min-height: calc(100vh - 3.2rem); }
@@ -69,7 +71,7 @@ html[data-theme="dark"] code{color:#fda4af}
       border-left: 3px solid transparent; transition: .15s;
     }
     nav.sidebar li a:hover, nav.sidebar li a.active {
-      background: var(--brand-soft); color: #e11d48; border-left-color: #e11d48; text-decoration: none;
+      background: var(--brand-soft); color: var(--brand); border-left-color: var(--brand); text-decoration: none;
     }
     nav.sidebar .section-label {
       padding: .6rem 1.25rem .25rem; font-size: .7rem; text-transform: uppercase;
@@ -87,7 +89,7 @@ html[data-theme="dark"] code{color:#fda4af}
     main h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: var(--text-primary); }
     main p, main li { margin-bottom: .65rem; color: var(--text-secondary); }
     main ul, main ol { padding-left: 1.5rem; margin-bottom: 1rem; }
-    main ul li::marker { color: #e11d48; }
+    main ul li::marker { color: var(--brand); }
 
     /* ─── Callout boxes ─── */
     .callout {
@@ -1190,7 +1192,7 @@ html[data-theme="dark"] code{color:#fda4af}
   </p>
 
   <hr style="margin:3rem 0 .75rem; border:none; border-top:1px solid var(--border);">
-  <p style="text-align:center; color:#9ca3af; font-size:.82rem;">
+  <p style="text-align:center; color:var(--text-muted); font-size:.82rem;">
     MissedCall Respondr &mdash; Built by SwiftSoftware<br>
     © 2026 SwiftSoftware. All rights reserved.
   </p>
