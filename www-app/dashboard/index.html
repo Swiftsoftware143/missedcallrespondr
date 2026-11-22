@@ -205,6 +205,7 @@ window.appGuidePages = {
   // four things, so the entry names them: the logo, the display name, the colour, and the preview
   // that mails the sample to the customer's own address.
   branding:     { title: "Email Branding", desc: "Your logo, business name and colour, as they appear at the top of every email this account sends \u2014 welcome, password reset and receipts. Anything left blank keeps the MissedCall Respondr header.", actions: ["Upload your logo", "Save your brand name and colour", "Press Send me a preview email to see the real header in your own inbox"] },
+  donotmail:    { title: "Do Not Mail", desc: "The addresses this workspace must never mail again \u2014 people who asked to stop, and addresses that hard-bounced. Every send checks this list before it leaves.", actions: ["Download the list as a CSV file", "Add an address that asked by phone", "Press Allow again when someone wants mail back"] },
   apikeys:      { title: "API Keys", desc: "The key other software uses to reach this workspace on your behalf. Every account starts with one, and it stays viewable \u2014 press View, enter your account password, and you can copy it again any time.", actions: ["Press + Create key to add another", "Press View / Copy to see a key again", "Press Regenerate to replace a key you think leaked", "Press Revoke to turn a key off"] },
   // MCP HAD NO ENTRY (cron 2026-11-13): appGuidePages carried a key for every customer view
   // except this one, so the guide's round "?" silently disappeared on the MCP tab \u2014 the same
@@ -1296,6 +1297,120 @@ const Branding = () => {
         <div style="grid-column:1 / -1"><label class="text-sm font-medium block mb-1">A line</label><input id="brand-sig-line" class="input" maxlength="160" value=${st.sig.line || ''} onInput=${e => { st.sig.line = e.target.value; }} placeholder="Miami · Mon–Fri" /></div>
       </div>
       <button id="brand-signature-save" class="btn btn-sm" style="margin-top:12px" disabled=${st.sigBusy} onClick=${saveSignature}>${st.sigBusy ? 'Saving…' : 'Save signature'}</button>
+    </div>
+  </div>`;
+};
+
+// ===== DO NOT MAIL =====
+// The workspace's do-not-mail list. The backend doors shipped 2026-11-21
+// (GET|POST /api/v1/settings/suppressions, DELETE /:id, GET /suppressions.csv) with NO screen, so
+// a customer could not see who had asked to stop receiving notices, could not honour a request made
+// by phone or a note written on paper, and could not tell why one address never receives anything.
+// Every door is scoped to the caller's own workspace from the token, so this screen cannot read or
+// change another workspace's list. DELETE answers 204 with no body, so it is fetched directly
+// instead of through API.del (whose JSON parse would read a correct 204 as a failure).
+const DoNotMail = () => {
+  const st = viewState('donotmail', {
+    loaded: false, list: [], busy: false, error: null, notice: null,
+    address: '', mail_class: 'notification', reason: '', downloading: false
+  });
+  const load = async () => {
+    try {
+      const d = await API.get('/settings/suppressions');
+      st.list = Array.isArray(d && d.suppressions) ? d.suppressions : [];
+      st.error = null;
+    } catch (e) { st.error = 'Could not load the list: ' + e.message; }
+    st.loaded = true; renderApp();
+  };
+  if (!st.loaded) { st.loaded = true; load(); }
+  const add = async () => {
+    const a = (st.address || '').trim();
+    if (!a || a.indexOf('@') < 1 || a.length > 254) {
+      st.error = 'Type the full email address you want to stop mailing.'; renderApp(); return;
+    }
+    st.busy = true; st.error = null; st.notice = null; renderApp();
+    try {
+      const d = await API.post('/settings/suppressions', {
+        address: a, mail_class: st.mail_class, reason: (st.reason || '').trim()
+      });
+      st.notice = 'Added ' + ((d && d.address) || a) + ' — this address will not be mailed again.';
+      st.address = ''; st.reason = '';
+      await load();
+    } catch (e) { st.error = 'Could not add that address: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+  const allow = async (row) => {
+    if (!confirm('Start mailing ' + row.address + ' again?')) return;
+    st.busy = true; st.error = null; st.notice = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/settings/suppressions/' + encodeURIComponent(row.id), {
+        method: 'DELETE', headers: { 'Authorization': 'Bearer ' + API.token }
+      });
+      if (!r.ok) {
+        let m = 'Request failed (' + r.status + ')';
+        try { const j = await r.json(); m = j.error || j.message || m; } catch (e) { /* 204 or non-JSON refusal */ }
+        throw new Error(m);
+      }
+      st.notice = 'Mail to ' + row.address + ' is allowed again.';
+      await load();
+    } catch (e) { st.error = 'Could not allow that address: ' + e.message; }
+    st.busy = false; renderApp();
+  };
+  // The same list as a file the operator can keep. The token rides in the header, so the CSV is
+  // fetched and handed to a blob download rather than opened as a bare link (which would 401).
+  const download = async () => {
+    st.downloading = true; st.error = null; st.notice = null; renderApp();
+    try {
+      const r = await fetch(window.location.origin + '/api/v1/settings/suppressions.csv', {
+        headers: { 'Authorization': 'Bearer ' + API.token }
+      });
+      if (!r.ok) throw new Error('Download failed (' + r.status + ')');
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = 'do-not-mail.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      st.notice = 'The list was downloaded as do-not-mail.csv';
+    } catch (e) { st.error = 'Could not download the list: ' + e.message; }
+    st.downloading = false; renderApp();
+  };
+  const what = (c) => c === 'all' ? 'Everything — no mail at all' : 'Notices only';
+  return html`<div>
+    <h2 class="text-xl font-bold mb-4">Do Not Mail</h2>
+    <p class="text-xs text-gray-500 mb-3">Addresses this workspace must never mail again — people who asked to stop, and addresses that hard-bounced. Every send checks this list first.</p>
+    ${st.error && html`<div class="card" style="border-left:4px solid #dc2626"><p id="dnm-error" class="text-sm text-red-700">${st.error}</p></div>`}
+    ${st.notice && html`<div class="card" style="border-left:4px solid #059669"><p id="dnm-notice" class="text-sm text-gray-700">${st.notice}</p></div>`}
+    <div class="card">
+      <h3 class="font-semibold mb-1">Add an address by hand</h3>
+      <p class="text-xs text-gray-500 mb-3">For a request that arrived by phone, or an address you saw bouncing. We add addresses that hard-bounce on our own.</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div><label class="text-sm font-medium block mb-1" for="dnm-address">Email address</label>
+          <input id="dnm-address" class="input" maxlength="254" placeholder="name@example.com" value=${st.address || ''} onInput=${e => { st.address = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1" for="dnm-class">What to stop</label>
+          <select id="dnm-class" class="input" value=${st.mail_class} onChange=${e => { st.mail_class = e.target.value; }}>
+            <option value="notification">Notices only</option>
+            <option value="all">Everything — no mail at all</option>
+          </select></div>
+        <div><label class="text-sm font-medium block mb-1" for="dnm-reason">Why (optional)</label>
+          <input id="dnm-reason" class="input" maxlength="200" placeholder="Asked by phone on 21 Nov" value=${st.reason || ''} onInput=${e => { st.reason = e.target.value; }} /></div>
+      </div>
+      <button id="dnm-add" class="btn btn-sm" style="margin-top:12px" disabled=${st.busy} onClick=${add}>Stop mailing this address</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="flex items-center gap-2" style="margin-bottom:8px">
+        <h3 class="font-semibold" style="flex:1">The list (${st.list.length})</h3>
+        <button id="dnm-download" class="btn btn-sm btn-outline" disabled=${st.downloading} onClick=${download}>${st.downloading ? 'Preparing…' : 'Download CSV'}</button>
+      </div>
+      ${st.list.length === 0
+        ? html`<p id="dnm-empty" class="text-xs text-gray-500">Nobody has asked this workspace to stop mailing them.</p>`
+        : html`<table class="w-full text-sm">
+            <thead><tr><th>Address</th><th>Stops</th><th>Why</th><th>Added by</th><th>Added</th><th></th></tr></thead>
+            <tbody>${st.list.map(r => html`<tr>
+              <td>${r.address}</td><td>${what(r.mail_class)}</td><td>${r.reason || '—'}</td><td>${r.source || '—'}</td>
+              <td>${String(r.created_at || '').slice(0, 10)}</td>
+              <td style="text-align:right"><button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${() => allow(r)}>Allow again</button></td>
+            </tr>`)}</tbody>
+          </table>`}
     </div>
   </div>`;
 };
@@ -4050,12 +4165,13 @@ const App = () => {
     { id: 'integrations', label: 'Integrations', icon: '🔗' },
     { id: 'team', label: 'Your team', icon: '🤝' },
     { id: 'branding', label: 'Email Branding', icon: '🎨' },
+    { id: 'donotmail', label: 'Do Not Mail', icon: '🚫' },
     { id: 'apikeys', label: 'API Keys', icon: '🔑' },
     { id: 'billing', label: 'Plan & Billing', icon: '💳' },
     { id: 'profile', label: 'Profile', icon: '👤' },
     { id: 'mcp', label: 'MCP', icon: '🤖' }
   ].filter(n => !(impTenant && n.id === 'profile'));
-  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, inbox: Inbox, workspaces: Workspaces, integrations: Integrations, team: Team, branding: Branding, apikeys: ApiKeys, mcp: Mcp, billing: Billing, profile: Profile };
+  const views = { overview: Overview, calls: Calls, phoneNumbers: PhoneNumbers, rules: ResponseRules, templates: Templates, messages: Messages, followups: FollowUps, contacts: Contacts, lists: Lists, calendar: Calendar, tickets: Tickets, inbox: Inbox, workspaces: Workspaces, integrations: Integrations, team: Team, branding: Branding, donotmail: DoNotMail, apikeys: ApiKeys, mcp: Mcp, billing: Billing, profile: Profile };
   const CurrentView = views[S.view] || Overview;
   const c = API.user || {};
   return html`<div class="flex">
