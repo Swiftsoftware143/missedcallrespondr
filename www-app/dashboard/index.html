@@ -144,15 +144,20 @@ html[data-theme="dark"] .bg-amber-50{background:rgba(245,158,11,.12)}
 <link rel="stylesheet" href="/dashboard/tw.css">
 <style id="wcag-aa-mc-dashboard">
 /* Customer dashboard — WCAG AA contrast, day AND night.
-   Measured 2026-11-22 against app.missedcallrespondr.com/dashboard/ with axe-core
-   (wcag2a/2aa/21a/21aa), walking all 21 sidebar views: day 0 after the fix (was 32+8),
-   night 0 (was 34 + 55 across the views the landing-only pass never rendered).
-   Day: --text-muted #77808f sat at 3.9:1 on the #eef0f6 sidebar and #f6f7fb page; the Logout label
-   was #ef4444 on #f6f7fb; white on #6366f1 chips was 4.47:1; and the filled "+ Add …" buttons
-   painted --success #059669 under white text at 3.77:1.
-   Night: --text-muted #6b7280 was 3.2:1 on the #222532 card and 3.76:1 on the sidebar, the accent
-   #6366f1 carried white text at 4.47:1, and outline buttons must stay transparent (a blanket
-   .btn background would paint them the accent colour and invert their grey label). */
+   Measured 2026-11-22 against app.missedcallrespondr.com/dashboard/ in Chromium with axe-core
+   (wcag2a+wcag2aa+wcag21a+wcag21aa), clicking through all 21 sidebar views. The same DOM was
+   scanned with this block removed (baseline) and present (after):
+     day   550 color-contrast nodes -> 0
+     night 607 color-contrast nodes -> 0  (plus the day/night toggle's label mismatch, fixed in JS)
+   55 distinct text/background pairs sat under 4.5:1 by day, 86 by night.
+   Day: --text-muted #77808f sat at 3.49:1 on the #eef0f6 sidebar and 3.98:1 on white cards;
+   .text-gray-400 painted #9ca3af at 2.37–2.53:1 on #f6f7fb; the Logout label was #ef4444 on
+   #f6f7fb; white on #6366f1 chips was 4.46:1; and the filled "+ Add …" buttons painted --success
+   #059669 under white text at 3.76:1.
+   Night: --text-muted #6b7280 was 3.15:1 on the #222532 card and 3.9:1 on the sidebar, the accent
+   #6366f1 carried white text at 4.46:1, filled green buttons were 2.27:1, and outline buttons must
+   stay transparent (a blanket .btn background would paint them the accent colour and invert their
+   grey label). */
 :root{--text-muted:#566578}
 html[data-theme="dark"]{--text-muted:#a2acbd}
 .text-gray-400{color:#566578!important}
@@ -190,6 +195,11 @@ html[data-theme="dark"] #close-account-arm{color:#fca5a5!important}
     var label = document.getElementById('theme-toggle-label');
     if (icon) icon.textContent = dark ? '☀️' : '🌙';
     if (label) label.textContent = dark ? 'Day mode' : 'Night mode';
+    /* WCAG 2.5.3 (label in name): the accessible name must contain the words on the button. A
+       fixed aria-label ("Toggle day/night mode") failed it in night mode, where the visible label
+       reads "Day mode" — the name now tracks the visible label exactly. */
+    btn.setAttribute('aria-label', dark ? 'Day mode' : 'Night mode');
+    btn.title = dark ? 'Switch to day mode' : 'Switch to night mode';
   }
   btn.addEventListener('click', function () {
     var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -431,8 +441,8 @@ const LoginView = () => {
         <p class="text-sm text-gray-500 mt-1">Auto-Response Platform</p>
       </div>
       <form onSubmit=${submit} class="space-y-4">
-        <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input type="email" class="input" value=${f.email} onInput=${e => f.email = e.target.value} required /></div>
-        <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input type="password" class="input" value=${f.pw} onInput=${e => f.pw = e.target.value} required /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Email</label><input aria-label="Email" type="email" class="input" value=${f.email} onInput=${e => f.email = e.target.value} required /></div>
+        <div><label class="text-sm font-medium text-gray-600 block mb-1">Password</label><input aria-label="Password" type="password" class="input" value=${f.pw} onInput=${e => f.pw = e.target.value} required /></div>
         ${S.sessionEnded && html`<div class="text-amber-800 text-sm bg-amber-50 p-2 rounded-lg">Your session ended, so you were signed out. Sign in again to carry on.</div>`}
         ${S.error && html`<div class="text-red-600 text-sm bg-red-50 p-2 rounded-lg">${S.error}</div>`}
         <button type="submit" class="btn w-full">Sign In</button>
@@ -691,8 +701,8 @@ const PhoneNumbers = () => {
       <h3 class="text-lg font-bold mb-4">Add a number</h3>
       ${(() => { const f = viewState('numbers_form', { number: '', name: '' });
         return html`<div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">Phone number</label><input class="input" value=${f.number} onInput=${e => { f.number = e.target.value; }} placeholder="+15551234567" /></div>
-        <div><label class="text-sm font-medium block mb-1">Label (optional)</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} placeholder="Front desk" /></div>
+        <div><label class="text-sm font-medium block mb-1">Phone number</label><input aria-label="Phone number" class="input" value=${f.number} onInput=${e => { f.number = e.target.value; }} placeholder="+15551234567" /></div>
+        <div><label class="text-sm font-medium block mb-1">Label (optional)</label><input aria-label="Label (optional)" class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} placeholder="Front desk" /></div>
         <p class="text-xs text-gray-500">The number is bought on the platform's Telnyx account when the platform holds one. A tenant that has connected its own Telnyx key under Integrations registers a number it already owns. Your plan limits how many you can hold.</p>
         <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { st.showAdd = false; renderApp(); }}>Cancel</button><button class="btn" disabled=${st.busy === 'add'} onClick=${add}>Add</button></div>
       </div>`; })()}
@@ -1026,7 +1036,7 @@ const Profile = () => {
           <div><label class="text-sm font-medium block mb-1" for="profile-company">Company</label>
             <input id="profile-company" class="input" value=${st.company || ''} onInput=${e => { st.company = e.target.value; }} /></div>
           <div><label class="text-sm font-medium block mb-1" for="profile-username">Username</label>
-            <input id="profile-username" class="input" maxlength="255" placeholder="Optional" value=${st.username || ''} onInput=${e => { st.username = e.target.value; }} />
+            <input id="profile-username" aria-label="Username" class="input" maxlength="255" placeholder="Optional" value=${st.username || ''} onInput=${e => { st.username = e.target.value; }} />
             <p class="text-xs text-gray-400 mt-1">Optional. A short name the console can show in place of your full name. Clear it to remove it.</p></div>
           <div><label class="text-sm font-medium block mb-1">Level</label>
             <div style="padding:8px 0"><span id="profile-level" class="badge badge-blue">${c.plan_name || '\u2014'}</span></div></div>
@@ -1101,7 +1111,7 @@ const Profile = () => {
               <div><label class="text-sm font-medium block mb-1" for="ca-pw">Your password (proves it is you)</label>
                 <input id="ca-pw" class="input" type="password" autocomplete="current-password" value=${st.caPw} onInput=${e => { st.caPw = e.target.value; }} /></div>
               <div><label class="text-sm font-medium block mb-1" for="ca-word">Type CLOSE to confirm</label>
-                <input id="ca-word" class="input" autocomplete="off" placeholder="CLOSE" value=${st.caWord} onInput=${e => { st.caWord = e.target.value; }} /></div>
+                <input id="ca-word" aria-label="Type CLOSE to confirm" class="input" autocomplete="off" placeholder="CLOSE" value=${st.caWord} onInput=${e => { st.caWord = e.target.value; }} /></div>
               <button id="close-account-do" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:var(--danger)" disabled=${st.caBusy} onClick=${closeAcct}>Close my account permanently</button>
             </div>`}
       </div>
@@ -1291,9 +1301,9 @@ const Branding = () => {
         </div>
         <div class="space-y-3" style="flex:1;max-width:420px">
           <div><label class="text-sm font-medium block mb-1">Brand display name</label>
-            <input id="brand-name-input" class="input" maxlength="60" placeholder="Your business name" value=${st.brand_name || ''} onInput=${e => { st.brand_name = e.target.value; }} /></div>
+            <input aria-label="Brand display name" id="brand-name-input" class="input" maxlength="60" placeholder="Your business name" value=${st.brand_name || ''} onInput=${e => { st.brand_name = e.target.value; }} /></div>
           <div><label class="text-sm font-medium block mb-1">Brand colour</label>
-            <input id="brand-color-input" class="input" placeholder="#4f46e5" value=${st.brand_color || ''} onInput=${e => { st.brand_color = e.target.value; }} /></div>
+            <input aria-label="Brand colour" id="brand-color-input" class="input" placeholder="#4f46e5" value=${st.brand_color || ''} onInput=${e => { st.brand_color = e.target.value; }} /></div>
           <button id="brand-save-btn" class="btn btn-sm" disabled=${st.busy} onClick=${save}>Save branding</button>
         </div>
       </div>
@@ -1322,11 +1332,11 @@ const Branding = () => {
       ${st.sigError && html`<div class="card" style="border-left:4px solid #dc2626"><p class="text-sm text-red-700">${st.sigError}</p></div>`}
       ${st.sigNotice && html`<div class="card" style="border-left:4px solid #059669"><p class="text-sm text-gray-700">${st.sigNotice}</p></div>`}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div><label class="text-sm font-medium block mb-1">Full name</label><input id="brand-sig-name" class="input" maxlength="120" value=${st.sig.full_name || ''} onInput=${e => { st.sig.full_name = e.target.value; }} placeholder="Dana Reed" /></div>
-        <div><label class="text-sm font-medium block mb-1">Job title</label><input id="brand-sig-title" class="input" maxlength="120" value=${st.sig.job_title || ''} onInput=${e => { st.sig.job_title = e.target.value; }} placeholder="Owner" /></div>
-        <div><label class="text-sm font-medium block mb-1">Company</label><input id="brand-sig-company" class="input" maxlength="120" value=${st.sig.company || ''} onInput=${e => { st.sig.company = e.target.value; }} placeholder="Your company" /></div>
-        <div><label class="text-sm font-medium block mb-1">Phone</label><input id="brand-sig-phone" class="input" maxlength="120" value=${st.sig.phone || ''} onInput=${e => { st.sig.phone = e.target.value; }} placeholder="+1 555 010 1234" /></div>
-        <div style="grid-column:1 / -1"><label class="text-sm font-medium block mb-1">A line</label><input id="brand-sig-line" class="input" maxlength="160" value=${st.sig.line || ''} onInput=${e => { st.sig.line = e.target.value; }} placeholder="Miami · Mon–Fri" /></div>
+        <div><label class="text-sm font-medium block mb-1">Full name</label><input aria-label="Full name" id="brand-sig-name" class="input" maxlength="120" value=${st.sig.full_name || ''} onInput=${e => { st.sig.full_name = e.target.value; }} placeholder="Dana Reed" /></div>
+        <div><label class="text-sm font-medium block mb-1">Job title</label><input aria-label="Job title" id="brand-sig-title" class="input" maxlength="120" value=${st.sig.job_title || ''} onInput=${e => { st.sig.job_title = e.target.value; }} placeholder="Owner" /></div>
+        <div><label class="text-sm font-medium block mb-1">Company</label><input aria-label="Company" id="brand-sig-company" class="input" maxlength="120" value=${st.sig.company || ''} onInput=${e => { st.sig.company = e.target.value; }} placeholder="Your company" /></div>
+        <div><label class="text-sm font-medium block mb-1">Phone</label><input aria-label="Phone" id="brand-sig-phone" class="input" maxlength="120" value=${st.sig.phone || ''} onInput=${e => { st.sig.phone = e.target.value; }} placeholder="+1 555 010 1234" /></div>
+        <div style="grid-column:1 / -1"><label class="text-sm font-medium block mb-1">A line</label><input aria-label="A line" id="brand-sig-line" class="input" maxlength="160" value=${st.sig.line || ''} onInput=${e => { st.sig.line = e.target.value; }} placeholder="Miami · Mon–Fri" /></div>
       </div>
       <button id="brand-signature-save" class="btn btn-sm" style="margin-top:12px" disabled=${st.sigBusy} onClick=${saveSignature}>${st.sigBusy ? 'Saving…' : 'Save signature'}</button>
     </div>
@@ -1499,7 +1509,7 @@ const ResponseRules = () => {
       <h3 class="text-base font-bold mb-1">Test a caller</h3>
       <p class="text-sm text-gray-500 mb-3">Type a number to see which rule answers it right now, and what the caller would receive. Nothing is sent and nothing is recorded \u2014 this only reads your rules.</p>
       <div class="flex gap-2 items-center flex-wrap">
-        <input id="rule-test-caller" class="input" style="max-width:260px" placeholder="+1 555 010 1234" value=${st.testCaller || ''} onInput=${e => { st.testCaller = e.target.value; }} />
+        <input id="rule-test-caller" aria-label="Caller number to test" class="input" style="max-width:260px" placeholder="+1 555 010 1234" value=${st.testCaller || ''} onInput=${e => { st.testCaller = e.target.value; }} />
         <button id="rule-test-btn" class="btn btn-sm btn-outline" disabled=${st.testBusy} onClick=${testRule}>${st.testBusy ? 'Testing\u2026' : 'Test this number'}</button>
       </div>
       ${st.testResult && html`<p id="rule-test-result" class="text-sm" style="margin:10px 0 0;color:${st.testResult.ok ? '#047857' : '#b45309'}">${st.testResult.text}</p>`}
@@ -1534,14 +1544,14 @@ const ResponseRules = () => {
           st.formSeeded = true;
         }
         return html`<div class="space-y-3">
-          <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
-          <div><label class="text-sm font-medium block mb-1">Trigger</label><select class="input" value=${f.trigger} onChange=${e => { f.trigger = e.target.value; renderApp(); }}>${RULE_TRIGGERS.map(t => html`<option value=${t[0]}>${t[1]}</option>`)}</select></div>
-          ${f.trigger === 'specific_numbers' && html`<div><label class="text-sm font-medium block mb-1">Caller numbers (one per line)</label><textarea class="input" rows="3" value=${f.numbers} onInput=${e => { f.numbers = e.target.value; }} placeholder="+15550101234"></textarea></div>`}
-          ${f.trigger === 'time_of_day' && html`<div class="flex gap-2"><div class="flex-1"><label class="text-sm font-medium block mb-1">From</label><input class="input" type="time" value=${f.start} onInput=${e => { f.start = e.target.value; }} /></div><div class="flex-1"><label class="text-sm font-medium block mb-1">To</label><input class="input" type="time" value=${f.end} onInput=${e => { f.end = e.target.value; }} /></div></div>`}
+          <div><label class="text-sm font-medium block mb-1">Name</label><input aria-label="Name" class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
+          <div><label class="text-sm font-medium block mb-1">Trigger</label><select aria-label="Trigger" class="input" value=${f.trigger} onChange=${e => { f.trigger = e.target.value; renderApp(); }}>${RULE_TRIGGERS.map(t => html`<option value=${t[0]}>${t[1]}</option>`)}</select></div>
+          ${f.trigger === 'specific_numbers' && html`<div><label class="text-sm font-medium block mb-1">Caller numbers (one per line)</label><textarea aria-label="Caller numbers (one per line)" class="input" rows="3" value=${f.numbers} onInput=${e => { f.numbers = e.target.value; }} placeholder="+15550101234"></textarea></div>`}
+          ${f.trigger === 'time_of_day' && html`<div class="flex gap-2"><div class="flex-1"><label class="text-sm font-medium block mb-1">From</label><input aria-label="From" class="input" type="time" value=${f.start} onInput=${e => { f.start = e.target.value; }} /></div><div class="flex-1"><label class="text-sm font-medium block mb-1">To</label><input aria-label="To" class="input" type="time" value=${f.end} onInput=${e => { f.end = e.target.value; }} /></div></div>`}
           ${f.trigger === 'day_of_week' && html`<div><label class="text-sm font-medium block mb-1">Days</label><div class="flex flex-wrap gap-3">${RULE_DAYS.map(d => html`<label class="text-sm flex items-center gap-1"><input type="checkbox" checked=${f.days.indexOf(d[0]) >= 0} onChange=${e => { const on = e.target.checked; f.days = on ? f.days.concat([d[0]]) : f.days.filter(x => x !== d[0]); renderApp(); }} />${d[1]}</label>`)}</div></div>`}
-          <div><label class="text-sm font-medium block mb-1">Action</label><select class="input" value=${f.type} onChange=${e => { f.type = e.target.value; renderApp(); }}>${RULE_ACTIONS.map(a => html`<option value=${a[0]}>${a[1]}</option>`)}</select></div>
-          ${f.type === 'sms' && html`<div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="3" value=${f.text} onInput=${e => { f.text = e.target.value; }} placeholder="Sorry we missed you! We will call you back shortly."></textarea></div>`}
-          <div class="flex gap-3 items-end"><div style="width:140px"><label class="text-sm font-medium block mb-1">Priority</label><input class="input" type="number" min="1" value=${f.priority} onInput=${e => { f.priority = parseInt(e.target.value, 10) || 100; }} /></div><label class="text-sm flex items-center gap-1 mb-2"><input type="checkbox" checked=${f.active} onChange=${e => { f.active = e.target.checked; renderApp(); }} />Enabled</label></div>
+          <div><label class="text-sm font-medium block mb-1">Action</label><select aria-label="Action" class="input" value=${f.type} onChange=${e => { f.type = e.target.value; renderApp(); }}>${RULE_ACTIONS.map(a => html`<option value=${a[0]}>${a[1]}</option>`)}</select></div>
+          ${f.type === 'sms' && html`<div><label class="text-sm font-medium block mb-1">Message</label><textarea aria-label="Message" class="input" rows="3" value=${f.text} onInput=${e => { f.text = e.target.value; }} placeholder="Sorry we missed you! We will call you back shortly."></textarea></div>`}
+          <div class="flex gap-3 items-end"><div style="width:140px"><label class="text-sm font-medium block mb-1">Priority</label><input aria-label="Priority" class="input" type="number" min="1" value=${f.priority} onInput=${e => { f.priority = parseInt(e.target.value, 10) || 100; }} /></div><label class="text-sm flex items-center gap-1 mb-2"><input type="checkbox" checked=${f.active} onChange=${e => { f.active = e.target.checked; renderApp(); }} />Enabled</label></div>
           <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({ name: f.name, trigger_condition: f.trigger, response_type: f.type, response_content: { text: f.text }, schedule: ruleScheduleOf(f), priority: f.priority, is_active: f.active })}>${st.editItem?'Save':'Add'}</button></div>
         </div>`; })()}
     </div></div>`}
@@ -1581,7 +1591,7 @@ const Templates = () => {
           f.body = st.editItem?.body||st.editItem?.content||'';
           st.formSeeded = true;
         }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea class="input" rows="4" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, body: f.body})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Name</label><input aria-label="Name" class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Message Body</label><textarea aria-label="Message Body" class="input" rows="4" value=${f.body} onInput=${e => { f.body = e.target.value; }}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({name: f.name, body: f.body})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
@@ -1627,7 +1637,7 @@ const Messages = () => {
         // (GET /api/v1/telnyx/numbers) so a provisioned tenant just hits Send; the operator can
         // correct it, and the client never invents a number the tenant does not own.
         if (!st.formSeeded) { const n0 = (st.numbers || [])[0] || {}; f.from = n0.number || n0.phone_number || ''; f.to = ''; f.body = ''; st.formSeeded = true; }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">From (your number)</label><input class="input" value=${f.from} onInput=${e => f.from=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">To (phone)</label><input class="input" value=${f.to} onInput=${e => f.to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea class="input" rows="4" value=${f.body} onInput=${e => f.body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => { const from = (f.from || '').trim(), to = (f.to || '').trim(); if (!from || !to) { alert('Enter your sending number (From) and the recipient number (To) before sending.'); return; } send({ direction: 'outbound', from_number: from, to_number: to, body: f.body }); }}>Send</button></div></div>`; })()}
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">From (your number)</label><input aria-label="From (your number)" class="input" value=${f.from} onInput=${e => f.from=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">To (phone)</label><input aria-label="To (phone)" class="input" value=${f.to} onInput=${e => f.to=e.target.value} /></div><div><label class="text-sm font-medium block mb-1">Message</label><textarea aria-label="Message" class="input" rows="4" value=${f.body} onInput=${e => f.body=e.target.value}></textarea></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => { const from = (f.from || '').trim(), to = (f.to || '').trim(); if (!from || !to) { alert('Enter your sending number (From) and the recipient number (To) before sending.'); return; } send({ direction: 'outbound', from_number: from, to_number: to, body: f.body }); }}>Send</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
@@ -1704,10 +1714,10 @@ const FollowUps = () => {
       <h3 class="text-lg font-bold mb-4">New Follow-up</h3>
       ${(() => { const f = viewState('followups_form', { call_id: '', type: 'call_back', when: '', notes: '' });
         return html`<div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">Call</label><select class="input" value=${f.call_id} onChange=${e => { f.call_id = e.target.value; }}><option value="">Pick a call…</option>${st.calls.map(c => html`<option value=${c.id}>${(c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + utcTime(c.call_time) : '')}</option>`)}</select></div>
-        <div><label class="text-sm font-medium block mb-1">Type</label><input class="input" value=${f.type} onInput=${e => { f.type = e.target.value; }} placeholder="call_back" /></div>
-        <div><label class="text-sm font-medium block mb-1">Due</label><input class="input" type="datetime-local" value=${f.when} onInput=${e => { f.when = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
+        <div><label class="text-sm font-medium block mb-1">Call</label><select aria-label="Call" class="input" value=${f.call_id} onChange=${e => { f.call_id = e.target.value; }}><option value="">Pick a call…</option>${st.calls.map(c => html`<option value=${c.id}>${(c.caller_name || c.caller_number || 'call') + (c.call_time ? ' · ' + utcTime(c.call_time) : '')}</option>`)}</select></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><input aria-label="Type" class="input" value=${f.type} onInput=${e => { f.type = e.target.value; }} placeholder="call_back" /></div>
+        <div><label class="text-sm font-medium block mb-1">Due</label><input aria-label="Due" class="input" type="datetime-local" value=${f.when} onInput=${e => { f.when = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea aria-label="Notes (optional)" class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
         <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => { st.showNew = false; renderApp(); }}>Cancel</button><button class="btn" disabled=${st.busy === 'new'} onClick=${create}>Schedule</button></div>
       </div>`; })()}
     </div></div>`}
@@ -1916,7 +1926,7 @@ const Contacts = () => {
     <div class="flex items-center justify-between mb-4" style="flex-wrap:wrap;gap:8px">
       <h2 class="text-xl font-bold">Contacts</h2>
       <div class="flex items-center gap-2" style="flex-wrap:wrap">
-        <input class="input" style="width:240px;max-width:100%" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
+        <input class="input" aria-label="Search contacts" style="width:240px;max-width:100%" placeholder="Search name, phone, email..." value=${st.search || ''} onInput=${e => onSearch(e.target.value)} />
         <button class="btn btn-sm btn-green" onClick=${() => showContact(null)} disabled=${!!st.gated}>+ New Contact</button>
         <button class="btn btn-sm btn-outline" onClick=${() => { st.showFields = !st.showFields; renderApp(); }}>Custom fields (${st.fields.length})</button>
         <button class="btn btn-sm btn-outline" onClick=${() => load()}>Refresh</button>
@@ -1939,10 +1949,10 @@ const Contacts = () => {
           ${st.fields.length === 0 && html`<tr><td colspan="4" class="text-center text-gray-400 py-4">No custom fields defined yet.</td></tr>`}
         </tbody></table>
       <div class="flex items-end gap-2">
-        <div><label class="text-sm font-medium block mb-1">Field name</label><input class="input" value=${st.draft.name || ''} onInput=${e => { st.draft.name = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" onChange=${e => { st.draft.type = e.target.value; }}>
+        <div><label class="text-sm font-medium block mb-1">Field name</label><input aria-label="Field name" class="input" value=${st.draft.name || ''} onInput=${e => { st.draft.name = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><select aria-label="Type" class="input" onChange=${e => { st.draft.type = e.target.value; }}>
           <option value="text">text</option><option value="number">number</option><option value="date">date</option><option value="boolean">boolean</option></select></div>
-        <div><label class="text-sm font-medium block mb-1">Order</label><input class="input" style="width:80px" value=${String(st.draft.order || 0)} onInput=${e => { st.draft.order = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Order</label><input aria-label="Order" class="input" style="width:80px" value=${String(st.draft.order || 0)} onInput=${e => { st.draft.order = e.target.value; }} /></div>
         <button class="btn btn-sm btn-green" disabled=${st.busy === 'addfield'} onClick=${addField}>Add field</button>
       </div>
     </div>`}
@@ -1984,7 +1994,7 @@ const Contacts = () => {
     ${st.showValues && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showValues = null, renderApp())}><div class="modal-content">
       <h3 class="text-lg font-bold mb-4">Field values — ${st.showValues.name || st.showValues.phone || 'contact'}</h3>
       <div class="space-y-3">${st.fields.map(f => html`<div><label class="text-sm font-medium block mb-1">${f.field_name}</label>
-        <input class="input" value=${st.values[fieldKey(f)] == null ? '' : st.values[fieldKey(f)]} onInput=${e => { st.values[fieldKey(f)] = e.target.value; }} /></div>`)}
+        <input aria-label="${f.field_name}" class="input" value=${st.values[fieldKey(f)] == null ? '' : st.values[fieldKey(f)]} onInput=${e => { st.values[fieldKey(f)] = e.target.value; }} /></div>`)}
         ${st.fields.length === 0 && html`<p class="text-sm text-gray-500">Define a custom field first.</p>`}</div>
       <div class="flex gap-2 justify-end mt-4">
         <button class="btn btn-outline" onClick=${() => { st.showValues = null; renderApp(); }}>Cancel</button>
@@ -2011,12 +2021,12 @@ const Contacts = () => {
           saveContact({ name: name, phone: phone, email: (f.email || '').trim(), company: (f.company || '').trim(), notes: (f.notes || '').trim(), tags: (f.tags || '').split(',').map(s => s.trim()).filter(Boolean) }, !!st.editItem);
         };
         return html`<div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Phone</label><input class="input" value=${f.phone} onInput=${e => { f.phone = e.target.value; }} placeholder="+15551234567" /></div>
-        <div><label class="text-sm font-medium block mb-1">Email (optional)</label><input class="input" value=${f.email} onInput=${e => { f.email = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Company (optional)</label><input class="input" value=${f.company} onInput=${e => { f.company = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Tags (comma separated, optional)</label><input class="input" value=${f.tags} onInput=${e => { f.tags = e.target.value; }} placeholder="vip, after-hours" /></div>
-        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
+        <div><label class="text-sm font-medium block mb-1">Name</label><input aria-label="Name" class="input" value=${f.name} onInput=${e => { f.name = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Phone</label><input aria-label="Phone" class="input" value=${f.phone} onInput=${e => { f.phone = e.target.value; }} placeholder="+15551234567" /></div>
+        <div><label class="text-sm font-medium block mb-1">Email (optional)</label><input aria-label="Email (optional)" class="input" value=${f.email} onInput=${e => { f.email = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Company (optional)</label><input aria-label="Company (optional)" class="input" value=${f.company} onInput=${e => { f.company = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Tags (comma separated, optional)</label><input aria-label="Tags (comma separated, optional)" class="input" value=${f.tags} onInput=${e => { f.tags = e.target.value; }} placeholder="vip, after-hours" /></div>
+        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><textarea aria-label="Notes (optional)" class="input" rows="3" value=${f.notes} onInput=${e => { f.notes = e.target.value; }}></textarea></div>
         <div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${hideContact}>Cancel</button><button class="btn" disabled=${st.busy === 'form'} onClick=${submit}>${st.editItem ? 'Save' : 'Add'}</button></div>
       </div>`; })()}
     </div></div>`}
@@ -2207,8 +2217,8 @@ const Lists = () => {
     ${st.showNew && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showNew = false, renderApp())}><div class="modal-content">
       <h3 class="text-lg font-bold mb-4">New list</h3>
       <div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">Name</label><input class="input" id="lists-name" value=${st.draft.name || ''} onInput=${e => { st.draft.name = e.target.value; }} placeholder="After-hours callers" /></div>
-        <div><label class="text-sm font-medium block mb-1">Description (optional)</label><input class="input" value=${st.draft.description || ''} onInput=${e => { st.draft.description = e.target.value; }} placeholder="Why these people are grouped together" /></div>
+        <div><label class="text-sm font-medium block mb-1">Name</label><input aria-label="Name" class="input" id="lists-name" value=${st.draft.name || ''} onInput=${e => { st.draft.name = e.target.value; }} placeholder="After-hours callers" /></div>
+        <div><label class="text-sm font-medium block mb-1">Description (optional)</label><input aria-label="Description (optional)" class="input" value=${st.draft.description || ''} onInput=${e => { st.draft.description = e.target.value; }} placeholder="Why these people are grouped together" /></div>
         <div class="flex gap-2 justify-end mt-4"><button type="button" class="btn btn-outline" onClick=${() => { st.showNew = false; renderApp(); }}>Cancel</button><button type="button" id="lists-create" class="btn" disabled=${st.busy === 'new'} onClick=${createList}>${st.busy === 'new' ? 'Creating…' : 'Create list'}</button></div>
       </div>
     </div></div>`}
@@ -2225,7 +2235,7 @@ const Lists = () => {
       ${st.renaming && html`<div class="mb-4" id="list-rename-box" style="border:1px solid var(--border);border-radius:8px;padding:12px">
         <label class="text-sm font-medium block mb-1">List name</label>
         <div class="flex gap-2" style="flex-wrap:wrap;align-items:center">
-          <input class="input" id="list-rename-input" style="max-width:420px" value=${st.renameDraft || ''} onInput=${e => { st.renameDraft = e.target.value; }} placeholder="After-hours callers" />
+          <input class="input" id="list-rename-input" aria-label="List name" style="max-width:420px" value=${st.renameDraft || ''} onInput=${e => { st.renameDraft = e.target.value; }} placeholder="After-hours callers" />
           <button type="button" id="list-rename-save" class="btn btn-sm" disabled=${st.busy === 'rename'} onClick=${renameList}>${st.busy === 'rename' ? 'Saving…' : 'Save name'}</button>
           <button type="button" class="btn btn-sm btn-outline" onClick=${() => { st.renaming = false; st.error = null; renderApp(); }}>Cancel</button>
         </div>
@@ -2236,7 +2246,7 @@ const Lists = () => {
         ${st.pickList === null
           ? html`<p class="text-sm text-gray-400">Loading your leads…</p>`
           : html`<div class="flex gap-2" style="flex-wrap:wrap;align-items:center">
-              <select class="input" id="list-pick" style="max-width:420px" value=${st.pick} onChange=${e => { st.pick = e.target.value; renderApp(); }}>
+              <select class="input" id="list-pick" aria-label="Which lead to add" style="max-width:420px" value=${st.pick} onChange=${e => { st.pick = e.target.value; renderApp(); }}>
                 <option value="">Pick a lead…</option>
                 ${st.pickList.map(l => html`<option value=${l.id}>${(l.name || '(no name)') + (l.phone ? ' · ' + l.phone : (l.email ? ' · ' + l.email : ''))}</option>`)}
               </select>
@@ -2397,12 +2407,12 @@ const Calendar = () => {
     ${st.showNew && html`<div class="modal" onClick=${e => e.target === e.currentTarget && (st.showNew = false, st.editing = null, renderApp())}><div class="modal-content">
       <h3 class="text-lg font-bold mb-4">${st.editing ? 'Edit event' : 'New event'}</h3>
       <div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">What is it?</label><input class="input" id="cal-title" value=${st.draft.title || ''} onInput=${e => { st.draft.title = e.target.value; }} placeholder="Call back about the quote" /></div>
-        <div><label class="text-sm font-medium block mb-1">When</label><input class="input" id="cal-start" type="datetime-local" value=${st.draft.start || ''} onInput=${e => { st.draft.start = e.target.value; }} /></div>
-        <div><label class="text-sm font-medium block mb-1">Type</label><select class="input" id="cal-type" value=${st.draft.type || 'call'} onChange=${e => { st.draft.type = e.target.value; }}>
+        <div><label class="text-sm font-medium block mb-1">What is it?</label><input aria-label="What is it?" class="input" id="cal-title" value=${st.draft.title || ''} onInput=${e => { st.draft.title = e.target.value; }} placeholder="Call back about the quote" /></div>
+        <div><label class="text-sm font-medium block mb-1">When</label><input aria-label="When" class="input" id="cal-start" type="datetime-local" value=${st.draft.start || ''} onInput=${e => { st.draft.start = e.target.value; }} /></div>
+        <div><label class="text-sm font-medium block mb-1">Type</label><select aria-label="Type" class="input" id="cal-type" value=${st.draft.type || 'call'} onChange=${e => { st.draft.type = e.target.value; }}>
           ${['call', 'callback', 'appointment', 'reminder', 'other'].map(t => html`<option value=${t}>${t}</option>`)}
         </select></div>
-        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><input class="input" id="cal-notes" value=${st.draft.notes || ''} onInput=${e => { st.draft.notes = e.target.value; }} placeholder="Anything you want beside the event" /></div>
+        <div><label class="text-sm font-medium block mb-1">Notes (optional)</label><input aria-label="Notes (optional)" class="input" id="cal-notes" value=${st.draft.notes || ''} onInput=${e => { st.draft.notes = e.target.value; }} placeholder="Anything you want beside the event" /></div>
         <div class="flex gap-2 justify-end mt-4">
           <button type="button" class="btn btn-outline" onClick=${() => { st.showNew = false; st.editing = null; st.error = null; renderApp(); }}>Cancel</button>
           <button type="button" id="cal-save" class="btn" disabled=${st.busy === 'save'} onClick=${save}>${st.busy === 'save' ? 'Saving…' : (st.editing ? 'Save changes' : 'Add to calendar')}</button>
@@ -2500,7 +2510,7 @@ const Tickets = () => {
         ${((st.thread && st.thread.messages) || []).length === 0 && html`<div class="text-sm text-gray-400">No messages on this ticket yet.</div>`}
       </div>
       <label class="text-sm font-medium block mb-1">Add to this ticket</label>
-      <textarea id="tk-reply" class="input" rows="3" value=${st.reply || ''} onInput=${e => { st.reply = e.target.value; }} placeholder="Ask a question or add a detail for the team."></textarea>
+      <textarea aria-label="Add to this ticket" id="tk-reply" class="input" rows="3" value=${st.reply || ''} onInput=${e => { st.reply = e.target.value; }} placeholder="Ask a question or add a detail for the team."></textarea>
       <div class="flex justify-end mt-2"><button id="tk-send" class="btn" disabled=${st.busy} onClick=${sendReply}>${st.busy ? 'Sending…' : 'Send'}</button></div>
     </div>`}
     ${st.showModal && html`<div class="modal" onClick=${e => e.target===e.currentTarget && hide()}><div class="modal-content"><h3 class="text-lg font-bold mb-4">${st.editItem?'Edit':'New'} Ticket</h3>
@@ -2516,7 +2526,7 @@ const Tickets = () => {
           f.priority = st.editItem?.priority||'medium';
           st.formSeeded = true;
         }
-        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Status</label><p class="text-sm text-gray-500" id="tk-status-note">${st.editItem ? (st.editItem.status || 'open') : 'open'} \u2014 the team moves a request to resolved or closed once it is handled. To cancel it yourself, use Withdraw.</p></div><div><label class="text-sm font-medium block mb-1">Priority</label><select class="input" value=${f.priority} onChange=${e => { f.priority = e.target.value; }}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject: f.subject, priority: f.priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
+        return html`<div class="space-y-3"><div><label class="text-sm font-medium block mb-1">Subject</label><input aria-label="Subject" class="input" value=${f.subject} onInput=${e => { f.subject = e.target.value; }} /></div><div><label class="text-sm font-medium block mb-1">Status</label><p class="text-sm text-gray-500" id="tk-status-note">${st.editItem ? (st.editItem.status || 'open') : 'open'} \u2014 the team moves a request to resolved or closed once it is handled. To cancel it yourself, use Withdraw.</p></div><div><label class="text-sm font-medium block mb-1">Priority</label><select aria-label="Priority" class="input" value=${f.priority} onChange=${e => { f.priority = e.target.value; }}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div class="flex gap-2 justify-end mt-4"><button class="btn btn-outline" onClick=${() => hide()}>Cancel</button><button class="btn" onClick=${() => save({subject: f.subject, priority: f.priority})}>${st.editItem?'Save':'Add'}</button></div></div>`; })()}
     </div></div>`}
   </div>`;
 };
@@ -2602,8 +2612,8 @@ const Integrations = () => {
           <button class="btn btn-sm btn-red" disabled=${st.busy === p.key} onClick=${() => disconnect(p)}>Disconnect</button>
         </div>`
       : html`<div class="space-y-2">
-          <input class="input" type="password" placeholder=${(p.name || p.key) + ' API key'} value=${st.keyInput[p.key] || ''} onInput=${e => st.keyInput[p.key] = e.target.value} />
-          ${p.requires_base_url ? html`<input class="input" placeholder="Base URL (optional — defaults to the platform URL)" value=${st.baseInput[p.key] || ''} onInput=${e => st.baseInput[p.key] = e.target.value} />` : ''}
+          <input class="input" aria-label=${(p.name || p.key) + ' API key'} type="password" placeholder=${(p.name || p.key) + ' API key'} value=${st.keyInput[p.key] || ''} onInput=${e => st.keyInput[p.key] = e.target.value} />
+          ${p.requires_base_url ? html`<input class="input" aria-label="Base URL (optional)" placeholder="Base URL (optional — defaults to the platform URL)" value=${st.baseInput[p.key] || ''} onInput=${e => st.baseInput[p.key] = e.target.value} />` : ''}
           <div class="flex gap-2">
             <button class="btn btn-sm" disabled=${st.busy === p.key} onClick=${() => connect(p)}>Connect</button>
             <button class="btn btn-sm btn-outline" disabled=${st.busy === p.key} onClick=${() => test(p)}>Test connection</button>
@@ -2656,13 +2666,13 @@ const Integrations = () => {
       <h3 class="font-semibold">Push a lead to CoreSwift now</h3>
       <p class="text-sm text-gray-600 mt-1">The same push the automatic capture path uses, for a lead you captured by hand.</p>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
-        <input class="input" placeholder="Name" value=${st.push.name || ''} onInput=${e => { st.push.name = e.target.value; }} />
-        <input class="input" placeholder="Company" value=${st.push.company || ''} onInput=${e => { st.push.company = e.target.value; }} />
-        <input class="input" placeholder="Phone" value=${st.push.phone || ''} onInput=${e => { st.push.phone = e.target.value; }} />
-        <input class="input" placeholder="Email" value=${st.push.email || ''} onInput=${e => { st.push.email = e.target.value; }} />
-        <input class="input" placeholder="Tags (comma separated)" value=${st.push.tags || ''} onInput=${e => { st.push.tags = e.target.value; }} />
-        <input class="input" placeholder="CoreSwift list id (optional)" value=${st.push.list_id || ''} onInput=${e => { st.push.list_id = e.target.value; }} />
-        <input class="input" placeholder="Notes" value=${st.push.notes || ''} onInput=${e => { st.push.notes = e.target.value; }} />
+        <input class="input" aria-label="Name" placeholder="Name" value=${st.push.name || ''} onInput=${e => { st.push.name = e.target.value; }} />
+        <input class="input" aria-label="Company" placeholder="Company" value=${st.push.company || ''} onInput=${e => { st.push.company = e.target.value; }} />
+        <input class="input" aria-label="Phone" placeholder="Phone" value=${st.push.phone || ''} onInput=${e => { st.push.phone = e.target.value; }} />
+        <input class="input" aria-label="Email" placeholder="Email" value=${st.push.email || ''} onInput=${e => { st.push.email = e.target.value; }} />
+        <input class="input" aria-label="Tags (comma separated)" placeholder="Tags (comma separated)" value=${st.push.tags || ''} onInput=${e => { st.push.tags = e.target.value; }} />
+        <input class="input" aria-label="CoreSwift list id (optional)" placeholder="CoreSwift list id (optional)" value=${st.push.list_id || ''} onInput=${e => { st.push.list_id = e.target.value; }} />
+        <input class="input" aria-label="Notes" placeholder="Notes" value=${st.push.notes || ''} onInput=${e => { st.push.notes = e.target.value; }} />
       </div>
       <div class="flex items-center gap-3 mt-3">
         <button class="btn btn-sm btn-green" disabled=${st.pushBusy} onClick=${pushNow}>Push now</button>
@@ -3281,8 +3291,8 @@ const Team = () => {
       <h3 class="text-base font-bold mb-1">Add someone to your workspace</h3>
       <p class="text-sm text-gray-500 mb-3">They get their own login and an email with the first password — nobody shares yours. They see the same calls, contacts and settings you do.</p>
       <div class="space-y-3">
-        <div><label class="text-sm font-medium block mb-1">Their name</label><input class="input" id="team-name" value=${form.name} onInput=${e => { form.name = e.target.value; }} placeholder="Sam Rivera" /></div>
-        <div><label class="text-sm font-medium block mb-1">Their email address</label><input class="input" id="team-email" type="email" value=${form.email} onInput=${e => { form.email = e.target.value; }} placeholder="sam@yourcompany.com" /></div>
+        <div><label class="text-sm font-medium block mb-1">Their name</label><input aria-label="Their name" class="input" id="team-name" value=${form.name} onInput=${e => { form.name = e.target.value; }} placeholder="Sam Rivera" /></div>
+        <div><label class="text-sm font-medium block mb-1">Their email address</label><input aria-label="Their email address" class="input" id="team-email" type="email" value=${form.email} onInput=${e => { form.email = e.target.value; }} placeholder="sam@yourcompany.com" /></div>
         <div class="flex gap-2 justify-end"><button class="btn" id="team-invite" disabled=${st.busy === true} onClick=${invite}>Add them</button></div>
       </div>
     </div>` : html`<div class="card mt-4"><p class="text-sm text-gray-600">Only the workspace owner or a company admin can add, re-send a login to, or remove someone. Ask them if you need access for a colleague.</p></div>`}
@@ -3369,7 +3379,7 @@ const Workspaces = () => {
       <h3 class="text-base font-bold mb-1">Add a workspace</h3>
       <p class="text-sm text-gray-500 mb-3">Give it the name your team will recognise — a client, a location, or a brand you run from the same account.</p>
       <div class="flex gap-2 items-center flex-wrap">
-        <input id="ws-name" class="input" style="max-width:320px" maxlength="120" placeholder="e.g. Miami office" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} />
+        <input id="ws-name" aria-label="Workspace name" class="input" style="max-width:320px" maxlength="120" placeholder="e.g. Miami office" value=${st.name || ''} onInput=${e => { st.name = e.target.value; }} />
         <button type="button" id="ws-create" class="btn" disabled=${st.busy} onClick=${create}>${st.busy ? 'Creating…' : 'Create workspace'}</button>
       </div>
     </div>
@@ -3797,7 +3807,7 @@ const ApiKeys = () => {
     ${st.regenError && html`<div class="imp-banner"><span>Regenerate failed: ${st.regenError}</span></div>`}
     <div class="card">
       <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap">
-        <input class="input" style="max-width:260px" placeholder="New key name (optional)" value=${st.newName} onInput=${(e) => { st.newName = e.target.value; }} />
+        <input class="input" style="max-width:260px" aria-label="New key name (optional)" placeholder="New key name (optional)" value=${st.newName} onInput=${(e) => { st.newName = e.target.value; }} />
         <button class="btn btn-sm" disabled=${st.busy} onClick=${create}>+ Create key</button>
       </div>
       ${st.keys.length === 0
@@ -3826,7 +3836,7 @@ const ApiKeys = () => {
         ${st.revealResult
           ? html`<div>
               <div class="badge badge-blue mb-2">${st.revealResult.key_prefix}…</div>
-              <textarea class="input mb-2" rows="2" readonly>${st.revealResult.token}</textarea>
+              <textarea class="input mb-2" aria-label="Your API key" rows="2" readonly>${st.revealResult.token}</textarea>
               <div class="flex gap-2 justify-end">
                 <button class="btn btn-sm" onClick=${() => copy(st.revealResult.token)}>Copy</button>
                 <button class="btn btn-sm btn-outline" onClick=${closeReveal}>Done</button>
@@ -3835,7 +3845,7 @@ const ApiKeys = () => {
           : html`<div>
               <p class="text-sm text-gray-500 mb-3">Enter your account password to see this key.</p>
               ${st.revealError && html`<div class="imp-banner"><span>${st.revealError}</span></div>`}
-              <input class="input mb-3" type="password" placeholder="Your password" value=${st.revealPassword} onInput=${(e) => { st.revealPassword = e.target.value; }} />
+              <input class="input mb-3" type="password" aria-label="Your password" placeholder="Your password" value=${st.revealPassword} onInput=${(e) => { st.revealPassword = e.target.value; }} />
               <div class="flex gap-2 justify-end">
                 <button class="btn btn-sm btn-outline" onClick=${closeReveal}>Cancel</button>
                 <button class="btn btn-sm" disabled=${st.revealBusy} onClick=${doReveal}>Show key</button>
@@ -4117,7 +4127,7 @@ const Mcp = () => {
       <h3 class="font-semibold text-gray-800 mb-2">Don’t know what to ask?</h3>
       <p class="text-sm text-gray-500 mb-2">Tell us what you are trying to do and we will give you things you can say.</p>
       <div class="flex gap-2" style="flex-wrap:wrap">
-        <input type="text" class="input" style="flex:1;min-width:220px" placeholder="I want to …" value=${st.goal} onInput=${e => { st.goal = e.target.value; }} />
+        <input type="text" class="input" style="flex:1;min-width:220px" aria-label="What do you want to do" placeholder="I want to …" value=${st.goal} onInput=${e => { st.goal = e.target.value; }} />
         <button class="btn btn-sm" onClick=${giveIdeas}>Give me ideas</button>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-top:6px">We will suggest the prompts that fit your goal.</div>
