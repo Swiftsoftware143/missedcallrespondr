@@ -492,9 +492,13 @@ const Overview = () => {
     const of = (cap !== null && isFinite(cap) && cap > 0 && n <= cap) ? ' of ' + cap : '';
     return html`<p class="text-sm text-gray-600 mt-2" id="credit-note">${n}${of} call credit${n === 1 ? '' : 's'} left</p>`;
   };
-  // Activity-feed labels. A new action kind shows its RAW token until a label is added here, which
-  // is honest rather than invisible.
-  const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added', 'campaign.created': '📣 Campaign created', 'campaign.activated': '▶️ Campaign started', 'campaign.paused': '⏸ Campaign paused' };
+  // Activity-feed labels. The four API-key actions are written by this app's own api_key_handler
+  // for a tenant's OWN keys, so they reach this feed and used to render as raw machine tokens
+  // ("api_key_revealed") — measured live 2026-11-21 in Chromium on app.missedcallrespondr.com.
+  // `actLabel` keeps the old rule that an unknown action stays VISIBLE, but as words rather than as
+  // a token nobody outside the codebase can read.
+  const ACT_LABEL = { 'call.received': '📞 Missed call received', 'message.sent': '💬 Reply sent', 'contact.created': '👤 Contact added', 'campaign.created': '📣 Campaign created', 'campaign.activated': '▶️ Campaign started', 'campaign.paused': '⏸ Campaign paused', 'api_key_created': '🔑 API key created', 'api_key_revealed': '🔑 API key viewed', 'api_key_revoked': '🔑 API key revoked', 'api_key_regenerated': '🔑 API key replaced' };
+  const actLabel = (a) => ACT_LABEL[a] || String(a || '').replace(/[._]/g, ' ').replace(/^./, c => c.toUpperCase());
   // A stored value is only as short as the write path allowed it to be, and the contact create/update
   // paths were unbounded until today (a 250-character name was accepted and one is already in the
   // activity log). Rows written before that cap must not be able to stretch this feed, so every
@@ -591,7 +595,7 @@ const Overview = () => {
       ${(st.activity && st.activity.length)
         ? html`<ul style="list-style:none;padding:0;margin:0">
             ${st.activity.map(a => html`<li class="text-sm text-gray-600" style="padding:6px 0;border-bottom:1px solid #f1f5f9">
-              <b>${ACT_LABEL[a.action] || a.action}</b>${actDetail(a)}
+              <b>${actLabel(a.action)}</b>${actDetail(a)}
               <span class="text-gray-400" style="float:right">${utcTime(a.created_at)}</span></li>`)}
           </ul>`
         : html`<p class="text-sm text-gray-400">Nothing yet — a call, an automatic reply, a captured contact or a campaign you build shows here.</p>`}
