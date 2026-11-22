@@ -195,6 +195,11 @@ pub const PUBLIC_ROUTES: &[&str] = &[
     // It reads a raw body before it can verify anything, which is why it is also mounted with the
     // body-read deadline (the public router's own `route_layer`).
     "/api/v1/webhooks/mailgun/inbound",
+    // The provider's DELIVERY events (2026-11-22): a hard bounce, a spam complaint and a list
+    // unsubscribe, posted with no session like every provider webhook. The credential is a secret
+    // this app generates and carries IN THE PATH (`mailgun_events_token`), compared in constant
+    // time before anything is written; a wrong token is a 403 and records nothing.
+    "/api/v1/webhooks/mailgun/events/:token",
     // The OTHER receiver a domain can choose (measured live 2026-11-14: the console hands a
     // SendGrid-hosted customer this URL, and the router existed but was never mounted, so it
     // answered 404). SendGrid signs nothing — the unguessable per-domain `inbound_token` in the
@@ -606,12 +611,12 @@ mod tests {
         // 18 deliberate public routes: the tenant plan catalogue `/api/v1/public/plans` joined on
         // 2026-11-12 (aed4070) and this pin was left at 17, so `cargo test` was RED on HEAD until
         // 2026-11-16 (card t_03c38b20) re-counted it against the list.
-        assert_eq!(super::PUBLIC_ROUTES.len(), 19, "PUBLIC_ROUTES size");
+        assert_eq!(super::PUBLIC_ROUTES.len(), 20, "PUBLIC_ROUTES size");
         assert_eq!(super::INTERNAL_ROUTES.len(), 3, "INTERNAL_ROUTES size");
         // The 21 anonymous mounts: 18 deliberate + 3 key receivers.
         assert_eq!(
             super::PUBLIC_ROUTES.len() + super::INTERNAL_ROUTES.len(),
-            22
+            23
         );
         // 135 entries / 135 distinct paths (the "sign out every other device" door
         // `POST /api/v1/auth/logout-all` joined on 2026-11-01 — a PROTECTED mount beside
@@ -698,11 +703,14 @@ mod tests {
         // operator's portfolio-companies screen) — a PROTECTED `/api/v1/admin/*` mount like its
         // `/tenants` neighbours, so PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing
         // became reachable without a credential. Found by `cargo test`, RED at HEAD before it.
-        assert_eq!(lits.len(), 158, "mounted .route entries");
+        // RE-MEASURED 2026-11-22 (kanban t_6146b9c9): the delivery-events receiver and the
+        // operator's read of its address are 2 more literals -> 160 total / 160 distinct; the
+        // anonymous lists are 20 + 3 = 23.
+        assert_eq!(lits.len(), 160, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 158, "distinct mounted paths");
+        assert_eq!(uniq.len(), 160, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),

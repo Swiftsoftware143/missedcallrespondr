@@ -161,6 +161,15 @@ pub fn create_router(state: AppState) -> Router {
                 post(crate::private_email::webhook_handler::inbound_webhook);
             with_limit.layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024))
         })
+        // The provider's DELIVERY events (2026-11-22): a hard bounce, a spam complaint and a list
+        // unsubscribe, posted with no session like every provider webhook. The credential is a
+        // secret this app generates and carries IN THE PATH (`mailgun_events_token`), compared in
+        // constant time before anything is written; a wrong token is a 403 and records nothing.
+        // Listed in `auth::route_policy::PUBLIC_ROUTES`, beside the inbound receiver.
+        .route(
+            "/api/v1/webhooks/mailgun/events/:token",
+            post(crate::compliance_events::events_webhook),
+        )
         // SendGrid Inbound Parse — the OTHER receiver a domain can pick. Measured 2026-11-14: the
         // handler and its named router existed, the console handed a SendGrid-hosted customer a
         // `…/api/v1/webhooks/sendgrid/inbound/<token>` URL, and nothing mounted the router, so that
@@ -316,6 +325,13 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/v1/settings/suppressions.csv",
             get(crate::compliance::suppressions_csv),
+        )
+        // The provider's delivery-events address, read by the operator's do-not-mail card so it can
+        // be pasted into the provider once (2026-11-22). PRIVATE: it hands out a capability URL, so
+        // the boundary must refuse an anonymous caller before the handler runs.
+        .route(
+            "/api/v1/settings/do-not-mail/webhook",
+            get(crate::compliance_events::webhook_url),
         )
         .route(
             "/api/v1/settings/suppressions/:id",
