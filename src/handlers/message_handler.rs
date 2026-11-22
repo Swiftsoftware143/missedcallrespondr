@@ -76,7 +76,8 @@ pub(crate) struct ProviderOutcome {
     /// Telnyx's message id — the key later delivery events match on.
     pub provider_message_id: Option<String>,
     /// The stored `messages.status`: `queued` / `sent` / `delivered` / `failed` (`logged` for the
-    /// inbound arm, which is not transmitted at all).
+    /// inbound arm, which is not transmitted at all; `suppressed` for a number no carrier can reach,
+    /// which is not transmitted either — see [`suppressed_number`]).
     pub status: &'static str,
     pub mark_sent: bool,
     pub mark_delivered: bool,
@@ -181,6 +182,23 @@ pub(crate) fn outcome_from_provider(http_status: u16, body: &Value) -> ProviderO
     }
 }
 
+/// The refusal for a number that can never receive a text, if this is one.
+///
+/// `None` means nothing about the number says it is fiction, so the send proceeds exactly as it did
+/// before. `Some` means: record the row as `suppressed` and do NOT contact the provider — the NANP
+/// reserves exchange `555` with subscriber `0100`–`0199` for fiction, so the send can only fail, and
+/// a failed send is charged to the same account that carries real customers' texts (2026-11-22,
+/// parity with XrideDispatch commit 2ede6cb).
+pub(crate) fn suppressed_number(to: &str) -> Option<ProviderOutcome> {
+    crate::security::probe_addr::undeliverable_number(to).map(|reason| ProviderOutcome {
+        provider_message_id: None,
+        status: "suppressed",
+        mark_sent: false,
+        mark_delivered: false,
+        detail: Some(format!("undeliverable_number:{reason}")),
+    })
+}
+
 /// Hand one message to Telnyx and report what its answer means.
 ///
 /// Runs AFTER the sender check, the plan gate and the configuration check: nothing is transmitted
@@ -193,6 +211,14 @@ async fn deliver_outbound(
     to: &str,
     body: &str,
 ) -> ProviderOutcome {
+    // THE TRANSPORT'S OWN GATE (2026-11-22): a number in the NANP fiction block is never handed to
+    // Telnyx, whoever calls this. Both doors below also ask BEFORE the credential lookup, so an
+    // installation with no key still records the suppressed row; this check is what stops a future
+    // third caller from dialling one.
+    if let Some(outcome) = suppressed_number(to) {
+        tracing::info!(to = %to, "text withheld: the number cannot receive one, so nothing was sent");
+        return outcome;
+    }
     let client = reqwest::Client::new();
     let sent = client
         .post(format!("{}/v2/messages", api_base))
@@ -298,7 +324,19 @@ pub async fn create_message(
     features::enforce_feature_limit(&state.pool, tenant_id, "max_messages", "Messages").await?;
 
     let is_outbound = direction == "outbound";
-    let outcome = if is_outbound {
+    // A NUMBER THAT CAN NEVER RECEIVE A TEXT IS REFUSED BEFORE THE CREDENTIAL IS READ (2026-11-22).
+    // `813-555-0101` sits in the NANP's reserved fiction block, so the send is a guaranteed failure
+    // charged to the same account that carries real customers' texts. Asking here — above the
+    // configuration check — means the attempt is still recorded (`suppressed`, not `failed`) on an
+    // installation with no Telnyx key, and no provider is contacted for one.
+    let reserved = if is_outbound {
+        suppressed_number(req.to_number.trim())
+    } else {
+        None
+    };
+    let outcome = if let Some(reserved) = reserved {
+        reserved
+    } else if is_outbound {
         // The credential and the messaging profile are an OPERATOR's responsibility. With either
         // missing there is nothing to send with: refuse, name what is missing, and write no row —
         // an entry in the log would imply an attempt that never happened.
@@ -428,39 +466,48 @@ pub(crate) async fn send_rule_sms(
     body: &str,
     rule_name: &str,
 ) -> Result<Uuid, AppError> {
-    let conf = crate::handlers::telnyx_handler::get_telnyx_config(&state.pool)
-        .await?
-        .filter(|c| {
-            !c.api_key.trim().is_empty()
-                && c.messaging_profile_id
-                    .as_deref()
-                    .map(|m| !m.trim().is_empty())
-                    .unwrap_or(false)
-        })
-        .ok_or_else(|| {
-            AppError::ServiceUnavailable(
-                "Text delivery is not configured: an administrator must save the Telnyx API key \
-                 and the messaging profile id of a messaging-enabled number (Admin, Telnyx Config) \
-                 before a response rule can text a caller back."
-                    .to_string(),
+    // The same gate as the manual door, asked BEFORE the configuration lookup (2026-11-22): a
+    // number in the NANP fiction block can never receive a text, so the row says `suppressed`
+    // instead of the attempt failing at the provider, and an installation with no key still records
+    // what happened rather than leaving the operator with an empty log.
+    let outcome = match suppressed_number(to) {
+        Some(reserved) => reserved,
+        None => {
+            let conf = crate::handlers::telnyx_handler::get_telnyx_config(&state.pool)
+                .await?
+                .filter(|c| {
+                    !c.api_key.trim().is_empty()
+                        && c.messaging_profile_id
+                            .as_deref()
+                            .map(|m| !m.trim().is_empty())
+                            .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    AppError::ServiceUnavailable(
+                        "Text delivery is not configured: an administrator must save the Telnyx API key \
+                         and the messaging profile id of a messaging-enabled number (Admin, Telnyx Config) \
+                         before a response rule can text a caller back."
+                            .to_string(),
+                    )
+                })?;
+
+            let profile = conf
+                .messaging_profile_id
+                .as_deref()
+                .unwrap_or_default()
+                .trim();
+
+            deliver_outbound(
+                &telnyx_api_base(),
+                conf.api_key.trim(),
+                profile,
+                from,
+                to,
+                body,
             )
-        })?;
-
-    let profile = conf
-        .messaging_profile_id
-        .as_deref()
-        .unwrap_or_default()
-        .trim();
-
-    let outcome = deliver_outbound(
-        &telnyx_api_base(),
-        conf.api_key.trim(),
-        profile,
-        from,
-        to,
-        body,
-    )
-    .await;
+            .await
+        }
+    };
 
     let id = Uuid::new_v4();
     let now = chrono::Utc::now().naive_utc();

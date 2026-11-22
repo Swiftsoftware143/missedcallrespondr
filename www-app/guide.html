@@ -504,7 +504,8 @@ html[data-theme="dark"] code{color:#fda4af}
     Telnyx account saved yet, a rule still fires and is logged, but the Messages screen stays empty
     because nothing was attempted — write to us from <a href="https://app.missedcallrespondr.com/contact.html">our contact page</a> and our team
     switches it on. Queued, sent, delivered and failed on the Messages screen are always the
-    provider's own answer.
+    provider's own answer; <strong>suppressed</strong> is the one status that is not the provider's,
+    because nothing was sent: the number cannot receive a text.
   </p>
 
   <h3>Testing a Rule Before a Caller Rings</h3>
@@ -757,6 +758,7 @@ html[data-theme="dark"] code{color:#fda4af}
       <tr><td><strong>sent</strong></td><td>The carrier took the message. The <strong>Sent</strong> column shows when Telnyx reported this.</td></tr>
       <tr><td><strong>delivered</strong></td><td>The recipient's network confirmed delivery. The <strong>Delivered</strong> column shows when Telnyx reported this.</td></tr>
       <tr><td><strong>failed</strong></td><td>The provider refused the message or the carrier reported a failure. The reason Telnyx gave is shown in a dialog when you send; the attempt stays in the log as <strong>failed</strong>.</td></tr>
+      <tr><td><strong>suppressed</strong></td><td>The number is in the range reserved for fiction (exchange 555 with a subscriber part of 0100–0199, such as 813-555-0101), so no carrier can deliver to it. Nothing was sent and nothing was charged — the row stays in the log with the reason <strong>undeliverable_number</strong>.</td></tr>
       <tr><td><strong>logged</strong></td><td>A message recorded as received (inbound). Nothing is transmitted for these.</td></tr>
     </tbody>
   </table>
@@ -768,6 +770,9 @@ html[data-theme="dark"] code{color:#fda4af}
       <strong>Phone Numbers</strong> tab in the app. If this installation has no Telnyx account saved
       yet, sending answers
       <em>"Text delivery is not configured"</em> and nothing is recorded — write to us from <a href="https://app.missedcallrespondr.com/contact.html">our contact page</a> and our team switches it on for you.
+      (The one exception is a number in the range reserved for fiction, which is recorded as
+      <strong>suppressed</strong> without any provider involved, because no configuration could make
+      it deliverable.)
     </p>
   </div>
 

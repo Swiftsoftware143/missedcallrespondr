@@ -1556,8 +1556,9 @@ const Templates = () => {
 
 // kanban t_2ed95642 — the badge paints the PROVIDER'S answer, never ours: green only for what
 // Telnyx confirmed (sent to the carrier / delivered to the handset), blue while it is still with
-// the provider, red for a message the provider refused.
-const messageBadge = (s) => (s === 'delivered' || s === 'sent') ? 'badge-green' : s === 'failed' ? 'badge-red' : s === 'queued' ? 'badge-blue' : 'badge-yellow';
+// the provider, red for a message the provider refused. Grey is `suppressed` (2026-11-22): the
+// number is in the range reserved for fiction and no carrier can reach it, so nothing was sent.
+const messageBadge = (s) => (s === 'delivered' || s === 'sent') ? 'badge-green' : s === 'failed' ? 'badge-red' : s === 'queued' ? 'badge-blue' : s === 'suppressed' ? 'badge-gray' : 'badge-yellow';
 // The API stores naive UTC (the server writes Utc::now().naive_utc()). A naive ISO string is read
 // by the browser as LOCAL time, so the clock time would be wrong by the timezone offset; pin it to
 // UTC before formatting.
@@ -1579,7 +1580,7 @@ const Messages = () => {
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">Messages</h2><button class="btn btn-sm btn-green" onClick=${() => { st.formSeeded = false; st.showModal = true; renderApp(); }}>+ Send Message</button></div>
     ${'' /* kanban t_2ed95642 — the send path now really transmits through Telnyx, and this table paints the PROVIDER'S answer: queued/sent/delivered as Telnyx reports them, failed when it refuses. The Sent and Delivered columns show the provider's own timestamps and each stays "-" until the provider says so. */}
-    <p class="text-sm text-gray-500 mb-3">Messages are sent from your own number through the Telnyx number this account holds. A message shows <span class="font-medium">queued</span> when Telnyx accepts it, <span class="font-medium">sent</span> when the carrier takes it and <span class="font-medium">delivered</span> when the recipient's network confirms it. A message the provider refuses is recorded as <span class="font-medium">failed</span> and the reason is shown when you send it.</p>
+    <p class="text-sm text-gray-500 mb-3">Messages are sent from your own number through the Telnyx number this account holds. A message shows <span class="font-medium">queued</span> when Telnyx accepts it, <span class="font-medium">sent</span> when the carrier takes it and <span class="font-medium">delivered</span> when the recipient's network confirms it. A message the provider refuses is recorded as <span class="font-medium">failed</span> and the reason is shown when you send it. A number in the range reserved for fiction (an exchange of 555 with a subscriber part of 0100–0199, such as 813-555-0101) is recorded as <span class="font-medium">suppressed</span>: no carrier can deliver to it, so nothing was sent and nothing was charged.</p>
     <div class="card p-0 overflow-hidden">
       <table class="table"><thead><tr><th>To</th><th>Body</th><th>Status</th><th>Sent</th><th>Delivered</th></tr></thead>
         <tbody>${st.list.slice(0,100).map(m => html`<tr><td class="font-medium">${m.to_number||m.to||m.phone||'-'}</td><td class="text-gray-500">${m.body||m.content||'-'}</td><td><span class="badge ${messageBadge(m.status)}">${m.status||'pending'}</span></td><td class="text-gray-500 text-sm">${utcTime(m.sent_at)}</td><td class="text-gray-500 text-sm">${utcTime(m.delivered_at)}</td></tr>`)}
