@@ -1027,7 +1027,11 @@ const Portfolio = () => {
     st.busy = null; renderApp();
   };
 
-  const filtered = st.list.filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.slug||'').toLowerCase().includes(st.search.toLowerCase()) || (c.domain||'').toLowerCase().includes(st.search.toLowerCase()));
+  // cron 2026-11-22 — `load()` sets st.list = null when the request FAILS (a 403 for a non-super-admin
+  // operator, or any network error), and the next render called `.filter` on null: the Portfolio tab
+  // died with "Cannot read properties of null (reading 'filter')" and the error sentence below never
+  // painted. Null-safe so the screen shows the reason instead of throwing.
+  const filtered = (st.list || []).filter(c => !st.search || (c.name||'').toLowerCase().includes(st.search.toLowerCase()) || (c.slug||'').toLowerCase().includes(st.search.toLowerCase()) || (c.domain||'').toLowerCase().includes(st.search.toLowerCase()));
 
   return html`<div>
     <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">🏢 Portfolio Companies</h2><div class="flex gap-2 items-center"><input class="input" style="width:240px" placeholder="Search..." value=${st.search || ''} onInput=${e => { st.search = e.target.value; renderApp(); }} /><button class="btn btn-sm btn-outline" disabled=${st.busy === 'list'} onClick=${reload}>${st.busy === 'list' ? '...' : 'reload'}</button></div></div>
