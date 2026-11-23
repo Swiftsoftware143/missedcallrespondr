@@ -629,8 +629,11 @@ to charge anyone: it only decides <em>where the buyer is sent</em>.</p>
       itself and a second click changes nothing. (2) The operator's <em>Add address</em> box, for a request
       made by phone or an address watched bouncing. (3) The mail provider's own delivery events:
       <code>GET /api/v1/settings/do-not-mail/webhook</code> (operator only) answers the install's base URL
-      plus <code>/api/v1/webhooks/mailgun/events/&lt;token&gt;</code>. Paste it once into the provider's
-      webhook settings for the sending domain with permanent failures, complaints and unsubscribes ticked.
+      plus <code>/api/v1/webhooks/mailgun/events/&lt;token&gt;</code> and <code>last_event_at</code>, the date
+      of the most recent verified report. Nothing is pasted anywhere: the safety net is ours, the fleet
+      already points permanent failures, complaints and unsubscribes at the sending domain's receiver, and
+      the screen says <strong>Connected</strong> with that date or <strong>Connected, waiting for its first
+      report</strong> until one arrives. The address stays on screen for support only.
       That receiver is anonymous by design (the path token is the credential, compared in constant time) and
       records through the same writer the screen uses: <code>failed</code> with
       <code>severity: permanent</code> or <code>rejected</code> &rarr; <code>hard_bounce</code>,
