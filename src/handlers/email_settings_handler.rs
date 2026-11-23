@@ -361,15 +361,26 @@ pub async fn test_email_config(
 /// (reserved/harness recipient), `failed` = the transport refused it, `sent` = the provider
 /// accepted it. Platform-admin only, inherited from the `/api/v1/admin/*` prefix.
 ///
-/// THE `withheld` ROWS ARE NOT IN THE LIST (2026-10-23). Every fleet probe signup writes one, so the
-/// tail was 49/50 harness addresses when measured live on this app — the history could not answer the
+/// THE `withheld` ROWS ARE MOSTLY NOT IN THE LIST (2026-10-23). Every fleet probe signup writes one, so
+/// the tail was 49/50 harness addresses when measured live on this app — the history could not answer the
 /// question it exists for ("did this customer ever get their password?") because real attempts had been
 /// pushed out of the window by rows that were never sends. The tail now lists real attempts only, and
 /// `withheld_7d` counts the harness rows that are not shown, so nothing is silently dropped.
+///
+/// A DO-NOT-MAIL REFUSAL IS NOT A PROBE (2026-11-23). The exclusion above was written as
+/// `status <> 'withheld'`, which also hid the refusals the compliance gate produces for a REAL
+/// recipient: a customer who clicked the unsubscribe link, or one the operator watched hard-bounce
+/// (a hard bounce lands on the list by itself). Measured live before this change: those rows existed in
+/// `email_send_log` with detail `withheld: do-not-mail list: …`, were counted into `withheld_7d`, and
+/// the panel's own sentence told the operator the whole withheld bucket was reserved test addresses and
+/// "none of them were attempts" — i.e. the one refusal a person must act on was the one the screen
+/// explained away. The tail now INCLUDES them, `opt_out_7d` counts them separately, and `withheld_7d`
+/// keeps its old meaning (reserved/harness rows, which really are not attempts).
 pub async fn email_log(State(state): State<AppState>) -> Json<Value> {
     let rows = sqlx::query(
         "SELECT to_email, template, provider, status, detail, created_at \
-         FROM email_send_log WHERE status <> 'withheld' \
+         FROM email_send_log \
+         WHERE status <> 'withheld' OR detail LIKE 'withheld: do-not-mail list:%' \
          ORDER BY created_at DESC LIMIT 50",
     )
     .fetch_all(&state.pool)
@@ -377,7 +388,18 @@ pub async fn email_log(State(state): State<AppState>) -> Json<Value> {
     .unwrap_or_default();
     let withheld: i64 = sqlx::query_scalar(
         "SELECT COUNT(*)::bigint FROM email_send_log \
-          WHERE status = 'withheld' AND created_at > NOW() - INTERVAL '7 days'",
+          WHERE status = 'withheld' \
+            AND detail NOT LIKE 'withheld: do-not-mail list:%' \
+            AND created_at > NOW() - INTERVAL '7 days'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0);
+    let opt_out: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM email_send_log \
+          WHERE status = 'withheld' \
+            AND detail LIKE 'withheld: do-not-mail list:%' \
+            AND created_at > NOW() - INTERVAL '7 days'",
     )
     .fetch_one(&state.pool)
     .await
@@ -395,7 +417,7 @@ pub async fn email_log(State(state): State<AppState>) -> Json<Value> {
             })
         })
         .collect();
-    Json(json!({ "sends": sends, "withheld_7d": withheld }))
+    Json(json!({ "sends": sends, "withheld_7d": withheld, "opt_out_7d": opt_out }))
 }
 
 /// `POST /api/v1/admin/email-log/send-reset` — the operator's "this customer never got in" action.

@@ -3386,6 +3386,7 @@ const EmailProviderScreen = () => {
       const lg = await API.get('/admin/email-log');
       st.sends = (lg && lg.sends) || [];
       st.withheld7d = (lg && lg.withheld_7d) || 0;
+      st.optOut7d = (lg && lg.opt_out_7d) || 0;
     } catch (e) { st.sends = st.sends || []; }
     renderApp();
   };
@@ -3483,12 +3484,16 @@ const EmailProviderScreen = () => {
         <span class="font-semibold">Recent sends</span>
         <button class="btn btn-outline btn-sm" data-email-provider="refresh-history" disabled=${st.busy} onClick=${load}>Refresh</button>
       </div>
-      <p class="text-xs text-gray-400 mb-2">The last 50 real sends, newest first. The line above answers "what happened to the most recent one"; this list keeps the ones before it, so a credentials mail the provider refused at signup is still visible after a later send succeeds. Reserved test addresses (the fleet probes) are not listed here — ${st.withheld7d || 0} withheld in the last 7 days, and none of them were attempts. <b>failed</b> means the provider refused it, <b>sent</b> means the provider accepted it.</p>
+      <p class="text-xs text-gray-400 mb-2">The last 50 real sends, newest first. The line above answers "what happened to the most recent one"; this list keeps the ones before it, so a credentials mail the provider refused at signup is still visible after a later send succeeds. Reserved test addresses (the fleet probes) are not listed here — ${st.withheld7d || 0} of those withheld in the last 7 days, and none of them were attempts. A refusal for an address on the <b>do-not-mail list</b> IS listed, because that is a real person to act on${(st.optOut7d || 0) > 0 ? (' \\u2014 ' + st.optOut7d + ' in the last 7 days') : ' (none in the last 7 days)'}. <b>failed</b> means the provider refused it, <b>sent</b> means the provider accepted it, <b>not sent (do-not-mail)</b> means the compliance gate stopped it: that customer unsubscribed, or their address hard-bounced.</p>
       ${(st.sends && st.sends.length) ? html`<div class="overflow-x-auto"><table class="w-full text-sm" id="email-send-history-table">
         <thead><tr class="text-left text-xs text-gray-500"><th class="py-1 pr-3">When</th><th class="py-1 pr-3">To</th><th class="py-1 pr-3">What</th><th class="py-1 pr-3">Result</th><th class="py-1 pr-3">Detail</th><th class="py-1">Sign-in help</th></tr></thead>
         <tbody>${st.sends.map(s => {
-          const lbl = s.status === 'sent' ? '\u2705 sent' : (s.status === 'withheld' ? '\u26d4 withheld' : '\u274c failed');
-          const cls = s.status === 'sent' ? 'text-green-700' : 'text-red-600';
+          const isOptOut = s.status === 'withheld' && /do-not-mail list:/i.test(String(s.detail || ''));
+          const lbl = s.status === 'sent' ? '\u2705 sent'
+            : (s.status === 'withheld'
+                ? (isOptOut ? '\u26d4 not sent (do-not-mail)' : '\u26d4 withheld')
+                : '\u274c failed');
+          const cls = s.status === 'sent' ? 'text-green-700' : (isOptOut ? 'text-amber-700' : 'text-red-600');
           return html`<tr class="border-t border-gray-100" data-send-status=${s.status}>
             <td class="py-1 pr-3 text-xs text-gray-500 whitespace-nowrap">${utcStamp(s.at)}</td>
             <td class="py-1 pr-3 text-xs">${s.to || '-'}</td>
