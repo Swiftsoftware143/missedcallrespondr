@@ -178,6 +178,14 @@ html[data-theme="dark"] .btn.btn-green{background:#065f46!important}
 html[data-theme="dark"] .btn.btn-green:hover{background:#047857!important}
 html[data-theme="dark"] .btn.btn-red{background:#7f1d1d!important}
 html[data-theme="dark"] #close-account-arm{color:#fca5a5!important}
+/* kanban cron 2026-11-23 — measured on a phone (390x844): the Dashboard's 908px table spills out of
+   its 280px card, and every `.card.p-0.overflow-hidden` holding a table cuts off its right-hand
+   columns with no way to pan (the same defect measured on six admin screens). Below 900px a card that
+   holds a table scrolls sideways instead of hiding the overflow. Desktop is untouched. */
+@media (max-width:900px){
+  .card.p-0.overflow-hidden,
+  .card:has(>table){overflow-x:auto!important;overflow-y:hidden!important;-webkit-overflow-scrolling:touch}
+}
 </style>
 </head>
 <body>

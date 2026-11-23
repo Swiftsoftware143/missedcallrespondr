@@ -108,6 +108,16 @@ html[data-theme="dark"] .bg-amber-50{background:rgba(245,158,11,.12)}
 /* Day/Night switch */
 .theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
 .theme-toggle:hover{border-color:var(--accent)}
+/* kanban cron 2026-11-23 — measured on a phone (390x844) at admin.missedcallrespondr.com: six
+   screens (Portfolio, Response Rules, Leads, Follow-Ups, Campaigns, Tickets) render a <table> 412-604px
+   wide inside `.card.p-0.overflow-hidden` whose client width is 280px, so `overflow:hidden` cut off the
+   right-hand columns with no way to pan; the Dashboard's 908px table also spilled out of its card. Below
+   900px a card that holds a table scrolls sideways instead of hiding the overflow, so every column is
+   reachable on a phone. Desktop is untouched (the media query never applies above 900px). */
+@media (max-width:900px){
+  .card.p-0.overflow-hidden,
+  .card:has(>table){overflow-x:auto!important;overflow-y:hidden!important;-webkit-overflow-scrolling:touch}
+}
 </style>
 <link rel="stylesheet" href="/tw.css">
 </head>
