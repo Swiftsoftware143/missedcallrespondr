@@ -196,11 +196,17 @@ pub async fn invite_teammate(
     // `@example.invalid` probe address answered credentials_emailed:true). Same rule the branding
     // preview already follows: name WHICH reason instead of claiming a send.
     let reserved_domain = crate::security::probe_addr::harness_domain(&email);
+    // The OUTCOME, not `Ok`: the sender withholds for the do-not-mail list as well as for a
+    // reserved address, and both answer Ok. Reading Ok as "sent" is how the roster came to say
+    // "their password is on its way" for a message that was never attempted (2026-11-22).
+    let mut withheld_detail: Option<String> = None;
     let credentials_emailed = if reserved_domain.is_some() {
+        withheld_detail =
+            Some("that address is a reserved test address that can never receive mail".to_string());
         false
     } else {
         let vars = json!({ "name": name, "email": email, "password": password });
-        match crate::email::send_template_email(
+        match crate::email::send_template_email_outcome(
             &state.pool,
             claims.aid,
             &email,
@@ -209,7 +215,18 @@ pub async fn invite_teammate(
         )
         .await
         {
-            Ok(()) => true,
+            Ok(crate::email::SendOutcome::Queued) => true,
+            Ok(crate::email::SendOutcome::Withheld { code, reason }) => {
+                tracing::info!(
+                    "teammate {} ({}) was created, but the credentials mail was WITHHELD ({}): {}",
+                    user_id,
+                    email,
+                    code,
+                    reason
+                );
+                withheld_detail = Some(reason);
+                false
+            }
             Err(e) => {
                 tracing::error!(
                     "teammate {} ({}) was created in tenant {} but the CREDENTIALS EMAIL FAILED: {}",
@@ -253,6 +270,10 @@ pub async fn invite_teammate(
     } else if let Some(domain) = reserved_domain {
         format!(
             "Their login was created, but '{domain}' is a reserved test address, so no password email could be sent to it \u{2014} give them the password shown here."
+        )
+    } else if let Some(reason) = withheld_detail.as_deref() {
+        format!(
+            "Their login was created, but the mail was withheld \u{2014} {reason}. Give them the password shown here."
         )
     } else {
         "Their login was created, but the email carrying the password did not leave. Give them the password shown here, or press Send login again to try the mail once more.".to_string()

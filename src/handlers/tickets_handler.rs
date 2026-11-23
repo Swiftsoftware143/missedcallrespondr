@@ -769,7 +769,7 @@ pub(crate) async fn send_billing_request_receipt(
         // sends the mail it always sent.
         "payment_instructions": crate::billing_instructions::load(pool).await.unwrap_or_default(),
     });
-    match crate::email::send_template_email(
+    match crate::email::send_template_email_outcome(
         pool,
         tenant_id,
         &email,
@@ -778,7 +778,13 @@ pub(crate) async fn send_billing_request_receipt(
     )
     .await
     {
-        Ok(()) => true,
+        Ok(crate::email::SendOutcome::Queued) => true,
+        Ok(crate::email::SendOutcome::Withheld { code, reason }) => {
+            tracing::info!(
+                "plan-request receipt to {email} WITHHELD ({code}): {reason} — the request is filed, nothing was mailed"
+            );
+            false
+        }
         Err(e) => {
             tracing::warn!("plan-request receipt to {email} failed (tenant {tenant_id}): {e}");
             false
@@ -838,7 +844,7 @@ pub(crate) async fn send_support_request_receipt(
         "request_subject": subject,
         "dashboard_url": "https://app.missedcallrespondr.com/dashboard",
     });
-    match crate::email::send_template_email(
+    match crate::email::send_template_email_outcome(
         pool,
         tenant_id,
         &email,
@@ -847,7 +853,13 @@ pub(crate) async fn send_support_request_receipt(
     )
     .await
     {
-        Ok(()) => true,
+        Ok(crate::email::SendOutcome::Queued) => true,
+        Ok(crate::email::SendOutcome::Withheld { code, reason }) => {
+            tracing::info!(
+                "support receipt to {email} WITHHELD ({code}): {reason} — the request is filed, nothing was mailed"
+            );
+            false
+        }
         Err(e) => {
             tracing::warn!("support receipt to {email} failed (tenant {tenant_id}): {e}");
             false

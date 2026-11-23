@@ -3223,7 +3223,8 @@ const TenantsScreen = () => {
         // Withheld or refused: the console IS the delivery channel, so show it and say why.
         st.ok = true;
         st.msg = 'New password for ' + label + ': ' + r.handover_password
-          + ' — no email was sent (' + (r.withheld ? 'that address is a reserved test address'
+          + ' — no email was sent (' + (r.withheld
+            ? (r.withheld_detail || 'that address can never receive mail')
             : 'the mail provider refused it') + '), so give it to the customer directly.';
       } else {
         st.ok = true;
@@ -3262,7 +3263,8 @@ const TenantsScreen = () => {
       if (r && r.handover_password) {
         st.ok = true;
         st.msg = 'Created the login for ' + label + ' — password: ' + r.handover_password
-          + ' (no email left the system: ' + (r.withheld ? 'that address is a reserved test address'
+          + ' (no email left the system: ' + (r.withheld
+            ? (r.withheld_detail || 'that address can never receive mail')
             : 'the mail provider refused it') + '), so give it to the owner directly.';
       } else {
         st.ok = true;

@@ -462,30 +462,34 @@ pub async fn send_reset_for_log(
         .execute(&state.pool)
         .await?;
 
-    // Read BEFORE the attempt: `send_email_request` reports a deliberately-withheld message as a
+    // The OUTCOME, not `Ok`: `send_email_request` reports a deliberately-withheld message as a
     // non-send, and the panel must not tell the operator "on its way" for mail that never left.
-    let undeliverable = crate::security::probe_addr::harness_domain(&to).is_some();
+    // The sender withholds for a reserved address AND for an address on the do-not-mail list, so
+    // the reason is read back from the send itself rather than guessed from the address (2026-11-22).
     let vars = json!({
         "name": if name.trim().is_empty() { "there" } else { name.trim() },
         "token": token,
         "app_url": "https://app.missedcallrespondr.com",
     });
-    let attempt =
-        crate::email::send_template_email(&state.pool, tenant_id, &to, "password_reset", &vars)
-            .await;
+    let attempt = crate::email::send_template_email_outcome(
+        &state.pool,
+        tenant_id,
+        &to,
+        "password_reset",
+        &vars,
+    )
+    .await;
 
-    if undeliverable {
-        return Ok(Json(json!({
+    match attempt {
+        Ok(crate::email::SendOutcome::Withheld { code, reason }) => Ok(Json(json!({
             "sent": false,
             "withheld": true,
-            "reason": "reserved_address",
+            "reason": code,
             "message": format!(
-                "{to} is a reserved test address that can never receive mail, so nothing was sent. A fresh reset link was still issued for it."
+                "{to} cannot receive this mail ({reason}), so nothing was sent. A fresh reset link was still issued for it."
             ),
-        })));
-    }
-    match attempt {
-        Ok(()) => Ok(Json(json!({
+        }))),
+        Ok(crate::email::SendOutcome::Queued) => Ok(Json(json!({
             "sent": true,
             "message": format!("A fresh reset link is on its way to {to}."),
         }))),

@@ -158,13 +158,13 @@ fn apply_branding(
 
 /// Send a templated email using database-stored templates.
 /// Falls back to old inline methods when no template found.
-pub async fn send_template_email(
+pub async fn send_template_email_outcome(
     pool: &PgPool,
     tenant_id: Uuid,
     to: &str,
     template_type: &str,
     vars: &serde_json::Value,
-) -> Result<(), String> {
+) -> Result<SendOutcome, String> {
     let app_name = "MissedCall Respondr";
     let app_url = "https://app.missedcallrespondr.com";
 
@@ -226,6 +226,20 @@ pub async fn send_template_email(
             send_inline(pool, tenant_id, to, template_type, &vars, app_name, app_url).await
         }
     }
+}
+
+/// The old contract: "nothing went wrong". A thin wrapper over
+/// [`send_template_email_outcome`], so every existing caller is behaviourally unchanged.
+pub async fn send_template_email(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    to: &str,
+    template_type: &str,
+    vars: &serde_json::Value,
+) -> Result<(), String> {
+    send_template_email_outcome(pool, tenant_id, to, template_type, vars)
+        .await
+        .map(|_| ())
 }
 
 /// Fetch the tenant's template (or the global default) for `template_type`.
@@ -309,7 +323,7 @@ async fn send_inline(
     vars: &serde_json::Value,
     app_name: &str,
     app_url: &str,
-) -> Result<(), String> {
+) -> Result<SendOutcome, String> {
     let name = vars.get("name").and_then(|v| v.as_str()).unwrap_or("there");
     let email = vars.get("email").and_then(|v| v.as_str()).unwrap_or("");
     let password = vars.get("password").and_then(|v| v.as_str()).unwrap_or("");
@@ -1387,6 +1401,22 @@ pub async fn record_last_send(
 /// `400 {"message":"from parameter is missing"}` — the account was created and its welcome mail
 /// could never be sent (kanban t_6d575da6). `kind` names what the message IS ("welcome",
 /// "password_reset", …) so a failure is attributable on the admin surface.
+/// Whether a transactional mail was actually handed to the provider (2026-11-22).
+///
+/// `Ok(())` alone cannot answer this. The sender deliberately WITHHOLDS a message for an address on
+/// the do-not-mail list and for a reserved/harness address, and reports both as "nothing went
+/// wrong" — so a caller that reads `Ok` as "sent" tells a person a mail left the system when it
+/// never did. Same defect class fixed on ADASwift (t_e10ff64d) and FunnelSwift (e90a01c): this app
+/// now carries the same outcome, so an operator or customer screen can only promise a message that
+/// was really queued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// Handed to the provider. The only arm that may be reported to a person as "sent".
+    Queued,
+    /// Deliberately not attempted, with a machine-readable code and the gate's own reason.
+    Withheld { code: &'static str, reason: String },
+}
+
 async fn send_email_request(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -1395,7 +1425,7 @@ async fn send_email_request(
     subject: &str,
     text_body: &str,
     html_body: &str,
-) -> Result<(), String> {
+) -> Result<SendOutcome, String> {
     // THE DO-NOT-MAIL GATE (2026-11-21). An address this workspace has been told to stop mailing —
     // an opt-out clicked in a message, or one the operator watched hard-bounce — is refused HERE, at
     // the one choke point both the template arm and the inline fallbacks pass through, so no send
@@ -1422,7 +1452,10 @@ async fn send_email_request(
             &Err(format!("withheld: do-not-mail list: {reason}")),
         )
         .await;
-        return Ok(());
+        return Ok(SendOutcome::Withheld {
+            code: "do_not_mail",
+            reason: format!("the do-not-mail list: {reason}"),
+        });
     }
     // Fleet harness addresses never reach a real relay (parity with FunnelSwift, kanban t_36b55ed2).
     // A probe that signs up with a fleet-dev domain (`swiftsoftware.dev/.net`) is created normally but
@@ -1454,7 +1487,10 @@ async fn send_email_request(
             )),
         )
         .await;
-        return Ok(());
+        return Ok(SendOutcome::Withheld {
+            code: "suppressed",
+            reason: format!("'{domain}' is a reserved test address that can never receive mail"),
+        });
     }
     // The account's branding opens both parts of the message (kanban t_feab8aff). An account with
     // NO branding of its own gets this app's own wordmark and name instead of an empty space
@@ -1512,7 +1548,7 @@ async fn send_email_request(
     }
 
     record_last_send(pool, kind, to, &cfg.provider, subject, &outcome).await;
-    outcome.map(|_| ())
+    outcome.map(|_| SendOutcome::Queued)
 }
 
 #[derive(Debug, sqlx::FromRow)]

@@ -1027,37 +1027,42 @@ pub async fn resend_owner_credentials(
     .execute(&state.pool)
     .await?;
 
-    // A reserved/harness address is WITHHELD at the sender (it answers Ok without queueing
-    // anything), so it counts as NOT delivered — otherwise the console would tell the operator to
-    // wait for a mail that was deliberately never sent. Same predicate `auth::register` uses.
-    let withheld = crate::security::probe_addr::harness_domain(&email).is_some();
+    // A message the sender WITHHOLDS answers Ok without queueing anything, so it counts as NOT
+    // delivered — otherwise the console would tell the operator to wait for a mail that was
+    // deliberately never sent. The OUTCOME is read, never `Ok` alone (2026-11-22): the do-not-mail
+    // arm is the one an operator hits after a customer's address kept bouncing.
+    let mut withheld_code: Option<&'static str> = None;
+    let mut withheld_detail: Option<String> = None;
     let mut emailed = false;
-    if !withheld {
-        let vars = json!({
-            "name": name,
-            "email": email,
-            "password": password,
-        });
-        match crate::email::send_template_email(
-            &state.pool,
-            tenant_id,
-            &email,
-            "welcome_credentials",
-            &vars,
-        )
-        .await
-        {
-            Ok(()) => emailed = true,
-            Err(e) => {
-                tracing::error!(
-                    tenant = %tenant_id,
-                    user = %user_id,
-                    "operator re-issued a password but the mail failed: {}",
-                    e
-                );
-            }
+    let vars = json!({
+        "name": name,
+        "email": email,
+        "password": password,
+    });
+    match crate::email::send_template_email_outcome(
+        &state.pool,
+        tenant_id,
+        &email,
+        "welcome_credentials",
+        &vars,
+    )
+    .await
+    {
+        Ok(crate::email::SendOutcome::Queued) => emailed = true,
+        Ok(crate::email::SendOutcome::Withheld { code, reason }) => {
+            withheld_code = Some(code);
+            withheld_detail = Some(reason);
+        }
+        Err(e) => {
+            tracing::error!(
+                tenant = %tenant_id,
+                user = %user_id,
+                "operator re-issued a password but the mail failed: {}",
+                e
+            );
         }
     }
+    let withheld = withheld_code.is_some();
 
     tracing::info!(
         tenant = %tenant_id,
@@ -1072,8 +1077,12 @@ pub async fn resend_owner_credentials(
         "email": email,
         "credentials_emailed": emailed,
         // Published so the console can say WHY it is handing over a password instead of claiming
-        // "check your email" for a message that was deliberately never sent.
+        // "check your email" for a message that was deliberately never sent. The code and detail
+        // name the gate that stopped it — a reserved test address, or the do-not-mail list — so the
+        // panel never blames the wrong one (2026-11-22).
         "withheld": withheld,
+        "withheld_code": withheld_code,
+        "withheld_detail": withheld_detail,
         "handover_password": if emailed { Value::Null } else { json!(password) },
     })))
 }
