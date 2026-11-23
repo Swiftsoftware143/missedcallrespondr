@@ -611,6 +611,43 @@ to charge anyone: it only decides <em>where the buyer is sent</em>.</p>
     <li><code>POST /api/v1/webhooks/paypal</code> is <strong>signature-verified before anything is written or dispatched</strong> (kanban t_5cf44e1b). The four <code>paypal-transmission-*</code> headers are required and the signature is checked against PayPal's <code>verify-webhook-signature</code> API, authenticated with the REST <code>client_id:client_secret</code> and verified against <code>PAYPAL_WEBHOOK_ID</code> (or the <code>webhook_secret</code> of the active <code>paypal</code> provider row — no redeploy needed). Fail-closed replies, in order: <code>401 missing_paypal_signature_headers</code>, <code>503 paypal_not_configured</code> (no webhook id or no credential: PayPal is <strong>not</strong> called and nothing is written), <code>401 paypal_verification_api_error</code> / <code>401 paypal_verification_unreachable</code> (the verdict itself could not be obtained), <code>401 signature_verification_failed</code> (a real FAILURE verdict). Only a verified event reaches <code>payment_webhook_events</code> and fulfilment.</li>
     <li><strong>How a customer pays you</strong> (kanban t_03c38b20): the same screen carries a box with that heading, and it exists because of what happens when <em>no</em> card provider is connected. With no provider row the till cannot take a card, so a customer's press on a paid plan is filed as a plan request a person works by hand — which means they are ready to send you money, and until this box existed the product told them a person would reply and never told them <em>where</em>. Write how you take payment in your own words — a bank transfer with the account details, an invoice, a link to another rail — and press <strong>Save</strong>. The same words then appear on the customer's <em>Plan &amp; Billing</em> screen beside the plan ladder (including after a reload) and are printed in the receipt email a filed plan request sends, under the heading <em>How to pay now</em>. They are never invented: an empty box means every surface behaves exactly as it did before, and clearing the box puts it back. An ordinary help request never carries them, so a customer who wrote in about a password does not receive bank details. Backed by <code>GET|PUT /api/v1/admin/billing-settings</code> (platform admins only — a workspace token is refused 403), stored platform-wide in <code>admin_settings</code> key <code>billing</code>, and published to the customer through the <code>payment_instructions</code> field on <code>GET /api/v1/checkout/status</code>.</li>
   </ul>
+  <h2 id="do-not-mail">Do not mail &mdash; the list the send path honours</h2>
+  <ul>
+    <li><strong>The screen</strong> (admin console &rarr; <em>Email Branding</em>, the <em>Do-not-mail list</em>
+      card) is the operator's door onto <code>email_suppressions</code>:
+      <code>GET|POST /api/v1/settings/suppressions</code>,
+      <code>DELETE /api/v1/settings/suppressions/:id</code> and
+      <code>GET /api/v1/settings/suppressions.csv</code>, all scoped to the signed-in workspace. The table
+      is unique on <code>(tenant_id, address, mail_class)</code>, so one workspace's opt-out never silences
+      another workspace's mail to the same person.</li>
+    <li><strong>Two classes.</strong> <em>Notices only</em> (<code>notification</code>) stops the optional
+      notices; <em>Everything</em> (<code>all</code>) also stops receipts and password mail. A transactional
+      send is blocked only by <code>all</code> while a notice is blocked by either, so a click on an
+      unsubscribe link can never lock a customer out of their own password reset.</li>
+    <li><strong>How entries arrive.</strong> (1) The <strong>Unsubscribe</strong> link in every notice: the
+      signed token names the workspace, the address and the class, the opt-out is recorded on the click
+      itself and a second click changes nothing. (2) The operator's <em>Add address</em> box, for a request
+      made by phone or an address watched bouncing. (3) The mail provider's own delivery events:
+      <code>GET /api/v1/settings/do-not-mail/webhook</code> (operator only) answers the install's base URL
+      plus <code>/api/v1/webhooks/mailgun/events/&lt;token&gt;</code>. Paste it once into the provider's
+      webhook settings for the sending domain with permanent failures, complaints and unsubscribes ticked.
+      That receiver is anonymous by design (the path token is the credential, compared in constant time) and
+      records through the same writer the screen uses: <code>failed</code> with
+      <code>severity: permanent</code> or <code>rejected</code> &rarr; <code>hard_bounce</code>,
+      <code>complained</code> &rarr; <code>complaint</code>, <code>unsubscribed</code> &rarr;
+      <code>unsubscribed</code>, all three class <code>all</code>. A temporary failure suppresses nothing
+      (a full mailbox is not a dead one) and any other event is acknowledged and ignored. Both body shapes
+      are accepted &mdash; the webhook POST (<code>{"event-data": {...}}</code>), a bare events-API item and a
+      JSON array &mdash; so an event can be replayed from a shell.</li>
+    <li><strong>What a blocked send does.</strong> The gate sits inside the one send path every message
+      passes through, before anything is queued: the message is withheld, the mail log lists it as
+      <em>withheld</em> with the reason, and nothing reaches the provider &mdash; so a blocked address
+      produces no bounce. The gate fails open by design: a read error is logged and the message is sent,
+      because a database problem must never become a silent mailing freeze.</li>
+    <li><strong>Undoing one.</strong> <em>Allow again</em> deletes the row. The provider's own events can
+      add it back the next time that address bounces or is complained about, which is the honest answer for
+      a mailbox that is really gone; a mistaken address that still exists stays off the list.</li>
+  </ul>
   <h2 id="deployment">Deployment</h2>
   <p>The binary is IMAGE-BAKED (no bind mount), so <code>systemctl restart</code> / <code>docker restart</code> re-runs the OLD binary and is <strong>not</strong> a deploy:</p>
   <pre><code>the MissedCall Respondr deploy script        # rebuilds image, recreates the container,
