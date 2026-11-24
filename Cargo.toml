@@ -34,6 +34,11 @@ hmac = "0.12"
 # The private inbox's SMTP provider arm (customer's own SMTP mailbox, ported from ADASwift).
 lettre = { version = "0.11.22", features = ["tokio1", "tokio1-native-tls"] }
 base64 = "0.22"
+# This app's OWN MCP door (kanban t_9e143c06): the fleet's shared skeleton, consumed at a PINNED
+# REV and never edited here. One crate holds the JSON-RPC transport, the credential-resolver
+# contract, the tenancy/404 rule, the audit line and the tool registry; the app supplies only its
+# resolver and its tools (src/mcp_door.rs).
+mcp-door = { git = "https://github.com/Swiftsoftware143/mcp-door", rev = "15aef65e324c804dc1f3cc6ebe112c0e537aaede" }
 
 [dev-dependencies]
 # Tests only: `ServiceExt::oneshot` drives a real Router through the middleware stack so the

@@ -23,6 +23,7 @@ mod handlers;
 mod image_store;
 mod integration_schema;
 mod login_throttle;
+mod mcp_door;
 mod models;
 // Attribution for a workspace a test harness mints through the public signup
 // (`X-Swift-Harness`, kanban t_4a744754) — see `probe_harness`.
@@ -232,6 +233,19 @@ async fn main() -> anyhow::Result<()> {
     // locked out for days. First tick fires at boot, so a deploy reports the existing backlog.
     crate::credential_watch::spawn_credential_watch(pool.clone());
 
+    // This app's OWN MCP door (kanban t_9e143c06): the fleet skeleton crate pinned in Cargo.toml,
+    // this app's api_keys resolver, nine read tools. Built HERE so a registry or config problem is a
+    // startup failure — a door that boots with a half-annotated tool list answers 401-shaped
+    // nonsense forever and nobody notices. Its audit line goes to a host-mounted file (see
+    // deploy context's docker-compose.yml), 0600, created by the crate.
+    let mcp_door_audit = crate::mcp_door::audit_path_from_env();
+    let mcp_door = std::sync::Arc::new(crate::mcp_door::build(pool.clone(), &mcp_door_audit)?);
+    tracing::info!(
+        "mcp door mounted at /mcp ({} tools, audit: {})",
+        mcp_door.registry().len(),
+        mcp_door_audit
+    );
+
     let app_state = state::AppState {
         pool,
         config: cfg.clone(),
@@ -241,7 +255,7 @@ async fn main() -> anyhow::Result<()> {
         login_throttle: crate::login_throttle::LoginThrottle::new(),
     };
 
-    let app = routes::create_router(app_state);
+    let app = routes::create_router(app_state, mcp_door);
     let addr: SocketAddr = format!("{}:{}", cfg.server_host, cfg.server_port).parse()?;
     tracing::info!("MissedCall Respondr starting on {}", addr);
 

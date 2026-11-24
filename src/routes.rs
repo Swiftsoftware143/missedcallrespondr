@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     middleware,
     routing::{delete, get, post, put},
@@ -17,7 +19,7 @@ use crate::{
     state::AppState,
 };
 
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router(state: AppState, mcp: Arc<mcp_door::Door>) -> Router {
     // Body-read deadline (kanban t_7f688018): how long a request body may take to ARRIVE before the
     // request is answered 408 and its task, connection and partially-read body buffer are released.
     // The value is the one config.rs clamped and main.rs printed at boot — never re-derived here.
@@ -1097,6 +1099,16 @@ pub fn create_router(state: AppState) -> Router {
     // here. See `crate::auth::route_policy` for the committed allowlist it reads.
     let boundary_state = state.clone();
     Router::new()
+        // ── this app's OWN MCP door (kanban t_9e143c06) ──────────────────────────────────────────
+        // Its own credential boundary: the bearer is an `mcr_` key, resolved against the live
+        // `api_keys` row on EVERY request (hash, unrevoked, live owner, active workspace). It is
+        // mounted with `route_service` because the door is a finished Router from the pinned
+        // `mcp-door` crate, and it sits at `/mcp` — outside the `/api/v1` tree this app's
+        // `require_credential` governs, exactly like the provider receivers, so a machine client
+        // gets the door's own protocol 401 (`-32001`) instead of the boundary's body. No app
+        // handler is reachable from here: every tool reads one whitelisted table scoped by the
+        // token's workspace, and the registry contains no write tool.
+        .route_service("/mcp", Arc::clone(&mcp).router())
         .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)

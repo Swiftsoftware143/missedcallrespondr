@@ -5,9 +5,17 @@
 //!
 //! # The rule
 //!
-//! **A mounted route is PRIVATE unless it appears in one of the two lists below.**
-//! [`crate::auth::boundary::require_credential`] is mounted once, on the merged router, and reads
-//! only this module. Nothing else decides whether a route may be reached anonymously.
+//! **A mounted route inside the `/api/v1` tree is PRIVATE unless it appears in one of the two lists
+//! below.** [`crate::auth::boundary::require_credential`] is mounted once, on the merged router, and
+//! reads only this module. Nothing else decides whether an `/api/v1` route may be reached
+//! anonymously.
+//!
+//! Two mounts are deliberately OUTSIDE that tree and are therefore outside this module's reach:
+//! the static surfaces nginx serves, and this app's own MCP door at `POST /mcp` (kanban
+//! t_9e143c06). The door is not an exception to the rule, it is a different boundary: it answers a
+//! machine protocol and checks this app's `api_keys` row on EVERY request, so it must answer its own
+//! `-32001` refusal rather than this module's 401 body. The census test counts its mount
+//! (`service_literals`) so it cannot move or multiply unnoticed.
 //!
 //! # The census (measured 2026-10-06 from `src/routes.rs`, then verified live with an anonymous
 //! probe against 127.0.0.1:8088; re-measured 2026-10-16 after the payment-key check route
@@ -337,6 +345,31 @@ mod tests {
         let mut i = 0usize;
         while let Some(pos) = ROUTES_SRC[i..].find(".nest(") {
             let mut j = i + pos + ".nest(".len();
+            while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'"' {
+                let start = j + 1;
+                let mut k = start;
+                while k < bytes.len() && bytes[k] != b'"' {
+                    k += 1;
+                }
+                out.push(&ROUTES_SRC[start..k]);
+            }
+            i = j;
+        }
+        out
+    }
+
+    /// Every `.route_service("<literal>", ..)` path in the routing file — a finished Router mounted
+    /// as a service (the MCP door, kanban t_9e143c06). Its own `.route(..)` calls live in the
+    /// pinned `mcp-door` crate, so this scan is the only place the mount is visible.
+    fn service_literals() -> Vec<&'static str> {
+        let bytes = ROUTES_SRC.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        while let Some(pos) = ROUTES_SRC[i..].find(".route_service(") {
+            let mut j = i + pos + ".route_service(".len();
             while j < bytes.len() && (bytes[j] as char).is_whitespace() {
                 j += 1;
             }
@@ -715,6 +748,14 @@ mod tests {
         uniq.sort_unstable();
         uniq.dedup();
         assert_eq!(uniq.len(), 161, "distinct mounted paths");
+        // The MCP door is a Router mounted as a SERVICE, so it never appears in the `.route(` scan
+        // above. Counted here instead, so a second door (or a moved one) cannot appear unnoticed.
+        // Added 2026-11-24 (kanban t_9e143c06): `/mcp` is the app's own read-only MCP door.
+        assert_eq!(
+            service_literals(),
+            vec!["/mcp"],
+            "mounted .route_service entries (the app's own MCP door)"
+        );
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
@@ -799,13 +840,18 @@ mod tests {
         );
     }
 
-    /// This app ships NO MCP/API-key tool registry in its tree: the MCP surface the console links
-    /// is the FLEET service at https://hooks.swiftsoftware.net/mcp, not a module here (the one thing
-    /// named "registry", src/module_registry.rs, resolves PLAN FEATURES, not tools). The guard is
-    /// therefore structural: the source must declare no tool list that could carry a
-    /// close/erase/delete_account action, and no route mounts an MCP tool surface. If a tool
-    /// registry is ever added, it must be pinned HERE (the CoreSwift shape: a non-trivial list whose
-    /// names carry none of these fragments).
+    /// This app ships ONE MCP surface and it cannot erase: `POST /mcp` is served by `src/mcp_door.rs`
+    /// on the pinned `mcp-door` crate, whose registry holds NINE read tools and no write tool at all
+    /// (kanban t_9e143c06). The one thing named "registry" in this app's tree,
+    /// `src/module_registry.rs`, still resolves PLAN FEATURES, not tools. The guard is structural:
+    /// the door's own source must name none of these actions and must register no write or
+    /// destructive tool, the routing file must mount exactly one door, and `/mcp` must stay outside
+    /// the `/api/v1` tree the credential boundary governs (it is its own boundary — see
+    /// `the_mcp_door_is_mounted_outside_the_api_boundary`).
+    ///
+    /// Before this card the guard asserted `src/routes.rs` contained no "mcp" at all, because the
+    /// only MCP surface was the fleet service on another host. That assertion would now fail by
+    /// design, so it is replaced by the tighter one below rather than deleted.
     #[test]
     fn no_fleet_tool_can_erase() {
         const FORBIDDEN: [&str; 4] = [
@@ -819,15 +865,51 @@ mod tests {
             !registry.contains("TOOL_NAMES") && !registry.contains("list_tools"),
             "module_registry.rs must stay a plan-feature resolver, not an MCP tool list"
         );
-        assert!(
-            !ROUTES_SRC.to_ascii_lowercase().contains("mcp"),
-            "src/routes.rs must not mount an MCP tool surface"
-        );
+        let door = include_str!("../mcp_door.rs");
         for fragment in FORBIDDEN {
             assert!(
                 !registry.contains(fragment),
                 "no tool may be named {fragment:?}"
             );
+            assert!(
+                !door.contains(fragment),
+                "the MCP door must not name {fragment:?}"
+            );
         }
+        // Read-only by construction: the door registers no write and no destructive tool.
+        assert!(
+            !door.contains("ToolSpec::write") && !door.contains("ToolSpec::destructive"),
+            "the MCP door must register read tools only"
+        );
+        // Exactly ONE door is mounted, at /mcp, and it is not an /api/v1 route.
+        assert_eq!(
+            ROUTES_SRC.matches("\"/mcp\"").count(),
+            1,
+            "src/routes.rs must mount exactly one MCP door"
+        );
+        assert!(
+            !is_guarded_path("/mcp"),
+            "the door is its own credential boundary"
+        );
+    }
+
+    /// The MCP door answers its own protocol refusal, so it must not be an allowlist entry: an
+    /// `/api/v1`-scoped boundary would answer a machine client with the boundary's body instead of
+    /// the door's JSON-RPC `-32001`. This test pins that shape so a future move to `/api/v1/mcp`
+    /// cannot silently hand the door's 401 to the boundary.
+    #[test]
+    fn the_mcp_door_is_mounted_outside_the_api_boundary() {
+        assert!(
+            service_literals().contains(&"/mcp"),
+            "the door is not mounted"
+        );
+        assert!(
+            !is_public_route("/mcp") && !is_internal_route("/mcp"),
+            "/mcp must not be an allowlist entry: it is outside the guarded tree by construction"
+        );
+        assert!(
+            !super::PUBLIC_ROUTES.iter().any(|e| e.contains("mcp")),
+            "no /api/v1 router may answer the MCP protocol"
+        );
     }
 }
