@@ -30,10 +30,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::Router;
+
 use mcp_door::{
-    hash_token, AuditSink, AuthError, Caller, CredentialResolver, Door, Registry, Role, ToolError,
-    ToolSpec,
+    hash_token, AuthError, Caller, CredentialResolver, Door, Registry, Role, ToolError, ToolSpec,
 };
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
@@ -745,40 +744,22 @@ pub fn build(pool: PgPool, audit_path: &str) -> Result<Door, mcp_door::transport
     .build()
 }
 
-/// Expose the door as an axum service to mount at `POST /mcp`.
-pub fn router(door: Arc<Door>) -> Router {
-    door.router()
-}
-
 /// The audit path this deployment writes to (env-overridable for tests).
 pub fn audit_path_from_env() -> String {
     std::env::var("MCP_AUDIT_PATH").unwrap_or_else(|_| "/app/data/mcp-audit.log".to_string())
 }
 
-/// Use a door that discards audit lines — tests only.
-pub fn null_audit() -> Arc<dyn AuditSink> {
-    Arc::new(mcp_door::NullAudit)
-}
-
-/// Readable without a database: the registry shape and the SQL text, for the guard tests.
-pub fn tool_names() -> Vec<&'static str> {
-    const NAMES: [&str; 9] = [
-        "list_numbers",
-        "list_calls",
-        "list_messages",
-        "list_followups",
-        "list_contacts",
-        "list_campaigns",
-        "list_tickets",
-        "list_rules",
-        "list_suppressions",
-    ];
-    NAMES.to_vec()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A registry built without touching a database: `connect_lazy` opens no socket (it still needs
+    /// a Tokio context, which the async test provides), and the registry only captures the handle.
+    fn lazy_registry() -> Registry {
+        let pool = sqlx::PgPool::connect_lazy("postgres://probe@127.0.0.1:1/probe")
+            .expect("a lazy pool never dials");
+        registry(pool)
+    }
 
     /// Every statement must carry the tenant filter as a LITERAL. A tool whose SQL lost the scope
     /// clause would read every workspace in the app; this test is the structural half of the
@@ -810,18 +791,28 @@ mod tests {
     }
 
     /// The nine tools the inventory names, all under this app's slug, and nothing else.
-    #[test]
-    fn the_registry_is_the_inventoried_nine() {
-        let names: Vec<String> = tool_names()
-            .into_iter()
-            .map(|n| format!("{TOOL_PREFIX}{n}"))
-            .collect();
-        assert_eq!(names.len(), 9);
+    #[tokio::test]
+    async fn the_registry_is_the_inventoried_nine() {
+        // The REAL registry, not a parallel list: a tool added or renamed without an inventory
+        // decision fails here.
+        let mut names = lazy_registry().names();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "missedcall_list_calls",
+                "missedcall_list_campaigns",
+                "missedcall_list_contacts",
+                "missedcall_list_followups",
+                "missedcall_list_messages",
+                "missedcall_list_numbers",
+                "missedcall_list_rules",
+                "missedcall_list_suppressions",
+                "missedcall_list_tickets",
+            ]
+        );
         for name in &names {
-            assert!(
-                name.starts_with("missedcall_"),
-                "{name} carries the app slug"
-            );
+            assert!(name.starts_with(TOOL_PREFIX), "{name} carries the app slug");
         }
         for forbidden in [
             "delete", "erase", "close", "purge", "send", "update", "create",
@@ -830,6 +821,16 @@ mod tests {
                 !names.iter().any(|n| n.contains(forbidden)),
                 "no tool name may carry {forbidden:?}"
             );
+        }
+        // Every tool in this door is a read tool: a write or destructive spec would change the
+        // annotation a host sees and would break the "nothing here can change a record" promise.
+        for name in &names {
+            let spec = lazy_registry()
+                .get(name)
+                .map(|t| t.spec())
+                .expect("the registry just listed it");
+            assert!(spec.annotations.read_only, "{name} is not read-only");
+            assert!(!spec.annotations.destructive, "{name} is destructive");
         }
     }
 
