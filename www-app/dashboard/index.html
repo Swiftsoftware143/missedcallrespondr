@@ -314,7 +314,10 @@ const API = (() => {
   };
   const send = (p, opts) => {
     const carried = !!token;
-    return fetch(base + p, opts).then((r) => (r.status === 401 && carried ? sessionEnded() : handle(r)));
+    // A successful erase DELETES the session, so any in-flight request 401s at once and the shared
+    // 401 arm below would clobber the "deleted" landing with the sign-in shell. `window.__dzDone`
+    // (set before the erase fetch, kept on success, reset in its catch) keeps that arm quiet.
+    return fetch(base + p, opts).then((r) => (r.status === 401 && carried && !window.__dzDone ? sessionEnded() : handle(r)));
   };
   const get = (p) => send(p, { headers: headers() });
   const post = (p, b) => send(p, { method: 'POST', headers: headers(), body: JSON.stringify(b) });
@@ -816,7 +819,11 @@ const Profile = () => {
     soMsg: null, soErr: null, soBusy: false,
     // The exit door (2026-11-13): whether the form is revealed, the typed password and the word, and
     // its own sentence, so a refusal is never mistaken for a failed profile save.
-    caArm: false, caPw: '', caWord: '', caMsg: null, caErr: null, caBusy: false
+    caArm: false, caPw: '', caWord: '', caMsg: null, caErr: null, caBusy: false,
+    // The ERASE door (2026-11-24): the irreversible half, same reveal-then-confirm shape, its own
+    // busy flag and its own sentence. The confirm button stays disabled until BOTH the password and
+    // the typed word are non-empty (presence only — the server re-checks both).
+    dzArm: false, dzPw: '', dzWord: '', dzMsg: null, dzErr: null, dzBusy: false
   });
   // Seed the drafts ONCE from the account row (never on every render — that is what wiped typed
   // values in the sibling consoles).
@@ -1016,6 +1023,32 @@ const Profile = () => {
       renderApp();
     }
   };
+  // ── DELETE ACCOUNT AND DATA (2026-11-24, fleet standard §7) ──────────────────────────────────
+  // The IRREVERSIBLE other half of close. The client validates PRESENCE only (password + the typed
+  // word); the server re-checks both. `window.__dzDone` is set BEFORE the fetch so the shared 401
+  // arm stays quiet once the erase succeeds (the session is deleted server-side, so any in-flight
+  // request 401s); it stays set on success and is reset in the catch so a REAL refusal (wrong
+  // password) still ends the session. No timer redirect and no `<meta http-equiv=refresh>` — the
+  // customer must be able to READ the landing.
+  const deleteAccount = async () => {
+    st.dzMsg = null; st.dzErr = null;
+    if (!st.dzPw) { st.dzErr = 'Enter your password.'; renderApp(); return; }
+    if (!(st.dzWord || '').trim()) { st.dzErr = 'Type DELETE in the box to confirm.'; renderApp(); return; }
+    st.dzBusy = true; renderApp();
+    window.__dzDone = true;
+    try {
+      const d = await API.post('/auth/erase-data', { password: st.dzPw, confirm: (st.dzWord || '').trim() });
+      window.__dzAt = (d && d.erased_at) || null;
+      // Drop the dead token; `__dzDone` stays set so the landing below is what App renders.
+      API.logout();
+      renderApp();
+    } catch (e) {
+      window.__dzDone = false;
+      st.dzBusy = false;
+      st.dzErr = (e && e.message) || 'Could not delete the account.';
+      renderApp();
+    }
+  };
 
   const pic = pictureUrl();
   return html`<div>
@@ -1104,23 +1137,50 @@ const Profile = () => {
         <button id="download-my-data" class="btn btn-sm" disabled=${st.dlBusy} onClick=${downloadMyData}>Download my data</button>
       </div>
     </div>
-    <!-- CLOSE MY ACCOUNT (2026-11-13). The exit door: a STATE, never a delete — the workspace, its
-         calls and its contacts stay on record for the operator. Two deliberate steps: the first only
-         reveals the form; the red button is last on the screen on purpose. -->
-    <div class="card" id="close-account-card">
-      <h3 class="font-semibold mb-3">🚪 Close my account</h3>
-      <div class="space-y-3" style="max-width:520px">
-        <p class="text-sm text-gray-600">This ends your sign-in and every API key on the workspace, and you will not be able to sign in again. Your calls, contacts, follow-ups, templates and settings are kept for our records and are not deleted, so support can reopen the account if you close it by mistake.</p>
+    <!-- DANGER ZONE (2026-11-24, fleet standard §7). The LAST block on the profile screen, below a
+         full-width divider, outlined + tinted red with a warning icon AND the words (never colour
+         alone). Two doors: Cancel plan (neutral — the close-account STATE) and Delete account and
+         data (the ONE filled red button on the page — the irreversible erase). -->
+    <div class="card" id="danger-zone" style="border:1px solid #fca5a5;background:rgba(220,38,38,0.04)">
+      <h3 class="font-semibold mb-3" style="color:var(--danger)">⚠️ Danger zone</h3>
+      <p class="text-sm text-gray-600" style="margin-bottom:12px">These actions affect your whole workspace. Both ask for your password and a typed word, and one of them cannot be undone.</p>
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0" />
+      <!-- CANCEL PLAN — the CLOSE door (a STATE, support can reopen). Neutral/secondary. -->
+      <div class="space-y-3" style="max-width:520px;margin-bottom:16px">
+        <h4 class="text-sm font-semibold">Cancel plan</h4>
+        <p class="text-sm text-gray-600">This closes your account: you and your team are signed out and every API key stops working. Your calls, contacts, follow-ups, templates and settings are kept, so support can reopen the account if you change your mind.</p>
         ${st.caErr && html`<p class="text-sm text-red-700" id="close-account-msg" role="status" aria-live="polite">${st.caErr}</p>`}
         ${!st.caErr && st.caMsg && html`<p class="text-sm" style="color:#15803d" id="close-account-msg" role="status" aria-live="polite">${st.caMsg}</p>`}
         ${!st.caArm
-          ? html`<button id="close-account-arm" class="btn btn-sm btn-outline" style="color:var(--danger);border-color:#fca5a5" onClick=${() => { st.caArm = true; renderApp(); }}>Close my account</button>`
+          ? html`<button id="close-account-arm" class="btn btn-sm btn-outline" onClick=${() => { st.caArm = true; renderApp(); }}>Cancel plan</button>`
           : html`<div id="close-account-form" class="space-y-3">
               <div><label class="text-sm font-medium block mb-1" for="ca-pw">Your password (proves it is you)</label>
                 <input id="ca-pw" class="input" type="password" autocomplete="current-password" value=${st.caPw} onInput=${e => { st.caPw = e.target.value; }} /></div>
               <div><label class="text-sm font-medium block mb-1" for="ca-word">Type CLOSE to confirm</label>
                 <input id="ca-word" aria-label="Type CLOSE to confirm" class="input" autocomplete="off" placeholder="CLOSE" value=${st.caWord} onInput=${e => { st.caWord = e.target.value; }} /></div>
-              <button id="close-account-do" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:var(--danger)" disabled=${st.caBusy} onClick=${closeAcct}>Close my account permanently</button>
+              <button id="close-account-do" class="btn btn-sm btn-outline" disabled=${st.caBusy} onClick=${closeAcct}>Cancel plan</button>
+            </div>`}
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0" />
+      <!-- DELETE ACCOUNT AND DATA — the ERASE door (IRREVERSIBLE). The ONE filled red button. -->
+      <div class="space-y-3" style="max-width:520px">
+        <h4 class="text-sm font-semibold">Delete account and data</h4>
+        <p class="text-sm text-gray-600">Permanently destroys this workspace and everything in it — its users, contacts, calls and call history, campaigns, templates, sessions and API keys. Your billing record is kept only as tax law requires. This cannot be undone.</p>
+        ${st.dzErr && html`<p class="text-sm text-red-700" id="delete-account-msg" role="status" aria-live="polite">${st.dzErr}</p>`}
+        ${!st.dzErr && st.dzMsg && html`<p class="text-sm" style="color:#15803d" id="delete-account-msg" role="status" aria-live="polite">${st.dzMsg}</p>`}
+        ${!st.dzArm
+          ? html`<button id="delete-account-arm" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:var(--danger)" onClick=${() => { st.dzArm = true; renderApp(); }}>Delete account and data</button>`
+          : html`<div id="delete-account-form" class="space-y-3">
+              <p class="text-sm font-semibold" style="color:var(--danger)">Delete account and data?</p>
+              <p class="text-sm text-gray-600">This DELETES your workspace, its users, contacts, calls and call history, campaigns, templates, sessions and API keys. Your billing record is KEPT for tax. There is no undo.</p>
+              <div><label class="text-sm font-medium block mb-1" for="dz-pw">Your password (proves it is you)</label>
+                <input id="dz-pw" class="input" type="password" autocomplete="current-password" value=${st.dzPw} onInput=${e => { st.dzPw = e.target.value; }} /></div>
+              <div><label class="text-sm font-medium block mb-1" for="dz-word">Type DELETE to confirm</label>
+                <input id="dz-word" aria-label="Type DELETE to confirm" class="input" autocomplete="off" placeholder="DELETE" value=${st.dzWord} onInput=${e => { st.dzWord = e.target.value; }} /></div>
+              <div style="display:flex;gap:8px">
+                <button id="delete-account-cancel" class="btn btn-sm btn-outline" onClick=${() => { st.dzArm = false; st.dzErr = null; renderApp(); }}>Cancel</button>
+                <button id="delete-account-do" class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:var(--danger)" disabled=${st.dzBusy || !st.dzPw || !(st.dzWord || '').trim()} onClick=${deleteAccount}>Delete permanently</button>
+              </div>
             </div>`}
       </div>
     </div>
@@ -4184,8 +4244,26 @@ const Mcp = () => {
   </div>`;
 };
 
+// ===== ERASED LANDING (2026-11-24) =====
+// A successful erase DELETES the session, so the shell's own "no token -> LoginView" branch would
+// bounce the customer straight to sign-in. `window.__dzDone` (set before the erase fetch, kept on
+// success) routes here instead: a plain statement that the account and its data were deleted and
+// when. Deliberately NO `<meta http-equiv=refresh>` and NO timer redirect — the customer must be
+// able to READ this page, and a meta refresh cannot be cancelled (see the account-erasure skill).
+const ErasedLanding = () => html`
+  <div style="max-width:640px;margin:72px auto;padding:0 24px">
+    <div class="card" id="erased-landing" style="text-align:center;padding:40px 32px;border-left:4px solid #dc2626">
+      <div style="font-size:40px;margin-bottom:12px">🗑️</div>
+      <h1 class="text-xl font-bold mb-3" style="color:var(--danger)">Your account and its data have been deleted</h1>
+      <p class="text-sm text-gray-600" style="margin-bottom:8px">Your workspace, its users, contacts, calls and call history, campaigns, templates, sessions and API keys are gone. Your billing record has been kept only as far as tax law requires.</p>
+      ${window.__dzAt ? html`<p class="text-sm text-gray-500" id="erased-at">Deleted ${window.__dzAt}</p>` : html``}
+      <p class="text-sm text-gray-500" style="margin-top:16px">You can close this tab.</p>
+    </div>
+  </div>`;
+
 // ===== APP SHELL =====
 const App = () => {
+  if (window.__dzDone) return html`<${ErasedLanding} />`;
   if (!API.token) return html`<${LoginView} />`;
   // One-shot: re-read the account row from the server so the level label and the header picture are
   // the SERVER's answer (kanban t_9cd2c8f2). The login response carries no plan tier, so without

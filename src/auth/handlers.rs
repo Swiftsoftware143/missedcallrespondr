@@ -257,6 +257,7 @@ pub async fn register(
         // The new account's default workspace (migration 000051 creates it with the tenant), so the
         // first session already knows where it stands.
         wsid: default_workspace_id(&state.pool, ids.account_id).await,
+        via_api_key: false,
     };
 
     let token = create_token(&claims, &state.config.jwt_secret)
@@ -416,6 +417,7 @@ pub async fn login(
         iat: chrono::Utc::now().timestamp() as usize,
         // A sign-in opens the account's DEFAULT workspace (the switcher can move it afterwards).
         wsid: default_workspace_id(&state.pool, user.tenant_id).await,
+        via_api_key: false,
     };
 
     let token = create_token(&claims, &state.config.jwt_secret)
@@ -655,6 +657,7 @@ pub async fn change_password(
         iat: valid_from as usize,
         // A re-mint KEEPS the workspace the session was already in (never jumps to the default).
         wsid: keep_or_default_wsid(&state.pool, user.tenant_id, claims.wsid.as_deref()).await,
+        via_api_key: false,
     };
     let token = create_token(&fresh, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -713,6 +716,7 @@ pub async fn logout_all(
         iat: now,
         // This device stays in the workspace it was working in; the others simply die.
         wsid: keep_or_default_wsid(&state.pool, user.tenant_id, claims.wsid.as_deref()).await,
+        via_api_key: false,
     };
     let token = create_token(&fresh, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1017,6 +1021,17 @@ pub async fn close_account(
         ));
     }
 
+    // A DURABLE API key may never close an account (fleet standard
+    // docs/account-closure-erasure-standard-2026-11-24.md §3). The key's claims are otherwise
+    // indistinguishable from a session (sub/role/aid come from the owning user's live row), so
+    // `via_api_key` — set ONLY in `handlers::api_key_handler::resolve_api_key` — is the one marker
+    // that tells them apart. Refused on BOTH exit doors.
+    if claims.via_api_key {
+        return Err(AppError::Unauthorized(
+            "This action requires your password and cannot be done with an API key.".into(),
+        ));
+    }
+
     let row = sqlx::query("SELECT password_hash, role, closed_at FROM users WHERE id = $1")
         .bind(claims.sub)
         .fetch_optional(&state.pool)
@@ -1100,6 +1115,128 @@ pub async fn close_account(
         "closed_at": closed_at,
         "message": "Your account is closed. Every session and API key on it has been ended.",
     })))
+}
+
+// ── ERASE MY DATA (fleet standard docs/account-closure-erasure-standard-2026-11-24.md §3-§6) ────
+//
+// `close_account` above records a STATE: the rows stay and support can reopen. Erasure is the other
+// half and is IRREVERSIBLE. Three proofs of personhood are demanded, in this order: the SESSION
+// (the boundary), the PASSWORD (re-verified here), and the typed word `DELETE` (judged here AND in
+// the browser, so a bare API call cannot erase an account with one careless request). A DURABLE API
+// key is refused outright (`via_api_key`), an impersonation session is refused, and only the account
+// owner — or the workspace's ONLY user — may press it. The destruction itself is delegated to the
+// SQL function `erase_tenant` (migration 000064), which copies the billing documents into
+// `erasure_billing_retention`, writes ONE `account_erasures` audit row, and deletes the workspace
+// row — its foreign keys CASCADE, which is what ends this session and every API key on the account.
+
+/// The body of `POST /api/v1/auth/erase-data`.
+#[derive(Debug, serde::Deserialize)]
+pub struct EraseDataRequest {
+    pub password: String,
+    /// The word the console asks the customer to type. Judged HERE as well as in the browser, so a
+    /// bare API call cannot erase an account with one careless request.
+    pub confirm: String,
+}
+
+/// `POST /api/v1/auth/erase-data` — the signed-in owner destroys the workspace and its data.
+pub async fn erase_data(
+    Extension(claims): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(req): Json<EraseDataRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if !req.confirm.trim().eq_ignore_ascii_case("DELETE") {
+        return Err(AppError::BadRequest(
+            "Type DELETE to confirm erasing the account and its data".into(),
+        ));
+    }
+
+    // A DURABLE API key may never erase an account — the same refusal as `close_account` above.
+    // `via_api_key` is set ONLY in `handlers::api_key_handler::resolve_api_key`.
+    if claims.via_api_key {
+        return Err(AppError::Unauthorized(
+            "This action requires your password and cannot be done with an API key.".into(),
+        ));
+    }
+
+    // An impersonation session is the OPERATOR looking through a customer's eyes; it must never
+    // destroy the customer's data. The role itself IS the marker (admin_handler::impersonate).
+    if claims.role == "impersonated" {
+        return Err(AppError::Forbidden(
+            "An impersonation session cannot erase an account.".into(),
+        ));
+    }
+
+    let row = sqlx::query("SELECT password_hash, role, tenant_id, email FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+
+    let hash: String = row.get("password_hash");
+    let role: String = row.get("role");
+    let tenant_id: uuid::Uuid = row.get("tenant_id");
+    let email: String = row.get("email");
+
+    // The session's tenant and the user's own row must agree: a token minted for another workspace
+    // (an impersonation-class credential) must never erase this person's data.
+    if claims.aid != tenant_id {
+        return Err(AppError::Forbidden(
+            "This session is not signed in to the workspace this account belongs to.".into(),
+        ));
+    }
+
+    // A platform operator account closes workspaces; it is not a customer, and erasing the install's
+    // own workspace from a dashboard button would take the console away from whoever runs it.
+    if role == "admin" {
+        return Err(AppError::Forbidden(
+            "A platform operator account cannot be erased from this screen.".into(),
+        ));
+    }
+
+    // Ownership: the account owner may erase the workspace, or its ONLY user may. A teammate — a
+    // second user on the same workspace with a non-owner role — must not destroy the whole workspace.
+    if role != "account_owner" {
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE tenant_id = $1")
+            .bind(tenant_id)
+            .fetch_one(&state.pool)
+            .await?;
+        if user_count > 1 {
+            return Err(AppError::Forbidden(
+                "Only the account owner can erase the workspace and its data.".into(),
+            ));
+        }
+    }
+
+    // A stored hash that is not a usable PHC string verifies nothing: the ordinary 401, never a 500
+    // (the same rule `verify_password` states).
+    if !verify_password(&req.password, &hash).unwrap_or_default() {
+        return Err(AppError::Unauthorized("Your password is incorrect".into()));
+    }
+
+    // Irreversible from here. The SQL function copies the billing documents, writes the audit row
+    // and deletes the workspace row in ONE statement; every FK to `tenants` CASCADEs.
+    let report_text: String = sqlx::query_scalar("SELECT erase_tenant($1, $2, $3)::text")
+        .bind(tenant_id)
+        .bind(claims.sub)
+        .bind(&email)
+        .fetch_one(&state.pool)
+        .await?;
+
+    let report: serde_json::Value = serde_json::from_str(&report_text)
+        .map_err(|e| AppError::Internal(format!("erase_tenant returned unparsable JSON: {e}")))?;
+
+    let audit = report
+        .get("audit_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    tracing::info!(
+        user = %claims.sub,
+        tenant = %tenant_id,
+        audit = %audit,
+        "account erased: workspace and its data destroyed, billing documents retained"
+    );
+
+    Ok(Json(report))
 }
 
 pub async fn forgot_password(

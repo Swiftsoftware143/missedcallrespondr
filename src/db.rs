@@ -546,6 +546,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000063_email_suppressions",
             include_str!("../migrations/000063_email_suppressions.sql"),
         ),
+        // A customer's own IRREVERSIBLE data erasure (2026-11-24, fleet standard
+        // docs/account-closure-erasure-standard-2026-11-24.md §3-§6). Creates the two no-FK
+        // retention tables (`erasure_billing_retention`, `account_erasures`) and the ONE SQL
+        // function `erase_tenant(uuid, uuid, text)` the `POST /api/v1/auth/erase-data` handler
+        // calls. Idempotent (IF NOT EXISTS / CREATE OR REPLACE) because this runner re-executes
+        // every file per boot, and `include_str!` of a brand-new file is also what forces the
+        // rebuild to embed it.
+        (
+            "000064_account_erasure",
+            include_str!("../migrations/000064_account_erasure.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

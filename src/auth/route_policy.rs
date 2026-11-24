@@ -706,16 +706,127 @@ mod tests {
         // RE-MEASURED 2026-11-22 (kanban t_6146b9c9): the delivery-events receiver and the
         // operator's read of its address are 2 more literals -> 160 total / 160 distinct; the
         // anonymous lists are 20 + 3 = 23.
-        assert_eq!(lits.len(), 160, "mounted .route entries");
+        // 160 -> 161 on 2026-11-24: the customer's own DATA ERASURE door
+        // `POST /api/v1/auth/erase-data` (kanban t_9999fc8e) — a PROTECTED mount beside
+        // close-account, so PUBLIC_ROUTES and INTERNAL_ROUTES are untouched and nothing became
+        // reachable without a credential.
+        assert_eq!(lits.len(), 161, "mounted .route entries");
         let mut uniq: Vec<&str> = lits.clone();
         uniq.sort_unstable();
         uniq.dedup();
-        assert_eq!(uniq.len(), 160, "distinct mounted paths");
+        assert_eq!(uniq.len(), 161, "distinct mounted paths");
         for entry in super::PUBLIC_ROUTES {
             assert!(
                 !super::INTERNAL_ROUTES.contains(entry),
                 "{} in both lists",
                 entry
+            );
+        }
+    }
+
+    /// FLEET STANDARD §6 (docs/account-closure-erasure-standard-2026-11-24.md) — the two exit doors
+    /// are a signed-in HUMAN's alone, and that is structural, not promised. A machine credential
+    /// (this app's `mcr_` API key, resolved to a session-shaped Claims) must never be able to close
+    /// or wipe a customer's account even when its agent is asked to: the routes take a session only,
+    /// and the handler refuses `via_api_key`.
+    #[test]
+    fn the_erase_data_route_is_mounted_and_private() {
+        assert!(
+            mounted("/api/v1/auth/erase-data").is_some(),
+            "the erase-data route is not mounted in src/routes.rs"
+        );
+        assert!(!is_public_route("/api/v1/auth/erase-data"));
+        assert!(!is_internal_route("/api/v1/auth/erase-data"));
+    }
+
+    /// The close door — already shipped (2026-11-13) but never pinned here — gets the same census:
+    /// mounted and private. This is the test the sibling apps already carry and this one was missing.
+    #[test]
+    fn the_close_account_route_is_mounted_and_private() {
+        assert!(
+            mounted("/api/v1/auth/close-account").is_some(),
+            "the close-account route is not mounted in src/routes.rs"
+        );
+        assert!(!is_public_route("/api/v1/auth/close-account"));
+        assert!(!is_internal_route("/api/v1/auth/close-account"));
+    }
+
+    /// The erase handler must carry every lock, so a future edit that drops one fails the build:
+    /// the typed-word check, the API-key refusal, the impersonation refusal, the admin refusal, the
+    /// ownership refusal, the password re-verify and the `erase_tenant(` call.
+    #[test]
+    fn the_erasure_handler_carries_every_lock() {
+        let src = include_str!("handlers.rs");
+        let needles = [
+            "eq_ignore_ascii_case(\"DELETE\")",
+            "via_api_key",
+            "impersonated",
+            "cannot be erased",
+            "Only the account owner can erase",
+            "verify_password",
+            "erase_tenant(",
+        ];
+        for needle in needles {
+            assert!(
+                src.contains(needle),
+                "the erase handler must carry the lock {needle:?}"
+            );
+        }
+    }
+
+    /// The migration keeps billing documents and raises on an incomplete purge. This app has NO
+    /// `invoices` table, so there is deliberately no `DROP NOT NULL` and nothing may ever DELETE one.
+    #[test]
+    fn the_erasure_migration_keeps_billing_and_raises() {
+        let sql = include_str!("../../migrations/000064_account_erasure.sql");
+        for needle in [
+            "erasure_billing_retention",
+            "account_erasures",
+            "RAISE EXCEPTION",
+        ] {
+            assert!(
+                sql.contains(needle),
+                "the erasure migration must contain {needle:?}"
+            );
+        }
+        assert!(
+            !sql.contains("DELETE FROM invoices"),
+            "billing documents are retained, never deleted"
+        );
+        assert!(
+            !sql.contains("ALTER TABLE invoices"),
+            "this app has no invoices table to alter"
+        );
+    }
+
+    /// This app ships NO MCP/API-key tool registry in its tree: the MCP surface the console links
+    /// is the FLEET service at https://hooks.swiftsoftware.net/mcp, not a module here (the one thing
+    /// named "registry", src/module_registry.rs, resolves PLAN FEATURES, not tools). The guard is
+    /// therefore structural: the source must declare no tool list that could carry a
+    /// close/erase/delete_account action, and no route mounts an MCP tool surface. If a tool
+    /// registry is ever added, it must be pinned HERE (the CoreSwift shape: a non-trivial list whose
+    /// names carry none of these fragments).
+    #[test]
+    fn no_fleet_tool_can_erase() {
+        const FORBIDDEN: [&str; 4] = [
+            "close_account",
+            "erase_data",
+            "delete_account",
+            "purge_tenant",
+        ];
+        let registry = include_str!("../module_registry.rs");
+        assert!(
+            !registry.contains("TOOL_NAMES") && !registry.contains("list_tools"),
+            "module_registry.rs must stay a plan-feature resolver, not an MCP tool list"
+        );
+        assert!(
+            !ROUTES_SRC.to_ascii_lowercase().contains("mcp"),
+            "src/routes.rs must not mount an MCP tool surface"
+        );
+        for fragment in FORBIDDEN {
+            assert!(
+                !registry.contains(fragment),
+                "no tool may be named {fragment:?}"
             );
         }
     }

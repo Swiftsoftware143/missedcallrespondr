@@ -441,6 +441,7 @@ pub async fn switch_workspace(
         exp: now + 86400 * 7,
         iat: now,
         wsid: Some(id.to_string()),
+        via_api_key: false,
     };
     let token = create_token(&claims, &state.config.jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;

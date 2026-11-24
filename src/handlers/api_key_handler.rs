@@ -165,6 +165,9 @@ pub async fn resolve_api_key(db: &sqlx::PgPool, token: &str) -> Option<Claims> {
         exp: now + API_KEY_TTL_SECS,
         iat: now,
         wsid: None,
+        // THE ONLY marker that tells a durable key apart from a session (the key's sub/role/aid are
+        // otherwise the owning user's live values). `close_account` and `erase_data` refuse it.
+        via_api_key: true,
     })
 }
 

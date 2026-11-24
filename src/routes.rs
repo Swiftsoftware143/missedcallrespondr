@@ -264,6 +264,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/auth/close-account",
             post(auth_handlers::close_account),
         )
+        // The customer's own DATA ERASURE (2026-11-24, fleet standard
+        // docs/account-closure-erasure-standard-2026-11-24.md). Close records a STATE; this is the
+        // IRREVERSIBLE other half: `POST /api/v1/auth/erase-data` destroys the workspace through the
+        // SQL function `erase_tenant` (migration 000064). Same boundary as close-account — NOT in
+        // `auth::route_policy::PUBLIC_ROUTES`, so an anonymous caller is refused at the boundary, and
+        // the handler refuses a durable API key via `claims.via_api_key`.
+        .route("/api/v1/auth/erase-data", post(auth_handlers::erase_data))
         // The door for a customer whose first password never arrived: `register` mints it and mails
         // it, and when that send fails the account is otherwise unreachable (a reset code would fail
         // the same way). Authenticated by the token `register` returned, and accepted ONLY while that

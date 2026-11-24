@@ -190,6 +190,14 @@ pub struct Claims {
     /// the switcher shipped, or on an impersonation/API-key token. Switching re-mints with this set.
     #[serde(default)]
     pub wsid: Option<String>,
+    /// TRUE only on the Claims [`crate::handlers::api_key_handler::resolve_api_key`] synthesises for
+    /// a live `mcr_` API key — the one marker that tells a DURABLE key apart from a session, because
+    /// the key's `sub`/`role`/`aid` otherwise come from its owning user's live row and are
+    /// indistinguishable from a session's. `close_account` and `erase_data` refuse it (401): a key
+    /// that never expires must not be able to close or erase an account. Every session mint leaves
+    /// it `false`; `#[serde(default)]` keeps tokens issued before this field existed decodable.
+    #[serde(default)]
+    pub via_api_key: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

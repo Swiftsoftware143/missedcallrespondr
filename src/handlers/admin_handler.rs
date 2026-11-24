@@ -276,6 +276,7 @@ pub async fn impersonate(
         .ok()
         .flatten()
         .map(|w| w.to_string()),
+        via_api_key: false,
     };
 
     let token = create_token(&imp_claims, &state.config.jwt_secret)
