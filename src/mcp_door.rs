@@ -93,7 +93,7 @@ impl CredentialResolver for KeyAuth {
         // own `resolve_api_key` uses, plus `closed_at`: a closed account's key stops working the
         // moment the account is closed, not at the next restart.
         let row = sqlx::query(
-            "SELECT k.tenant_id, k.key_prefix, t.is_active \
+            "SELECT k.tenant_id, k.name AS key_name, t.slug AS tenant_slug, t.is_active \
                FROM api_keys k \
                JOIN users u ON u.id = k.created_by \
                JOIN tenants t ON t.id = k.tenant_id \
@@ -112,9 +112,16 @@ impl CredentialResolver for KeyAuth {
         let tenant: Uuid = row
             .try_get("tenant_id")
             .map_err(|e| AuthError::Unavailable(format!("api_keys.tenant_id: {e}")))?;
-        let prefix: String = row
-            .try_get("key_prefix")
-            .map_err(|e| AuthError::Unavailable(format!("api_keys.key_prefix: {e}")))?;
+        // The audited subject names the WORKSPACE and the key's own label. It is deliberately not
+        // the key prefix or any part of the secret: an audit that stores a fragment of the
+        // credential it audited is how a leak guard finds keys in a log directory, and a prefix is
+        // still part of the secret's bytes.
+        let key_name: String = row
+            .try_get("key_name")
+            .map_err(|e| AuthError::Unavailable(format!("api_keys.name: {e}")))?;
+        let tenant_slug: String = row
+            .try_get("tenant_slug")
+            .map_err(|e| AuthError::Unavailable(format!("tenants.slug: {e}")))?;
         let active: bool = row
             .try_get("is_active")
             .map_err(|e| AuthError::Unavailable(format!("tenants.is_active: {e}")))?;
@@ -122,9 +129,15 @@ impl CredentialResolver for KeyAuth {
             // A suspended workspace is a liveness refusal, not an unknown token.
             return Err(AuthError::Revoked);
         }
-        // The audited subject is the key PREFIX, never the secret. A workspace key reads and (in a
-        // later phase) writes inside its own workspace; this phase registers no write tool.
-        Ok(Caller::new(prefix, Role::Workspace).with_tenant(tenant))
+        let label: String = key_name.chars().take(40).collect();
+        let subject = if label.trim().is_empty() {
+            format!("{tenant_slug} (key)")
+        } else {
+            format!("{tenant_slug} (key {})", label.trim())
+        };
+        // A workspace key reads and (in a later phase) writes inside its own workspace; this phase
+        // registers no write tool.
+        Ok(Caller::new(subject, Role::Workspace).with_tenant(tenant))
     }
 }
 
