@@ -285,24 +285,16 @@ async fn tenant_for(pool: &PgPool, address: &str) -> Option<uuid::Uuid> {
     .flatten()
 }
 
-/// GET /api/v1/settings/do-not-mail/webhook — the URL the operator pastes into the provider.
+/// GET /api/v1/settings/do-not-mail/webhook — where the provider's problem reports arrive.
+///
+/// The capability URL is OPERATOR-ONLY: a POST to it suppresses an address, so a workspace member
+/// must never hold it. The STATUS is every member's business — the safety net that stops mail to a
+/// bounced address belongs to their workspace — so any authenticated caller is told whether reports
+/// are arriving, and only the address itself is withheld. Refusing the whole route to a member made
+/// their own Do-not-mail card say nothing at all about the safety net (measured 2026-11-24: the card
+/// rendered only "readable by a platform operator only"), which is the honest-but-useless shape the
+/// FunnelSwift fix 79c32e7 and IncentiveSwift's 7211d5eb removed.
 pub async fn webhook_url(State(state): State<AppState>, auth: AuthUser) -> Response {
-    if !auth.is_admin {
-        return refusal(
-            StatusCode::FORBIDDEN,
-            "only an operator can read the mail-events address",
-        );
-    }
-    let token = match token(&state.pool).await {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("could not read the mail-events token: {e}");
-            return refusal(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "could not read the events token",
-            );
-        }
-    };
     // WHEN the provider last reported something. The console shows this instead of asking a customer
     // to paste the address into a provider they do not control — the provider is ours, and the fleet
     // registers these three event types per sending domain. A read failure answers `null`, which the
@@ -314,10 +306,27 @@ pub async fn webhook_url(State(state): State<AppState>, auth: AuthUser) -> Respo
     .await
     .ok()
     .flatten();
-    Json(json!({
-        "url": format!("{APP_URL}/api/v1/webhooks/mailgun/events/{token}"),
+
+    let mut body = json!({
+        "operator": auth.is_admin,
+        "url": serde_json::Value::Null,
         "events": ["permanent_fail", "complained", "unsubscribed"],
         "last_event_at": last_event_at,
-    }))
-    .into_response()
+    });
+
+    if auth.is_admin {
+        let token = match token(&state.pool).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("could not read the mail-events token: {e}");
+                return refusal(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "could not read the events token",
+                );
+            }
+        };
+        body["url"] = json!(format!("{APP_URL}/api/v1/webhooks/mailgun/events/{token}"));
+    }
+
+    Json(body).into_response()
 }

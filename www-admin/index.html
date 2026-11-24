@@ -167,7 +167,7 @@ window.appGuidePages = {
   "clients": { title: "Clients", desc: "The businesses you serve, each with its own details and history.", actions: ["Add or edit a client", "Open a client's record"] },
   "calendar": { title: "Calendar", desc: "Appointments and callbacks scheduled for this workspace.", actions: ["See the schedule", "Add an appointment"] },
   "site-config": { title: "Site Configuration", desc: "The settings behind the public side: the call-tracking number and what a caller hears when no one answers.", actions: ["Set the tracking number", "Edit the message a caller hears"] },
-  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it. The Workspace signature card holds the default name, title, company, phone and one line printed under your logo on every message this workspace sends; an address in the mail client can override it or turn it off, and a field left blank stays blank in the message. The Do-not-mail list holds addresses this workspace must never mail again: someone who used the unsubscribe link in a notice, or one you watched bounce. Notices only stops the optional notices; Everything also stops receipts and password mails, which is what you want for an address that keeps bouncing. A new message to a blocked address is withheld and shown in the email log as withheld, with your reason. The same card reports whether the mail service's own problem reports are arriving: a hard bounce, a spam complaint or a provider-side unsubscribe lands the address on this list by itself, stopping everything to that address, with nobody watching an inbox. It says Connected with the date of the last report once one has arrived, and Connected, waiting for its first report until then — there is nothing to set up, and the address beneath it is for support reference only.", actions: ["Upload your logo", "Set your brand name and colour", "Set the workspace signature every address starts with", "Add an address to the Do-not-mail list, and allow one again later", "Check that the mail service's own problem reports have arrived, with the date of the last one", "Download the Do-not-mail list as a CSV file", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
+  "branding": { title: "Email Branding", desc: "Put your own name, colour and logo on the email this app sends for your account, instead of the default MissedCall Respondr header. Send me a preview email mails a sample of your own branded mail to the address you sign in with, so you see exactly what a caller receives; a reserved test address cannot receive it, so no preview is sent and the card tells you why. Show the exact email renders that same message below the card without sending anything, so you can check your logo is really on it. The Workspace signature card holds the default name, title, company, phone and one line printed under your logo on every message this workspace sends; an address in the mail client can override it or turn it off, and a field left blank stays blank in the message. The Do-not-mail list holds addresses this workspace must never mail again: someone who used the unsubscribe link in a notice, or one you watched bounce. Notices only stops the optional notices; Everything also stops receipts and password mails, which is what you want for an address that keeps bouncing. A new message to a blocked address is withheld and shown in the email log as withheld, with your reason. The same card reports whether the mail service's own problem reports are arriving: a hard bounce, a spam complaint or a provider-side unsubscribe lands the address on this list by itself, stopping everything to that address, with nobody watching an inbox. It says Connected with the date of the last report once one has arrived, and Connected, waiting for its first report until then — there is nothing to set up. Every member of the workspace sees that status; the address beneath it is for support reference and appears to the platform operator only.", actions: ["Upload your logo", "Set your brand name and colour", "Set the workspace signature every address starts with", "Add an address to the Do-not-mail list, and allow one again later", "Check that the mail service's own problem reports have arrived, with the date of the last one", "Download the Do-not-mail list as a CSV file", "Press Send me a preview email to see the real header in your own inbox", "Press Show the exact email to read the message the app would send, with nothing sent"] },
   "email-templates": { title: "Email Templates", desc: "The wording of the email this app sends as the platform: the welcome mail, the credentials mail that carries a new account's password, the password-reset mail, the purchase receipt, the branded preview and the ticket mails. The form lists the merge fields the chosen type actually fills. Pick the type the sender looks up — a row whose type no sender uses is never sent.", actions: ["Edit the subject and body of a mail", "Create a template for a type", "Mark a template as the default for its type"] },
   "payment-providers": { title: "Payment Providers", desc: "The Stripe or PayPal account this install collects through, and the webhook signing secret an inbound payment event is verified against. The keys are never shown back in full; the Encrypted column states whether the saved copy is encrypted at rest. The box at the top, How a customer pays you, is for what happens when NO provider is connected: write your bank details or any other way to pay, and a customer who asks for a plan sees them on Plan & Billing and in their receipt email. Leave it empty and nothing changes.", actions: ["Add your Stripe or PayPal keys", "Replace a stored key by typing a new one", "Mark a provider inactive to take it out of use", "Test a key before you save it", "Write how a customer pays you and press Save"] },
   "account": { title: "My Account", desc: "Your own profile: the name, username, company and picture that appear on what this panel shows, the address you sign in with, the password you sign in with, and the plan this workspace is on. The last card on this screen closes the account: it ends every session and API key on it and refuses sign-in from then on, while keeping your data so the business can be reopened by support if you change your mind. One card also downloads everything the workspace holds as a single file, with no passwords or provider secrets in it.", actions: ["Set your name, username and company", "Upload a profile picture", "Change your sign-in email (we email a confirmation link)", "Change your password", "See the plan you are on", "Download a copy of everything the workspace holds (contacts, calls, messages, campaigns) as one file", "Close the account — ends every session and API key, keeps the data"] },
@@ -577,16 +577,19 @@ const Branding = () => {
   // the only way an operator can see who asked to stop, add an address that asked by phone or keeps
   // bouncing, and allow one again. Every door is scoped to this workspace by the token, so the list
   // here is only ever this account's.
-  const dn = viewState('do-not-mail', { _loaded: false, rows: [], address: '', cls: 'notification', reason: '', busy: false, msg: null, hookUrl: '', hookErr: null });
+  const dn = viewState('do-not-mail', { _loaded: false, rows: [], address: '', cls: 'notification', reason: '', busy: false, msg: null, hookUrl: '', hookAt: null, hookOperator: false, hookLoaded: false, hookErr: null });
   if (!dn._loaded) { dn._loaded = true;
     API.get('/settings/suppressions').then(r => { dn.rows = (r && r.suppressions) || []; renderApp(); }).catch(() => { dn._loaded = false; });
     // Where the provider reports its own verdict (2026-11-23). The safety net is ours: the fleet
     // registers the three event types per sending domain, so this is not something the operator pastes
     // anywhere — the screen says whether a verified report has arrived yet and keeps the address for
-    // support only. Platform admins only — the app refuses everybody else.
+    // support only. The STATUS is answered to every member of the workspace (operator|url|events|
+    // last_event_at); only the capability ADDRESS is withheld from a non-operator, because a POST to it
+    // suppresses an address. So `url: null` is a legitimate answer and must never be painted as a fault
+    // (measured 2026-11-24: a team member's card said nothing at all about the safety net).
     API.get('/settings/do-not-mail/webhook')
-      .then(d => { dn.hookUrl = (d && d.url) || ''; dn.hookAt = (d && d.last_event_at) || null; dn.hookErr = null; renderApp(); })
-      .catch(e => { dn.hookUrl = ''; dn.hookErr = e.message || String(e); renderApp(); });
+      .then(d => { dn.hookUrl = (d && d.url) || ''; dn.hookAt = (d && d.last_event_at) || null; dn.hookOperator = !!(d && d.operator === true); dn.hookLoaded = true; dn.hookErr = null; renderApp(); })
+      .catch(e => { dn.hookUrl = ''; dn.hookLoaded = false; dn.hookErr = e.message || String(e); renderApp(); });
   }
   const reloadDn = async () => { const r = await API.get('/settings/suppressions'); dn.rows = (r && r.suppressions) || []; };
   const addDn = async () => {
@@ -719,24 +722,26 @@ const Branding = () => {
         <span class="text-xs text-gray-400">A new message to a blocked address is withheld, and the email log shows it as withheld with your reason.</span>
       </div>
       ${dn.msg && html`<div class="mt-2 text-sm ${dn.msg.ok ? 'text-green-600' : 'text-red-600'}">${dn.msg.text}</div>`}
-      ${dn.hookUrl
+      ${dn.hookLoaded
         ? html`<div class="mt-4 pt-3" style="border-top:1px solid var(--border)">
             <div class="text-sm font-medium text-gray-600 mb-1">Bounces and complaints report themselves</div>
             <p class="text-sm text-gray-500 mb-2">${dn.hookAt
               ? html`<strong>Connected.</strong> The mail service sends its problem reports here &mdash; the most recent arrived ${String(dn.hookAt).slice(0, 16).replace('T', ' ')} &mdash; so a hard-bounced or complained address joins the list above by itself.`
               : html`<strong>Connected, waiting for its first report.</strong> When a message hard-bounces or a recipient marks it as spam, the mail service tells this install and the address joins the list above. There is nothing to set up.`}</p>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-xs text-gray-400">For support, the address the mail service posts to is</span>
-              <code class="text-xs" data-provider-events-address=${dn.hookUrl} style="word-break:break-all">${dn.hookUrl}</code>
-              <button class="btn btn-outline btn-sm" id="dn-hook-copy" aria-label="Copy the delivery-events address" onClick=${() => {
-                try { navigator.clipboard.writeText(dn.hookUrl); dn.msg = { ok: true, text: 'Address copied.' }; }
-                catch(e) { dn.msg = { ok: false, text: 'Select the address and copy it.' }; }
-                renderApp();
-              }}>Copy</button>
-            </div>
+            ${dn.hookUrl
+              ? html`<div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs text-gray-400">For support, the address the mail service posts to is</span>
+                  <code class="text-xs" data-provider-events-address=${dn.hookUrl} style="word-break:break-all">${dn.hookUrl}</code>
+                  <button class="btn btn-outline btn-sm" id="dn-hook-copy" aria-label="Copy the delivery-events address" onClick=${() => {
+                    try { navigator.clipboard.writeText(dn.hookUrl); dn.msg = { ok: true, text: 'Address copied.' }; }
+                    catch(e) { dn.msg = { ok: false, text: 'Select the address and copy it.' }; }
+                    renderApp();
+                  }}>Copy</button>
+                </div>`
+              : html`<p class="text-xs text-gray-400" style="margin:0">The exact address the mail service posts to is shown to the workspace operator only. Reports reach the list above either way &mdash; nothing here needs setting up.</p>`}
           </div>`
         : (dn.hookErr
-          ? html`<div class="mt-4 pt-3 text-xs text-gray-400" style="border-top:1px solid var(--border)">The provider delivery-events address is readable by a platform operator only.</div>`
+          ? html`<div class="mt-4 pt-3 text-sm text-red-600" style="border-top:1px solid var(--border)">The mail-report status could not be read just now. Reload this screen to try again &mdash; nothing has been changed.</div>`
           : '')}
       ${dn.rows.length === 0
         ? html`<div class="text-sm text-gray-400 mt-3">Nobody has asked to stop, and no address has been added by hand.</div>`
