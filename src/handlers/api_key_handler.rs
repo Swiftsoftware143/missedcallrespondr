@@ -145,9 +145,14 @@ pub async fn resolve_api_key(db: &sqlx::PgPool, token: &str) -> Option<Claims> {
 
     let id: Uuid = row.get("id");
     let tenant_id: Uuid = row.get("tenant_id");
-    let created_by: Uuid = row.get("created_by");
+    // `api_keys.created_by` is NULLABLE (one live row carries NULL after an owner removal) and the
+    // INNER JOIN above is what guarantees a non-NULL value here. Decode it as Option and refuse the
+    // key when it is absent, so a NULL can never panic the decode — `Row::get` is an unwrap() and
+    // this process aborts on panic (fleet gate rule 5e, kanban t_f9d15f44).
+    let created_by: Option<Uuid> = row.get("created_by");
     let role: String = row.get("role");
     let email: String = row.get("email");
+    let created_by = created_by?;
 
     // Best-effort usage stamp: a bookkeeping write must never deny a valid key.
     let _ = sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
