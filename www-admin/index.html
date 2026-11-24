@@ -726,7 +726,7 @@ const Branding = () => {
         ? html`<div class="mt-4 pt-3" style="border-top:1px solid var(--border)">
             <div class="text-sm font-medium text-gray-600 mb-1">Bounces and complaints report themselves</div>
             <p class="text-sm text-gray-500 mb-2">${dn.hookAt
-              ? html`<strong>Connected.</strong> The mail service sends its problem reports here &mdash; the most recent arrived ${String(dn.hookAt).slice(0, 16).replace('T', ' ')} &mdash; so a hard-bounced or complained address joins the list above by itself.`
+              ? html`<strong>Connected.</strong> The mail service sends its problem reports here — the most recent arrived ${String(dn.hookAt).slice(0, 16).replace('T', ' ')} — so a hard-bounced or complained address joins the list above by itself.`
               : html`<strong>Connected, waiting for its first report.</strong> When a message hard-bounces or a recipient marks it as spam, the mail service tells this install and the address joins the list above. There is nothing to set up.`}</p>
             ${dn.hookUrl
               ? html`<div class="flex items-center gap-2 flex-wrap">
@@ -738,10 +738,10 @@ const Branding = () => {
                     renderApp();
                   }}>Copy</button>
                 </div>`
-              : html`<p class="text-xs text-gray-400" style="margin:0">The exact address the mail service posts to is shown to the workspace operator only. Reports reach the list above either way &mdash; nothing here needs setting up.</p>`}
+              : html`<p class="text-xs text-gray-400" style="margin:0">The exact address the mail service posts to is shown to the workspace operator only. Reports reach the list above either way — nothing here needs setting up.</p>`}
           </div>`
         : (dn.hookErr
-          ? html`<div class="mt-4 pt-3 text-sm text-red-600" style="border-top:1px solid var(--border)">The mail-report status could not be read just now. Reload this screen to try again &mdash; nothing has been changed.</div>`
+          ? html`<div class="mt-4 pt-3 text-sm text-red-600" style="border-top:1px solid var(--border)">The mail-report status could not be read just now. Reload this screen to try again — nothing has been changed.</div>`
           : '')}
       ${dn.rows.length === 0
         ? html`<div class="text-sm text-gray-400 mt-3">Nobody has asked to stop, and no address has been added by hand.</div>`
