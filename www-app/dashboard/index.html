@@ -256,12 +256,12 @@ window.appGuidePages = {
   // that mails the sample to the customer's own address.
   branding:     { title: "Email Branding", desc: "Your logo, business name and colour, as they appear at the top of every email this account sends \u2014 welcome, password reset and receipts. Anything left blank keeps the MissedCall Respondr header.", actions: ["Upload your logo", "Save your brand name and colour", "Press Send me a preview email to see the real header in your own inbox"] },
   donotmail:    { title: "Do Not Mail", desc: "The addresses this workspace must never mail again \u2014 people who asked to stop, and addresses that hard-bounced. Every send checks this list before it leaves.", actions: ["Download the list as a CSV file", "Add an address that asked by phone", "Press Allow again when someone wants mail back"] },
-  apikeys:      { title: "API Keys", desc: "The key other software uses to reach this workspace on your behalf. Every account starts with one, and it stays viewable \u2014 press View and it appears (one click, and every view is recorded), then copy it.", actions: ["Press + Create key to add another", "Press View / Copy to see a key again", "Press Regenerate to replace a key you think leaked", "Press Revoke to turn a key off"] },
+  apikeys:      { title: "API Keys", desc: "The key other software uses to reach this workspace on your behalf. Every account starts with one, and it stays viewable \u2014 press View and it appears (one click, and every view is recorded); press Copy to put it on your clipboard without showing it.", actions: ["Press + Create key to add another", "Press View to see a key again", "Press Copy to put a key on your clipboard", "Press Regenerate to replace a key you think leaked", "Press Revoke to turn a key off"] },
   // MCP HAD NO ENTRY (cron 2026-11-13): appGuidePages carried a key for every customer view
   // except this one, so the guide's round "?" silently disappeared on the MCP tab \u2014 the same
   // defect earlier passes fixed for lists, calendar, team and branding. Measured live in Chromium
   // on app.missedcallrespondr.com: MCP -> #ig-toggle display:none while API Keys/Calendar -> flex.
-  mcp:          { title: "MCP", desc: "Connect ChatGPT or Claude to this account so an AI can read your calls, leads, tickets and clients and find things for you. Read-only: the tool can look, never change, and it can only read this workspace. It signs in with this workspace's own API key, so the key here is the same one the API Keys screen shows.", actions: ["Follow the ChatGPT or Claude steps to paste the endpoint", "Press Copy beside the address to put the endpoint on the clipboard", "Press Reveal to see the key — one click, and every view is recorded", "Press Test connection to confirm the server answers"] },
+  mcp:          { title: "MCP", desc: "Connect ChatGPT or Claude to this account so an AI can read your calls, leads, tickets and clients and find things for you. Read-only: the tool can look, never change, and it can only read this workspace. It signs in with this workspace's own API key, so the key here is the same one the API Keys screen shows.", actions: ["Follow the ChatGPT or Claude steps to paste the endpoint", "Press Copy beside the address to put the endpoint on the clipboard", "Press View to see the key — one click, and every view is recorded", "Press Copy to put the key on your clipboard without showing it", "Press Test connection to confirm the server answers"] },
   // PROFILES DELIBERATELY HAS NO ENTRY (kanban t_9cd2c8f2, same choice as the sibling consoles):
   // the widget AUTO-OPENS its panel over the screen it describes, and on the account screen that
   // panel sat on top of the Save button. With no key for it, `getCurrentEntry()` returns null on
@@ -3843,6 +3843,20 @@ const ApiKeys = () => {
     st.revealBusy = false; renderApp();
   };
 
+  // Copy = fetch the sealed value (the SAME session-only POST reveal View uses) and write it to the
+  // clipboard WITHOUT rendering it. The secret never touches the DOM or `st.revealResult` (plan §6
+  // rule 2): only the notice string is painted.
+  const doCopy = async (k) => {
+    try {
+      const d = await API.post('/api-keys/' + k.id + '/reveal', {});
+      if (!d || !d.token) { st.error = 'Could not read the key'; renderApp(); return; }
+      let ok = false;
+      try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(d.token); ok = true; } } catch (e) {}
+      st.notice = ok ? 'Copied to clipboard' : 'Could not copy — use View and copy it manually';
+    } catch (e) { st.error = e.message; }
+    renderApp();
+  };
+
   const doRegenerate = async (k) => {
     if (!confirm('Regenerate this key? Anything using the old key stops working immediately.')) return;
     st.busy = true; st.regenError = null; st.notice = null; renderApp();
@@ -3895,7 +3909,8 @@ const ApiKeys = () => {
               <td>${k.last_used_at ? k.last_used_at.slice(0, 10) : 'never'}</td>
               <td>${k.revoked_at ? html`<span class="badge badge-red">Revoked</span>` : html`<span class="badge badge-green">Active</span>`}</td>
               <td style="white-space:nowrap">
-                ${!k.revoked_at && html`<button class="btn btn-sm btn-outline" onClick=${() => openReveal(k)}>View / Copy</button>`}
+                ${!k.revoked_at && html`<button class="btn btn-sm btn-outline" onClick=${() => openReveal(k)}>View</button>`}
+                ${!k.revoked_at && html`<button class="btn btn-sm btn-outline" onClick=${() => doCopy(k)}>Copy</button>`}
                 ${!k.revoked_at && html`<button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${() => doRegenerate(k)}>Regenerate</button>`}
                 ${!k.revoked_at && html`<button class="btn btn-sm btn-red" disabled=${st.busy} onClick=${() => doRevoke(k)}>Revoke</button>`}
               </td>
@@ -3937,7 +3952,8 @@ const ApiKeys = () => {
 //   1. There is no OAuth "connect with one click". MissedCall authenticates with the account's own
 //      API key, so the steps say that instead of "choose OAuth".
 //   2. There is no list of connected apps — the key IS the connection. The connected-apps block says
-//      so and names the one action that disconnects everything (regenerate the key).
+//      so and names the one action that disconnects everything (replace the key on the API Keys
+//      screen).
 //   3. Every example is a question, because the MCP service is SELECT-only by construction.
 const MCP_ENDPOINT = 'https://hooks.swiftsoftware.net/mcp';
 // Copy-paste config for any MCP client. `YOUR_API_KEY` is this workspace's own API key from below.
@@ -4014,7 +4030,7 @@ const Mcp = () => {
   const k = activeKeys[0] || null;
   const c = API.user || {};
   const copy = async (text, elId) => {
-    if (!text) { st.error = 'Reveal the key first'; renderApp(); return; }
+    if (!text) { st.error = 'Nothing to copy'; renderApp(); return; }
     let ok = false;
     try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); ok = true; } } catch (e) {}
     if (!ok && elId) { const el = document.getElementById(elId); if (el) { const r = document.createRange(); r.selectNodeContents(el); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); try { document.execCommand('copy'); ok = true; } catch (e) {} } }
@@ -4030,13 +4046,19 @@ const Mcp = () => {
     } catch (e) { st.error = e.message; }
     st.busy = false; renderApp();
   };
-  const regenerate = async () => {
-    if (!confirm('Regenerate this key? The old key stops working immediately — any MCP client or API call already using it stops until you paste the new key in.')) return;
-    st.busy = true; st.error = null; renderApp();
+  // Copy = fetch the sealed value and write it to the clipboard WITHOUT rendering it (plan §6 rule
+  // 2). The secret never reaches `st.shown` or the DOM; only the notice string is painted.
+  const copyKey = async () => {
+    if (!k) return;
+    st.busy = true; st.error = null; st.notice = null; renderApp();
     try {
-      const d = await API.post('/api-keys/' + k.id + '/regenerate', {});
-      st.shown = { id: d.id, token: d.token };
-      reload();
+      const d = await API.post('/api-keys/' + k.id + '/reveal', {});
+      if (!d || !d.token) { st.error = 'Could not read the key'; }
+      else {
+        let ok = false;
+        try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(d.token); ok = true; } } catch (e) {}
+        st.notice = ok ? 'Copied to clipboard' : 'Could not copy — use View and copy it manually';
+      }
     } catch (e) { st.error = e.message; }
     st.busy = false; renderApp();
   };
@@ -4083,7 +4105,7 @@ const Mcp = () => {
     step(3, 'Open Apps and press the plus (+) to add one. Call it MissedCall.', 'Some accounts call these Plugins or Connectors instead.'),
     step(4, 'Paste this address into the address box.', 'The whole address, exactly as shown.', addressRow),
     step(5, 'Where it asks how to sign in, choose API key (Bearer token).', 'There is no OAuth approval here. Paste the key from the card below into the token field.'),
-    step(6, 'Press Create, then ask it a question.', 'Try “Which calls came in this week?” If no tools appear, the key was rejected — regenerate it and paste the new one.')
+    step(6, 'Press Create, then ask it a question.', 'Try “Which calls came in this week?” If no tools appear, the key was rejected — replace it on the API Keys screen and paste the new one.')
   ]}`;
   const claudeSteps = html`${[
     step(1, 'Open Claude on the web, on a computer.', 'Settings then Connectors then Add custom connector. The Claude phone app cannot add one.'),
@@ -4115,19 +4137,19 @@ const Mcp = () => {
     const p = (s) => html`<p style="color:var(--text-secondary);font-size:13px;margin:0 0 10px">${s}</p>`;
     const pre = (s) => html`<pre style="background:var(--code-bg);color:var(--code-fg);padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:0">${s}</pre>`;
     if (t === 0) return html`${h4('How it connects')}${p('Your AI client sends JSON-RPC over HTTPS to the address above. Every request carries your API key as a bearer token. The server hashes the key, finds the account it belongs to, and applies that account as a filter on every query — there is no parameter that can widen it. The database user behind it can only run SELECT.')}`;
-    if (t === 1) return html`${h4('Your API token')}${p('One key per account. Press Reveal on the card above to see it — one click, no password, and every view is recorded. Regenerating it disconnects every app using the old key.')}`;
+    if (t === 1) return html`${h4('Your API token')}${p('One key per account. Press View on the card above to see it — one click, no password, and every view is recorded. To replace the key, use the API Keys screen — that is the only place a key is replaced.')}`;
     if (t === 2) return html`${h4('Claude Code')}${pre('claude mcp add --transport http missedcallrespondr \\\n  https://hooks.swiftsoftware.net/mcp \\\n  --header "Authorization: Bearer YOUR_API_KEY"')}`;
     if (t === 3) return html`${h4('Claude Desktop')}${p('Settings, then Connectors, then Add custom connector. Paste the address and choose to authenticate with a token. Or add it to the config file:')}${pre(MCP_CONFIG_TEXT)}`;
     if (t === 4) return html`${h4('Codex')}${p('Codex reads the same config shape as Claude Desktop. Add it as an HTTP MCP server with the address above and the Authorization header carrying your key.')}${pre(MCP_CONFIG_TEXT)}`;
     if (t === 5) return html`${h4('Cursor')}${p('Settings, then MCP, then add a server of type http with the address above and the Authorization header carrying your key.')}${pre(MCP_CONFIG_TEXT)}`;
     if (t === 6) return html`${h4('Troubleshooting')}<ul style="margin:0;padding-left:20px;color:var(--text-secondary);font-size:13px;line-height:1.8">${[
-      html`<li><strong>No tools appear.</strong> The key was rejected. Regenerate it and paste the new one.</li>`,
+      html`<li><strong>No tools appear.</strong> The key was rejected. Replace it on the API Keys screen and paste the new one.</li>`,
       html`<li><strong>It answers but returns nothing.</strong> That is usually correct: a scope that genuinely holds no rows answers zero. Ask for something you know exists.</li>`,
       html`<li><strong>You want it to add a contact.</strong> It cannot, by design. Reading only.</li>`
     ]}</ul>`;
     return html`${h4('FAQ')}<ul style="margin:0;padding-left:20px;color:var(--text-secondary);font-size:13px;line-height:1.8">${[
       html`<li><strong>Does it cost anything?</strong> No. It is your own account reading its own data.</li>`,
-      html`<li><strong>Can I connect more than one app?</strong> Yes, with the same key. Regenerating the key disconnects all of them.</li>`,
+      html`<li><strong>Can I connect more than one app?</strong> Yes, with the same key. Replacing the key on the API Keys screen disconnects all of them.</li>`,
       html`<li><strong>Who can use it?</strong> Anyone holding the key can read the account, so treat it like a password.</li>`,
       html`<li><strong>Why do I see zero rows?</strong> Because that part of the account is empty. Zero is an answer, not an error.</li>`
     ]}</ul>`;
@@ -4138,6 +4160,28 @@ const Mcp = () => {
     <p class="text-sm text-gray-500 mb-4">Ask Claude or ChatGPT about your calls, leads, tickets and clients — and have it find things for you.</p>
     ${st.error && html`<div class="imp-banner"><span>${st.error}</span></div>`}
     ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:var(--success);color:#065f46"><span>${st.notice}</span></div>`}
+    <div class="card" id="mcp-key-card">
+      <h3 class="font-semibold text-gray-800 mb-1">Your API key</h3>
+      <p class="text-sm text-gray-500 mb-3">The server accepts this workspace’s API key as a Bearer token — the same key the API Keys screen shows. It is listed here by prefix only: press <strong>View</strong> to see it (one click, no password, and every view is recorded), or <strong>Copy</strong> to put it on the clipboard without showing it. To replace the key, use the API Keys screen. Treat it like a password: anyone holding it can read this workspace.</p>
+      ${!k ? html`<p class="text-sm text-gray-400">No active API key yet. Create one on the API Keys screen, then come back.</p>` : html`
+        <div class="flex items-center gap-2 flex-wrap mb-3">
+          <code style="background:var(--surface-1);color:var(--text-secondary);padding:8px 12px;border-radius:8px;font-size:13px">${k.key_prefix}…</code>
+          <span class="text-xs text-gray-500">${k.name || 'default'}</span>
+          ${k.recoverable === false
+            ? html`<span class="text-xs text-gray-500">(minted before keys were stored recoverably — replace it on the API Keys screen)</span>`
+            : html`<button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${reveal}>View</button><button class="btn btn-sm btn-outline" onClick=${copyKey}>Copy</button>`}
+        </div>
+      `}
+      ${st.shown && st.shown.token ? html`
+        <div style="border:2px solid #16a34a;border-radius:10px;padding:12px 14px;margin-top:12px">
+          <p class="text-sm text-gray-500 mb-2">Your key:</p>
+          <div class="flex items-center gap-2 flex-wrap">
+            <code id="mcp-revealed-key" style="flex:1;min-width:260px;word-break:break-all;background:var(--code-bg);color:var(--code-fg);padding:10px 14px;border-radius:10px;font-size:13px">${st.shown.token}</code>
+            <button class="btn btn-sm" onClick=${() => copy(st.shown.token, 'mcp-revealed-key')}>Copy</button>
+            <button class="btn btn-sm btn-outline" onClick=${() => { st.shown = null; renderApp(); }}>Hide</button>
+          </div>
+        </div>` : ''}
+    </div>
     <div class="card">
       <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap">
         <button class=${st.client === 'chatgpt' ? 'btn btn-sm' : 'btn btn-sm btn-outline'} onClick=${() => { st.client = 'chatgpt'; renderApp(); }}>ChatGPT</button>
@@ -4162,32 +4206,9 @@ const Mcp = () => {
         The approval screen names the account it will act as: your AI client reads exactly what this account can read, nothing more.
       </div>
     </div>
-    <div class="card">
-      <h3 class="font-semibold text-gray-800 mb-1">Your API key</h3>
-      <p class="text-sm text-gray-500 mb-3">The server accepts this workspace’s API key as a Bearer token — the same key the API Keys screen shows. It is listed here by prefix only; press Reveal to see it (one click, no password, and every view is recorded). Treat it like a password: anyone holding it can read this workspace.</p>
-      ${!k ? html`<p class="text-sm text-gray-400">No active API key yet. Create one on the API Keys screen, then come back.</p>` : html`
-        <div class="flex items-center gap-2 flex-wrap mb-3">
-          <code style="background:var(--surface-1);color:var(--text-secondary);padding:8px 12px;border-radius:8px;font-size:13px">${k.key_prefix}…</code>
-          <span class="text-xs text-gray-500">${k.name || 'default'}</span>
-          ${k.recoverable === false ? html`<span class="text-xs text-gray-500">(minted before keys were stored recoverably — Regenerate to get a viewable key)</span>` : html`<button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${reveal}>Reveal</button>`}
-          <button class="btn btn-sm btn-outline" onClick=${() => copy(st.shown && st.shown.id === k.id ? st.shown.token : '', 'mcp-revealed-key')}>Copy</button>
-          <button class="btn btn-sm btn-outline" disabled=${st.busy} onClick=${regenerate}>Regenerate</button>
-        </div>
-        <p class="text-xs text-gray-500">Regenerate replaces the key: the old one stops working immediately, so any client already using it stops until you paste the new key in.</p>
-      `}
-      ${st.shown && st.shown.token ? html`
-        <div style="border:2px solid #16a34a;border-radius:10px;padding:12px 14px;margin-top:12px">
-          <p class="text-sm text-gray-500 mb-2">Your key (${st.shown.id === (k && k.id) ? 'current' : 'newly generated'}):</p>
-          <div class="flex items-center gap-2 flex-wrap">
-            <code id="mcp-revealed-key" style="flex:1;min-width:260px;word-break:break-all;background:var(--code-bg);color:var(--code-fg);padding:10px 14px;border-radius:10px;font-size:13px">${st.shown.token}</code>
-            <button class="btn btn-sm" onClick=${() => copy(st.shown.token, 'mcp-revealed-key')}>Copy</button>
-            <button class="btn btn-sm btn-outline" onClick=${() => { st.shown = null; renderApp(); }}>Hide</button>
-          </div>
-        </div>` : ''}
-    </div>
     <div class="sunken">
       <h3 class="sunken-title">Connected apps</h3>
-      <p class="ref-body">We do not keep a list of the apps you have connected — your key is the connection. That means one action disconnects everything at once: regenerate the key above and every client using the old one stops working immediately.</p>
+      <p class="ref-body">We do not keep a list of the apps you have connected — your key is the connection. One action disconnects everything at once: replace the key on the API Keys screen and every client using the old one stops working immediately.</p>
     </div>
     <div class="card">
       <div style="font-size:11px;letter-spacing:.09em;color:var(--text-muted);font-weight:700;margin-bottom:8px">WHAT CAN I ASK MISSEDCALL RESPONDR?</div>

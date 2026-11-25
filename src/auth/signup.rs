@@ -294,7 +294,10 @@ pub async fn create_account(
     // create_account, so this is the ONE place the "every account gets a retrievable key"
     // invariant holds. Fail closed: if the key cannot be sealed (no PROVIDER_KEY_ENC_SECRET), the
     // whole account rolls back rather than be minted without a key.
-    crate::handlers::api_key_handler::mint_on(&mut tx, account_id, Some(user_id), "default")
+    // Labelled `MCP — <account>` (David 2026-11-25, plan §6 rule 5): the account's own name, in
+    // the SAME transaction as the account row, so no account is ever keyless.
+    let key_label = format!("MCP — {}", a.account_name);
+    crate::handlers::api_key_handler::mint_on(&mut tx, account_id, Some(user_id), &key_label)
         .await?;
 
     // The workspace, its owner, its plan row and its API key now exist as ONE unit of work. Commit
