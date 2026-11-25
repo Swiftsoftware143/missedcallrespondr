@@ -581,6 +581,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000069_contacts_follow_ups_archived_at",
             include_str!("../migrations/000069_contacts_follow_ups_archived_at.sql"),
         ),
+        // Soft-archive columns for the seven agent-parity CRUD entities with no `is_active` flag
+        // (kanban t_8df5d174, docs/agent-parity-2026-11-25.md). `ADD COLUMN IF NOT EXISTS` only, no
+        // constraint and no index, because this runner re-executes every file per boot and must
+        // never add a unique/PK that live rows violate. `include_str!` of a brand-new file is also
+        // what forces this rebuild to embed the new .sql.
+        (
+            "000070_mcp_parity_archived_at",
+            include_str!("../migrations/000070_mcp_parity_archived_at.sql"),
+        ),
     ];
 
     for (_name, sql) in migrations {

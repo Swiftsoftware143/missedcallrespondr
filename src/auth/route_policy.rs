@@ -841,9 +841,10 @@ mod tests {
     }
 
     /// This app ships ONE MCP surface and it cannot erase: `POST /mcp` is served by `src/mcp_door.rs`
-    /// on the pinned `mcp-door` crate, whose registry holds NINE read tools and SIXTEEN write tools
-    /// (create/update/archive/remove on the product's OWN entities — kanban t_9e143c06, then the
-    /// full read+write ruling kanban t_bb4d4d33). The one thing named "registry" in this app's tree,
+    /// on the pinned `mcp-door` crate, whose registry holds SIXTEEN read tools and FORTY-THREE write
+    /// tools (create/update/archive/remove on the product's OWN entities — kanban t_9e143c06, then the
+    /// full read+write ruling kanban t_bb4d4d33, then the agent-parity ruling kanban t_8df5d174). The
+    /// one thing named "registry" in this app's tree,
     /// `src/module_registry.rs`, still resolves PLAN FEATURES, not tools. The guard is structural:
     /// the door's own source must name none of these erasure/closure actions and must register no
     /// destructive tool, the routing file must mount exactly one door, and `/mcp` must stay outside
