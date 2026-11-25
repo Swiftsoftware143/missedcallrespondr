@@ -20,7 +20,7 @@
 //!   POST   /                  → `create_api_key` (mint)
 //!   DELETE /:id               → `revoke_api_key`
 //!   POST   /:id/rotate        → `regenerate_api_key` (atomic retire-then-mint, role preserved)
-//!   POST   /:id/reveal        → `reveal_api_key` (body `{"password":"…"}`, audited)
+//!   POST   /:id/reveal        → `reveal_api_key` (session only, no password, audited)
 
 use axum::{routing, Router};
 

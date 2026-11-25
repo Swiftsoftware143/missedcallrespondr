@@ -274,21 +274,47 @@ pub async fn create_api_key(
     ))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct RevealKeyRequest {
-    /// The caller's CURRENT password — a stolen session token must not be enough to read a live
-    /// credential.
-    pub password: String,
+/// True when the presented bearer credential is one of this app's API keys rather than a console
+/// session. `resolve_api_key` is the SAME resolver the auth middleware uses, so this can never
+/// disagree with the credential that authenticated the request.
+async fn presented_api_key(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
+    let token = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    match token {
+        Some(t) => resolve_api_key(&state.pool, t).await.is_some(),
+        None => false,
+    }
 }
 
 /// `POST /api/v1/api-keys/:id/reveal` — show the key again (repeatable, never show-once).
+///
+/// David's ruling (2026-11-25, plan §6.2 in docs/fleet-per-account-keys-and-mcp-2026-11-25.md):
+/// **View is one click.** A valid console session is enough — no password re-prompt, the same
+/// friction model as Stripe — because the key is already private by default (masked on load) and
+/// every reveal is recorded. The audit row is unchanged.
+///
+/// SESSION ONLY. The middleware that covers this route also accepts this app's API keys, so the
+/// credential is classified here: an API key is refused 403. Without that, a read-only key could
+/// reveal the account's read+write key — an escalation the key model forbids (the same rule that
+/// keeps a read-only key off every write tool).
 pub async fn reveal_api_key(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
-    Json(req): Json<RevealKeyRequest>,
+    headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let tenant_id = claims.aid;
+    let caller_id = claims.sub;
+
+    if presented_api_key(&state, &headers).await {
+        return Err(AppError::Forbidden(
+            "This needs a console session. An API key cannot view keys — sign in to the console \
+             and press View."
+                .to_string(),
+        ));
+    }
 
     let row = sqlx::query(
         "SELECT key_prefix, key_sealed FROM api_keys \
@@ -302,22 +328,6 @@ pub async fn reveal_api_key(
 
     let prefix: String = row.get("key_prefix");
     let sealed: Option<String> = row.get("key_sealed");
-
-    // ── re-authenticate against the caller's CURRENT password ─────────────────────────────────
-    let caller_id = claims.sub;
-    let stored: Option<String> =
-        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
-            .bind(caller_id)
-            .fetch_optional(&state.pool)
-            .await?;
-    let stored = stored.ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
-    let ok = crate::auth::models::verify_password(&req.password, &stored)
-        .map_err(|_| AppError::Unauthorized("Current password is incorrect".to_string()))?;
-    if !ok {
-        return Err(AppError::Unauthorized(
-            "Current password is incorrect".to_string(),
-        ));
-    }
 
     let sealed = sealed.ok_or_else(|| {
         AppError::NotFound(

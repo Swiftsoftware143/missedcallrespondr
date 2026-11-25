@@ -4081,7 +4081,7 @@ const App = () => {
   // PROVEN LIVE the day it shipped: POST tools/list to the fleet MCP server with a MissedCall
   // workspace key answered 200 and named all seven family SUMMARY/SEARCH pairs below. The key block
   // reads the SAME GET /api/v1/api-keys the API Keys screen reads; Reveal/Copy/Regenerate call this
-  // app's existing routes (password-gated reveal, atomic regenerate). `<family>_list_tenants` is
+  // app's existing routes (session-gated reveal — one click, audited — atomic regenerate). `<family>_list_tenants` is
   // admin-only and is deliberately NOT offered here — a workspace credential can never use it.
   const MCP_ENDPOINT = 'https://hooks.swiftsoftware.net/mcp';
   const MCP_TOOL_SPECS = [
@@ -4117,10 +4117,10 @@ const App = () => {
     const k = live.length ? live[0] : null;
     const reveal = async (copyOnly) => {
       if (!k) return;
-      const pw = prompt('Enter YOUR account password to show this key. Every view is recorded.');
-      if (!pw) return;
+      // One click (David 2026-11-25, plan §6.2): the session is enough — no password re-prompt.
+      // Every view is still written to the audit trail.
       try {
-        const r = await API.post('/api-keys/' + k.id + '/reveal', { password: pw });
+        const r = await API.post('/api-keys/' + k.id + '/reveal', {});
         if (copyOnly) { mcpCopy(r.token); return; }
         st.revealedId = k.id; st.revealed = r.token; renderApp();
       } catch (e) { alert('Could not show the key: ' + (e.message || 'unknown error')); }
@@ -4147,7 +4147,7 @@ const App = () => {
 
       <div class="card">
         <h3 class="font-semibold text-gray-700 mb-1">Your key</h3>
-        <p class="text-xs text-gray-500 mb-3">The MCP server accepts this workspace's API key as a Bearer token. It is listed by prefix only — the secret appears when you Reveal or Regenerate, and every view is recorded.</p>
+        <p class="text-xs text-gray-500 mb-3">The MCP server accepts this workspace's API key as a Bearer token. It is listed by prefix only — press Reveal or Copy to see it (one click, and every view is recorded), or Regenerate to replace it.</p>
         ${!st.loaded ? html`<p class="text-sm text-gray-400">Loading your key…</p>`
           : (!k ? html`<p class="text-sm text-gray-500">No active API key on this workspace. Create one on the API Keys screen, then come back here to connect an MCP client.</p>`
           : html`<div>

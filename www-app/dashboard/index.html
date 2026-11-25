@@ -3795,12 +3795,14 @@ const WsSwitcher = () => {
 
 // ===== API KEYS (kanban t_b6d650d6 re-introduction) =====
 // The durable bearer credential every account auto-mints, and the customer can view / copy /
-// regenerate / revoke from here. The key is never "shown once": View asks for the account
-// password and the server decrypts the SEALED copy, so it can be shown again any time.
+// regenerate / revoke from here. The key is never "shown once": View is ONE CLICK — a valid
+// console session is enough, no password re-prompt (David 2026-11-25, plan §6.2) — and the server
+// decrypts the SEALED copy, so it can be shown again any time. Every view is written to the
+// activity log.
 const ApiKeys = () => {
   const st = viewState('apikeys', {
     loaded: false, keys: [], notice: null, error: null, busy: false,
-    revealId: null, revealPassword: '', revealResult: null, revealBusy: false, revealError: null,
+    revealId: null, revealResult: null, revealBusy: false, revealError: null,
     regenError: null, newName: ''
   });
   const reload = () => {
@@ -3826,14 +3828,17 @@ const ApiKeys = () => {
     st.busy = false; renderApp();
   };
 
-  const openReveal = (k) => { st.revealId = k.id; st.revealPassword = ''; st.revealResult = null; st.revealError = null; renderApp(); };
+  const openReveal = async (k) => {
+    st.revealId = k.id; st.revealResult = null; st.revealError = null; renderApp();
+    await doReveal();
+  };
   const closeReveal = () => { st.revealId = null; st.revealResult = null; st.revealError = null; renderApp(); };
   const doReveal = async () => {
     st.revealBusy = true; st.revealError = null; renderApp();
     try {
-      const d = await API.post('/api-keys/' + st.revealId + '/reveal', { password: st.revealPassword });
+      // One click: the session is the only check (plan §6.2). The view is recorded server-side.
+      const d = await API.post('/api-keys/' + st.revealId + '/reveal', {});
       st.revealResult = { id: d.id, key_prefix: d.key_prefix, token: d.token };
-      st.revealPassword = '';
     } catch (e) { st.revealError = e.message; }
     st.revealBusy = false; renderApp();
   };
@@ -3869,7 +3874,7 @@ const ApiKeys = () => {
 
   return html`<div>
     <h2 class="text-xl font-bold mb-4">API Keys</h2>
-    <p class="text-sm text-gray-500 mb-4">A key lets other software (or our AI assistant) reach this workspace on your behalf. It stays viewable — press View and enter your account password to see it again any time.</p>
+    <p class="text-sm text-gray-500 mb-4">A key lets other software (or our AI assistant) reach this workspace on your behalf. It stays viewable — press View and the key appears straight away; every view is recorded.</p>
     ${st.error && html`<div class="imp-banner"><span>${st.error}</span></div>`}
     ${st.notice && html`<div class="imp-banner" style="background:#d1fae5;border-color:var(--success);color:#065f46"><span>${st.notice}</span></div>`}
     ${st.regenError && html`<div class="imp-banner"><span>Regenerate failed: ${st.regenError}</span></div>`}
@@ -3911,12 +3916,11 @@ const ApiKeys = () => {
               </div>
             </div>`
           : html`<div>
-              <p class="text-sm text-gray-500 mb-3">Enter your account password to see this key.</p>
+              <p class="text-sm text-gray-500 mb-3">${st.revealBusy ? 'Showing your key…' : 'This key could not be shown.'}</p>
               ${st.revealError && html`<div class="imp-banner"><span>${st.revealError}</span></div>`}
-              <input class="input mb-3" type="password" aria-label="Your password" placeholder="Your password" value=${st.revealPassword} onInput=${(e) => { st.revealPassword = e.target.value; }} />
               <div class="flex gap-2 justify-end">
-                <button class="btn btn-sm btn-outline" onClick=${closeReveal}>Cancel</button>
-                <button class="btn btn-sm" disabled=${st.revealBusy} onClick=${doReveal}>Show key</button>
+                <button class="btn btn-sm btn-outline" onClick=${closeReveal}>Close</button>
+                <button class="btn btn-sm" disabled=${st.revealBusy} onClick=${doReveal}>Try again</button>
               </div>
             </div>`}
       </div>

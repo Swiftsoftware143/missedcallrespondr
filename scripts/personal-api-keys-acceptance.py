@@ -17,7 +17,8 @@ Checks (one PASS/FAIL line each, exit 1 on any FAIL):
   5. DELETE /api/personal-api-keys/<minted id> with the key        -> 200
   6. same tools/list with the revoked key                          -> 401
   7. DELETE a SECOND probe tenant's key id with the first key      -> 404
-  8. reveal with a wrong password                                  -> 401 (password gate holds)
+  8. reveal with an API-KEY credential                          -> 403 (session-only; plan §6.2 makes
+     View one click for a SESSION, and a key may never reveal keys)
   9. teardown: probe residue == 0 for probe_harness='t_29efde4c'
 
 Never prints a full key — prefixes only.
@@ -194,10 +195,10 @@ def main():
     s, _ = http("DELETE", f"/api/personal-api-keys/{b['key_id']}", api_key=a["raw"])
     check("7 DELETE a second tenant's key id with the first key -> 404", s == 404, f"HTTP {s}")
 
-    # ── 8. reveal with a wrong password -> the gate holds ──────────────────────────────────────
+    # ── 8. a KEY cannot reveal keys: the reveal door is session-only (plan §6.2) ────────────────
     s, body = http("POST", f"/api/personal-api-keys/{a['key_id']}/reveal",
-                   {"password": "definitely-wrong"}, api_key=a["raw"])
-    check("8 reveal with a wrong password -> 401/400 (gate holds)", s in (401, 400), f"HTTP {s}")
+                   {}, api_key=a["raw"])
+    check("8 reveal with an API key -> 403 (session-only)", s == 403, f"HTTP {s} {str(body)[:100]}")
 
     # ── 9. teardown + residue ──────────────────────────────────────────────────────────────────
     ids = [a, b]
