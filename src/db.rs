@@ -471,13 +471,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
             "000055_api_keys",
             include_str!("../migrations/000055_api_keys.sql"),
         ),
-        // The one-live-key-per-workspace guarantee (CoreSwift API-key contract parity): a
-        // PARTIAL unique index over (tenant_id) WHERE revoked_at IS NULL. The handler's 409 on
-        // a second mint is the customer-facing refusal; this index is the store-level backstop
-        // that makes the rule hold under concurrency. Idempotent (CREATE UNIQUE INDEX IF NOT
-        // EXISTS) because this runner re-executes every file per boot; `include_str!` of a
-        // brand-new file is not a dependency of the previous build, so this entry is also what
-        // forces the rebuild to embed the new .sql.
+        // RETIRED 2026-11-25 (kanban t_dc7b75ac): this file used to CREATE the partial unique
+        // index `api_keys_one_live_per_tenant` ((tenant_id) WHERE revoked_at IS NULL), the
+        // store-level backstop for one-live-key-per-workspace. 000065 below retired that rule
+        // (multi-key, code cap 10) and DROPs the index — but 056 runs FIRST, so every boot
+        // re-created it and a workspace holding two live keys killed the process inside this
+        // file (`could not create unique index`, measured live 16:39Z) before 065 could drop it.
+        // The file now only DROPs the index, so the two entries converge instead of fighting:
+        // nothing creates it, and a database booted from an older image loses it here — DROP
+        // INDEX never validates rows. Keeping the entry (rather than deleting it) also keeps its
+        // `include_str!` dependency, which is what forces this rebuild to embed the new .sql.
         (
             "000056_api_keys_one_live_per_tenant",
             include_str!("../migrations/000056_api_keys_one_live_per_tenant.sql"),

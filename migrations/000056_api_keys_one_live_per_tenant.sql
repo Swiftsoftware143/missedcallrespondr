@@ -8,13 +8,29 @@
 -- Measured before this file shipped: 6 live keys across 9 tenants, zero duplicate live
 -- (tenant_id) pairs, so the index creates cleanly with no data repair.
 --
--- Idempotent (CREATE UNIQUE INDEX IF NOT EXISTS), because this runner re-executes every entry
--- on every boot and keeps no ledger.
+-- RETIRED 2026-11-25 (kanban t_dc7b75ac). This file NO LONGER CREATES the index — 000065
+-- (CoreSwift's multi-key rule: up to 10 live keys per workspace, enforcement in
+-- `handlers::api_key_handler::create_api_key`) supersedes it, and the CREATE was a boot-time
+-- trap: this runner re-executes every file on every boot with no ledger, so 056 re-created the
+-- one-live index BEFORE 065 could drop it, and a workspace holding two live keys made the whole
+-- process die with `could not create unique index "api_keys_one_live_per_tenant"` — measured
+-- live 2026-11-25 16:39Z: container Restarting (1), /mcp 502. Order matters; 056 runs first.
 --
--- Deliberately NOT a constraint on the table definition: a plain UNIQUE (tenant_id) would
--- forbid keeping the revoked history that `revoke` leaves behind (revoke never DELETEs — the
--- row survives with `revoked_at` set). Only the partial predicate expresses the real rule.
+-- The file is kept (not deleted) because `src/db.rs` names it in the runner list and its
+-- `include_str!` is what keeps the rebuild honest. Its only statement now DROPS the index, so
+-- both directions converge: a fresh database never gets it (056 cannot create it, 065 drops
+-- nothing), and a database booted from an older image that still carries the index has it
+-- removed here, before any data is examined. DROP INDEX never validates existing rows, so a
+-- duplicate-key state can no longer stop a boot.
+--
+-- The original rationale, for the record: the partial predicate `(tenant_id) WHERE revoked_at
+-- IS NULL` expressed "at most one LIVE key, any number of REVOKED ones" and was the store-level
+-- backstop behind the handler's 409. It is deliberately NOT a table constraint, because a plain
+-- UNIQUE (tenant_id) would forbid keeping the revoked history that `revoke` leaves behind
+-- (revoke never DELETEs — the row survives with `revoked_at` set). Multi-key retired the rule;
+-- the code cap is the limit now, and the db.rs entry records the same.
+--
+-- Idempotent (DROP INDEX IF EXISTS), because this runner re-executes every entry on every boot
+-- and keeps no ledger.
 
-CREATE UNIQUE INDEX IF NOT EXISTS api_keys_one_live_per_tenant
-    ON public.api_keys (tenant_id)
-    WHERE revoked_at IS NULL;
+DROP INDEX IF EXISTS api_keys_one_live_per_tenant;

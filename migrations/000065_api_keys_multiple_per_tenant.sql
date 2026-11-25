@@ -8,8 +8,10 @@
 --   409 — "This account already has 10 active API keys. Revoke one before minting another."
 --
 -- Idempotent (`DROP INDEX IF EXISTS`), because this runner re-executes every file on every boot and
--- keeps no ledger: 000056 re-creates the index each boot and this file drops it again, so the net
--- schema after every boot is multi-key.
+-- keeps no ledger. Since 2026-11-25 (kanban t_dc7b75ac) 000056 no longer CREATES the index — it was
+-- re-created on every boot immediately before this file, so any workspace holding two live keys
+-- killed the process inside 000056 (`could not create unique index`) and this file never ran. 000056
+-- now DROPs the index too, so the two entries converge; this one remains the authoritative DROP.
 --
 -- The fleet-standard mint surface `/api/personal-api-keys` (P1c, spec
 -- docs/p1c-personal-api-keys-spec-2026-11-25.md) exposes the same handlers; the existing
