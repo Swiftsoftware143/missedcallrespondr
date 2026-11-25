@@ -841,10 +841,11 @@ mod tests {
     }
 
     /// This app ships ONE MCP surface and it cannot erase: `POST /mcp` is served by `src/mcp_door.rs`
-    /// on the pinned `mcp-door` crate, whose registry holds NINE read tools and no write tool at all
-    /// (kanban t_9e143c06). The one thing named "registry" in this app's tree,
+    /// on the pinned `mcp-door` crate, whose registry holds NINE read tools and SIXTEEN write tools
+    /// (create/update/archive/remove on the product's OWN entities — kanban t_9e143c06, then the
+    /// full read+write ruling kanban t_bb4d4d33). The one thing named "registry" in this app's tree,
     /// `src/module_registry.rs`, still resolves PLAN FEATURES, not tools. The guard is structural:
-    /// the door's own source must name none of these actions and must register no write or
+    /// the door's own source must name none of these erasure/closure actions and must register no
     /// destructive tool, the routing file must mount exactly one door, and `/mcp` must stay outside
     /// the `/api/v1` tree the credential boundary governs (it is its own boundary — see
     /// `the_mcp_door_is_mounted_outside_the_api_boundary`).
@@ -876,10 +877,12 @@ mod tests {
                 "the MCP door must not name {fragment:?}"
             );
         }
-        // Read-only by construction: the door registers no write and no destructive tool.
+        // The door may write — create/update/archive/remove on the product's OWN entities (kanban
+        // t_bb4d4d33) — but it still registers NO destructive tool and names no erasure/closure
+        // verb, so a machine credential can never reach an erase arm.
         assert!(
-            !door.contains("ToolSpec::write") && !door.contains("ToolSpec::destructive"),
-            "the MCP door must register read tools only"
+            !door.contains("ToolSpec::destructive"),
+            "the MCP door must register no destructive tool"
         );
         // Exactly ONE door is mounted, at /mcp, and it is not an /api/v1 route.
         assert_eq!(

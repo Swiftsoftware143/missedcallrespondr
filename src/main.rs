@@ -234,8 +234,9 @@ async fn main() -> anyhow::Result<()> {
     // locked out for days. First tick fires at boot, so a deploy reports the existing backlog.
     crate::credential_watch::spawn_credential_watch(pool.clone());
 
-    // This app's OWN MCP door (kanban t_9e143c06): the fleet skeleton crate pinned in Cargo.toml,
-    // this app's api_keys resolver, nine read tools. Built HERE so a registry or config problem is a
+    // This app's OWN MCP door (kanban t_9e143c06, extended by t_bb4d4d33): the fleet skeleton crate
+    // pinned in Cargo.toml, this app's api_keys resolver, nine read tools and sixteen write tools.
+    // Built HERE so a registry or config problem is a
     // startup failure — a door that boots with a half-annotated tool list answers 401-shaped
     // nonsense forever and nobody notices. Its audit line goes to a host-mounted file (see
     // deploy context's docker-compose.yml), 0600, created by the crate.

@@ -1233,8 +1233,8 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "mcp-door"
-version = "0.1.0"
-source = "git+https://github.com/Swiftsoftware143/mcp-door?rev=15aef65e324c804dc1f3cc6ebe112c0e537aaede#15aef65e324c804dc1f3cc6ebe112c0e537aaede"
+version = "0.1.2"
+source = "git+https://github.com/Swiftsoftware143/mcp-door?rev=795033790d27c98d74f0e9bdf2ca7ef3b12e5d61#795033790d27c98d74f0e9bdf2ca7ef3b12e5d61"
 dependencies = [
  "async-trait",
  "axum",
