@@ -54,6 +54,13 @@ pub const TOOL_PREFIX: &str = "missedcall_";
 /// How much customer-written text one excerpt may carry.
 const EXCERPT_CHARS: i32 = 2000;
 
+/// `tools/list` page size: the WHOLE inventory in one answer. The transport default is 50, which
+/// splits this door's 59 tools across two pages — invisible to any client that does not follow
+/// `nextCursor`, and it once produced a false "50 tools, nine declared but never served" reading
+/// (t_8d54e37e). A page big enough for the inventory removes the trap; `one_page_lists_every_tool`
+/// fails the build the moment the inventory outgrows it.
+pub const TOOLS_PAGE_SIZE: usize = 200;
+
 /// The one tenant filter every statement carries, spelled as a SQL literal so the query is never
 /// built at run time (gate rule 5d) and the scope can never be dropped by a caller: `$1` is always
 /// the caller's workspace id list, bound from the token, never from an argument.
@@ -3758,6 +3765,7 @@ pub fn build(pool: PgPool, audit_path: &str) -> Result<Door, mcp_door::transport
         Arc::new(KeyAuth::new(pool)),
     )
     .audit(audit_path)
+    .page_size(TOOLS_PAGE_SIZE)
     .instructions(
         "Read and write access to THIS MissedCall Respondr workspace. The bearer token IS the \
          workspace: no tool takes a workspace argument, another workspace's rows are never returned, \
@@ -4054,6 +4062,48 @@ mod tests {
             );
             assert!(!spec.annotations.destructive, "{name} is destructive");
             assert_eq!(spec.min_role, Role::Workspace, "{name} min_role");
+        }
+    }
+
+    /// The whole inventory must arrive in ONE `tools/list` page at the size the door is built with.
+    /// A door that paginates its own tools hides the tail from every client that does not follow
+    /// `nextCursor` — the transport default of 50 put nine write tools on a second page and a
+    /// one-page reading called them "declared but never served" (t_8d54e37e). This fails if the
+    /// inventory ever outgrows `TOOLS_PAGE_SIZE`.
+    #[tokio::test]
+    async fn one_page_lists_every_tool() {
+        let reg = lazy_registry();
+        let (tools, next) = reg
+            .page(Role::Workspace, None, TOOLS_PAGE_SIZE)
+            .expect("page");
+        assert!(
+            next.is_none(),
+            "one page at {TOOLS_PAGE_SIZE} must hold the whole inventory, got {} and a cursor",
+            tools.len()
+        );
+        assert_eq!(tools.len(), READS.len() + WRITES.len());
+        let (reads, next) = reg
+            .page(Role::ReadOnly, None, TOOLS_PAGE_SIZE)
+            .expect("page");
+        assert!(next.is_none(), "the reads fit one page too");
+        assert_eq!(reads.len(), READS.len());
+        // The nine writes this card was filed for are on the FIRST page, not a second one.
+        for name in [
+            "missedcall_create_message_template",
+            "missedcall_update_message_template",
+            "missedcall_archive_message_template",
+            "missedcall_create_custom_field",
+            "missedcall_update_custom_field",
+            "missedcall_archive_custom_field",
+            "missedcall_create_ticket",
+            "missedcall_update_ticket",
+            "missedcall_reply_ticket",
+            "missedcall_respond_to_call",
+        ] {
+            assert!(
+                tools.iter().any(|t| t["name"] == name),
+                "{name} must be served on the first page"
+            );
         }
     }
 

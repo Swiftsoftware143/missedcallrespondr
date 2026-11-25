@@ -5,7 +5,11 @@ Proves the +34 agent-parity tools the parity contract (`docs/agent-parity-2026-1
 demands, live against http://127.0.0.1:8088/mcp and the app's /api/v1 REST surface:
 
   1. tools/list before/after counts (25 -> 59); every new read tool read_only=true, every new
-     write tool read_only=false, min_role workspace.
+     write tool read_only=false, min_role workspace. Also THE INVENTORY INVARIANT (t_8d54e37e):
+     ONE tools/list page, cursor NOT followed, must carry the whole inventory, live count == the
+     registry count parsed from src/mcp_door.rs, and it must include the nine writes
+     (message templates, contact custom fields, tickets, respond-to-call) that a 50-per-page
+     default had pushed onto a second page.
   2. a read-only key sees the 16 read tools and no write tool; a direct write call is refused.
   3. per new family (lead, list, list membership, client, deal, calendar event, message template,
      contact custom field, ticket, respond-to-call) with a workspace key: create -> read-back ->
@@ -34,7 +38,8 @@ import urllib.request
 from pathlib import Path
 
 BASE = "http://127.0.0.1:8088"
-HARNESS = "probe_t_8df5d174"
+HARNESS = "probe_t_8d54e37e"
+SOURCE = Path(__file__).resolve().parents[1] / "src" / "mcp_door.rs"
 APP_ENV = Path("/etc/swift/env/missedcall.env")
 CRED_ENV = Path("/opt/swift/secure/cred.env")
 VAULT_URL = "http://127.0.0.1:8100/vault/missedcall-mcp-giraudy"
@@ -136,6 +141,28 @@ def list_tools(token):
             return status, tools
 
 
+def list_tools_one_page(token):
+    """ONE tools/list, cursor NOT followed: exactly what a client that ignores `nextCursor` sees.
+
+    This is the measurement that matters for the inventory claim (t_8d54e37e). The transport used
+    to default to 50 per page, so a one-page reading saw 50 of 59 tools and called the nine writes
+    on page two "declared but never served" — the tools were always registered and callable.
+    """
+    status, body = mcp_post(
+        token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+    )
+    if status != 200 or not isinstance(body, dict):
+        return None, {}, None
+    result = body.get("result") or {}
+    tools = {t["name"]: (t.get("annotations") or {}) for t in result.get("tools") or []}
+    return status, tools, result.get("nextCursor")
+
+
+def source_registered_count():
+    """How many tool registrations the source carries, counted from the registry chain itself."""
+    return SOURCE.read_text(encoding="utf-8").count(".with_fn(")
+
+
 def vault_ceo_key():
     token = None
     for line in CRED_ENV.read_text().splitlines():
@@ -230,6 +257,20 @@ def write_tool_names():
     }
 
 
+def nine_write_names():
+    """The nine writes t_8d54e37e was filed for. They were ALWAYS registered and callable; the
+    transport's 50-per-page default put them on tools/list page two, so a one-page reading saw 50
+    tools and called them "declared but never served". The door now pages at the whole inventory."""
+    return {
+        "missedcall_create_message_template", "missedcall_update_message_template",
+        "missedcall_archive_message_template",
+        "missedcall_create_custom_field", "missedcall_update_custom_field",
+        "missedcall_archive_custom_field",
+        "missedcall_create_ticket", "missedcall_update_ticket", "missedcall_reply_ticket",
+        "missedcall_respond_to_call",
+    }
+
+
 def read_tool_names():
     return {
         "missedcall_list_leads", "missedcall_list_lists", "missedcall_list_clients",
@@ -273,6 +314,26 @@ def main():
           all(n in tools_a and tools_a[n].get("readOnlyHint") is True for n in read_tool_names()),
           f"missing={sorted(read_tool_names() - set(tools_a))}")
     check("1d CEO key sees 59 tools", len(tools_ceo) == 59, f"{len(tools_ceo)}")
+
+    # ── 1e-1g. THE INVENTORY INVARIANT (t_8d54e37e) ────────────────────────────────────────────
+    # ONE tools/list, cursor NOT followed. A door whose inventory spills onto a second page hides
+    # the tail from every client that ignores `nextCursor` — and from any measurement that reads a
+    # single page. The door is built with page_size = TOOLS_PAGE_SIZE so the whole inventory lands
+    # in one answer; this check fails if it ever spills again or if source and live disagree.
+    source_n = source_registered_count()
+    s, tools_one, next_cursor = list_tools_one_page(a["key"])
+    check("1e one page, no cursor, carries every registered tool (live == source)",
+          s == 200 and next_cursor is None and len(tools_one) == source_n == 59,
+          f"one_page={len(tools_one)} source={source_n} nextCursor={next_cursor}")
+    check("1f that one page carries all nine writes",
+          all(n in tools_one for n in nine_write_names()),
+          f"missing={sorted(nine_write_names() - set(tools_one))}")
+    s, tools_ro_one, ro_next = list_tools_one_page(ro_raw)
+    check("1g a read-only key's one page is the 16 reads and no write tool",
+          len(tools_ro_one) == 16 and ro_next is None
+          and not (set(tools_ro_one) & write_tool_names()),
+          f"count={len(tools_ro_one)} nextCursor={ro_next} "
+          f"writes={sorted(set(tools_ro_one) & write_tool_names())}")
 
     # ── 2. read-only key sees no write tool and a direct call is refused ────────────────────────
     check("2a read-only key sees 16 read tools only",
@@ -440,6 +501,23 @@ def main():
     b_call = insert_call(b["tenant_id"], "missed")
     s, f = mcp_call(a["key"], "missedcall_respond_to_call", {"call_id": b_call})
     check("3j.foreign call id answers not_found", tool_result_error(f) == "not_found", f"{f}")
+    # The three families whose foreign-id arm was never exercised before this card (t_8d54e37e):
+    # a message template, a contact custom field, and a READ that names another tenant's ticket.
+    s, b_mt = mcp_call(b["key"], "missedcall_create_message_template",
+                       {"name": "B-mt", "body": "b"})
+    b_mt_id = b_mt.get("id") if isinstance(b_mt, dict) else None
+    s, f = mcp_call(a["key"], "missedcall_archive_message_template", {"id": b_mt_id})
+    check("3j.foreign message_template id answers not_found",
+          tool_result_error(f) == "not_found", f"{f}")
+    s, b_cf = mcp_call(b["key"], "missedcall_create_custom_field",
+                       {"field_name": f"b_{uuid.uuid4().hex[:8]}"})
+    b_cf_id = b_cf.get("id") if isinstance(b_cf, dict) else None
+    s, f = mcp_call(a["key"], "missedcall_update_custom_field", {"id": b_cf_id, "field_order": 3})
+    check("3j.foreign custom_field id answers not_found",
+          tool_result_error(f) == "not_found", f"{f}")
+    s, f = mcp_call(a["key"], "missedcall_list_tickets", {"id": b_ticket_id})
+    check("3j.foreign ticket id is not readable either",
+          tool_result_error(f) == "not_found", f"{f}")
 
     # ── 4. REST parity with the mcr_ key ────────────────────────────────────────────────────────
     s, body = http("POST", "/api/v1/leads", {"name": "REST-lead"}, token=a["key"])
