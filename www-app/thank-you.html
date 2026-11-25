@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment status — MissedCall Respondr</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--surface-0:#f6f7fb;--surface-1:#eef0f6;--surface-2:#ffffff;--surface-3:#ffffff;--text-primary:#16181d;--text-secondary:#4b5563;--text-muted:#77808f;--accent:#4f46e5;--accent-hover:#4338ca;--border:#dde1ea;--border-light:#c9cfdb;--shadow-1:0 1px 3px rgba(16,24,40,.08);--shadow-2:0 8px 32px rgba(16,24,40,.16);--z-sticky:10;--z-dropdown:20;--z-modal:30;--z-toast:40;color-scheme:light}
+html[data-theme="dark"]{--surface-0:#0f1117;--surface-1:#1a1d27;--surface-2:#222532;--surface-3:#2a2d3a;--text-primary:#e8eaed;--text-secondary:#9aa0a6;--text-muted:#6b7280;--accent:#6366f1;--accent-hover:#818cf8;--border:#2d3148;--border-light:#383c52;--shadow-1:0 1px 3px rgba(0,0,0,.35);--shadow-2:0 8px 32px rgba(0,0,0,.5);color-scheme:dark}
+html[data-theme="dark"] .status.loading{background:rgba(249,115,22,.12);border-color:rgba(249,115,22,.4);color:#fdba74}
+html[data-theme="dark"] .status.ok{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.4);color:#4ade80}
+html[data-theme="dark"] .status.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);color:#fbbf24}
+html[data-theme="dark"] .status.error{background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.4);color:#fca5a5}
+.theme-toggle{position:fixed;left:16px;bottom:16px;z-index:var(--z-toast);display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--border-light);background:var(--surface-2);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-1);font-family:inherit}
+.theme-toggle:hover{border-color:var(--accent)}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--surface-0);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:var(--surface-2);border-radius:16px;box-shadow:var(--shadow-2);padding:48px 40px;max-width:520px;width:100%;text-align:center}
+.icon{font-size:56px;margin-bottom:16px}
+h1{font-size:24px;font-weight:700;color:var(--text-primary);margin-bottom:8px}
+p{color:var(--text-secondary);font-size:15px;line-height:1.6;margin-bottom:20px}
+.status{background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:24px;font-size:14px;color:var(--text-secondary);text-align:left}
+.status.loading{background:var(--surface-2)7ed;border-color:#fed7aa;color:#9a3412}
+.status.ok{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.status.warn{background:var(--surface-2)beb;border-color:#fde68a;color:#92400e}
+.status.error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.details{text-align:left;background:var(--surface-0);border-radius:8px;padding:16px;margin-bottom:24px}
+.details dt{font-size:12px;text-transform:uppercase;color:var(--text-muted);letter-spacing:.5px;margin-top:8px}
+.details dt:first-child{margin-top:0}
+.details dd{font-size:14px;color:var(--text-primary);font-weight:500;margin-bottom:4px;word-break:break-all}
+.actions{display:flex;flex-direction:column;gap:8px}
+.btn{display:inline-block;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-outline{border:1px solid var(--border);color:var(--text-secondary)}
+.btn-outline:hover{background:var(--surface-0)}
+.small{font-size:13px;color:var(--text-muted);margin-top:16px;margin-bottom:0}
+</style>
+<link rel="canonical" href="https://missedcallrespondr.com/thank-you"><script>
+(function(){try{var t=localStorage.getItem('mc_theme');if(!t)t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+</script>
+</head>
+<body>
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle day/night mode"><span id="theme-toggle-icon" aria-hidden="true">🌙</span><span id="theme-toggle-label">Night mode</span></button>
+<script>
+(function(){var b=document.getElementById('theme-toggle');if(!b)return;function p(){var d=document.documentElement.getAttribute('data-theme')==='dark';var i=document.getElementById('theme-toggle-icon');var l=document.getElementById('theme-toggle-label');if(i)i.textContent=d?'☀️':'🌙';if(l)l.textContent=d?'Day mode':'Night mode';}b.addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',n);try{localStorage.setItem('mc_theme',n);}catch(e){}p();});p();})();
+</script>
+
+<nav class="navx-crumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="navx-sep" aria-hidden="true">&rsaquo;</span><span aria-current="page">Thank you</span></nav><script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://missedcallrespondr.com/"},{"@type":"ListItem","position":2,"name":"Thank you","item":"https://missedcallrespondr.com/thank-you.html"}]}</script><style id="navx-style">.navx-crumb{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;font-size:.82rem;max-width:1100px;margin:0 auto;padding:14px 18px 0;line-height:1.4}.navx-crumb a{text-decoration:underline;text-underline-offset:2px}.navx-crumb .navx-sep{opacity:.55}.navx-crumb [aria-current]{opacity:.75}.navx-rel{max-width:1100px;margin:34px auto 18px;padding:16px 18px;border:1px solid rgba(128,128,128,.45);border-radius:10px;background:rgba(128,128,128,.08);color:inherit}.navx-rel h2{font-size:1rem;margin:0 0 .6rem;letter-spacing:.01em}.navx-rel ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.45rem 1.4rem}.navx-rel a{text-decoration:underline;text-underline-offset:2px;font-size:.93rem}</style>
+
+
+<div class="card" id="app">
+  <div class="icon" id="icon">⏳</div>
+  <h1 id="headline">Checking your payment…</h1>
+  <p id="intro">One moment while we look up this checkout.</p>
+  <div id="statusMsg" class="status loading">Verifying payment…</div>
+  <div id="detailsArea" class="details" style="display:none">
+    <dl>
+      <dt>Checkout</dt>
+      <dd id="sessionId">—</dd>
+      <dt>Plan</dt>
+      <dd id="planName">—</dd>
+      <dt>Amount</dt>
+      <dd id="amountLine">—</dd>
+    </dl>
+  </div>
+  <div class="actions">
+    <a id="loginLink" href="https://app.missedcallrespondr.com/login" class="btn btn-primary">Go to your dashboard</a>
+    <a id="supportLink" href="https://app.missedcallrespondr.com/contact.html" class="btn btn-outline">Contact support</a>
+  </div>
+  <p class="small">Your payment provider's receipt is the authoritative record of any charge.</p>
+</div>
+<script>
+// This page only ever states what the server told it. A missing session, an unreadable
+// answer or a network failure is NEVER reported as a confirmed payment (kanban: the page
+// used to announce "Payment confirmed" for any 2xx, for no session id at all, and on a
+// fetch error — i.e. it could tell a customer their card had been charged when it had not).
+(function(){
+  var PAID = ['completed', 'paid', 'succeeded'];
+  var params = new URLSearchParams(window.location.search);
+  var sessionId = params.get('session_id') || params.get('token') || '';
+  var el = document.getElementById('statusMsg');
+  var det = document.getElementById('detailsArea');
+  var icon = document.getElementById('icon');
+  var head = document.getElementById('headline');
+  var intro = document.getElementById('intro');
+
+  function set(kind, headline, lead, message, cls) {
+    icon.textContent = kind;
+    head.textContent = headline;
+    intro.textContent = lead;
+    el.className = 'status ' + (cls || '');
+    el.textContent = message;
+  }
+  function details(data) {
+    document.getElementById('sessionId').textContent = data.id || sessionId;
+    document.getElementById('planName').textContent = data.plan_name || data.purchasable_type || 'Subscription';
+    var amt = data.amount ? (data.amount + ' ' + (data.currency || 'USD')) : '—';
+    document.getElementById('amountLine').textContent = amt;
+    det.style.display = 'block';
+  }
+
+  // A payment provider sends the buyer back here carrying its OWN session token, not this app's
+  // checkout id: Stripe appends nothing to a success_url that carries no template, and PayPal
+  // appends `?token=…&PayerID=…`. None of those can be looked up as a checkout, and telling a
+  // customer who has just paid "No checkout to show … nothing has been confirmed here" reads as a
+  // failure. Measured 2026-11-14: this page also 404'd entirely on the app host, so the checkout
+  // fallback URL landed on a dead end (kanban missedcall thank-you landing). A non-uuid token gets
+  // the honest return-from-checkout state instead; only a real checkout uuid is looked up.
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function thanksBack() {
+    set('\u{1F389}', "Thanks \u2014 you're back from checkout",
+        "Your payment page sent you back to us. Nothing on this page is a receipt: your payment provider's receipt is the authoritative record of any charge.",
+        'What happens next: our team switches the plan on your workspace and emails you the moment it is on. Nothing further is needed from you.', 'ok');
+  }
+  if (!sessionId) { thanksBack(); return; }
+  if (!UUID_RE.test(sessionId)) { thanksBack(); return; }
+
+  fetch('/api/v1/checkout/session/' + encodeURIComponent(sessionId), {headers: {'Accept': 'application/json'}})
+    .then(function(res){
+      if (res.status === 404) {
+        set('❓', "We couldn't find that checkout",
+            'No checkout matches this link, so there is nothing here to confirm.',
+            "If you were charged, contact support and quote the checkout id above — your provider's receipt is what we go on.", 'error');
+        return null;
+      }
+      if (!res.ok) {
+        set('⚠️', "We couldn't check that payment",
+            'The payment lookup did not answer, so nothing here is confirmed.',
+            'Refresh this page in a moment. If you were charged, contact support — your provider receipt is authoritative.', 'warn');
+        return null;
+      }
+      return res.json();
+    })
+    .then(function(data){
+      if (!data || data.found !== true) return;
+      var st = String(data.status || '').toLowerCase();
+      details(data);
+      if (PAID.indexOf(st) !== -1) {
+        set('🎉', 'Payment confirmed',
+            'Thank you — your payment went through.',
+            '✅ Confirmed by our payment provider. Your plan is active on your account.', 'ok');
+      } else if (st === 'expired' || st === 'cancelled' || st === 'canceled') {
+        set('⌛', 'This checkout expired',
+            'Nothing was charged for this checkout.',
+            'Start again from the pricing page. If your card was charged, contact support.', 'error');
+      } else if (st === 'failed') {
+        set('⚠️', 'That payment did not go through',
+            'Your provider did not complete this payment, so nothing was charged by us.',
+            'Try again from the pricing page, or contact support if your card shows a charge.', 'error');
+      } else {
+        // pending / open / anything else: the provider has not confirmed it yet.
+        set('⏳', 'Payment not confirmed yet',
+            'We have your checkout, but our payment provider has not confirmed the payment yet.',
+            'This can take a minute — refresh this page. If you were charged and this still says pending, contact support and quote the checkout id above.', 'warn');
+      }
+    })
+    .catch(function(){
+      set('⚠️', "We couldn't reach our server",
+          'Nothing has been confirmed here.',
+          'Refresh this page in a moment. If you were charged, contact support — your provider receipt is authoritative.', 'warn');
+    });
+})();
+</script>
+
+
+<section class="navx-rel" aria-labelledby="navx-rel-h"><h2 id="navx-rel-h">Keep exploring missedcallrespondr</h2><ul><li><a href="/guide.html">Guide</a></li><li><a href="/">Home</a></li><li><a href="/terms.html">Terms of Service</a></li><li><a href="/privacy.html">Privacy Policy</a></li></ul></section>
+</body>
+</html>
