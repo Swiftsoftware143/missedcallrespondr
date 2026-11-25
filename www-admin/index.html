@@ -5078,7 +5078,8 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
   //   GET    /api-keys                      -> { api_keys: [{id,name,key_prefix,created_at,
   //                                              last_used_at,revoked_at,recoverable}] }
   //   POST   /api-keys                      -> 201 CreatedApiKey{token} | 409 when a live one exists
-  //   POST   /api-keys/:id/reveal {password}-> { token, key_prefix }  (CURRENT password required)
+  //   POST   /api-keys/:id/reveal {} -> { token, key_prefix }  (session only — no password;
+  //                                                   plan §6.2: View is one click; keys refused 403)
   //   POST   /api-keys/:id/regenerate       -> CreatedApiKey{token}
   //   DELETE /api-keys/:id                  -> { message }
   // The server records every reveal, rotate and revoke itself, so this screen never claims an
@@ -5097,11 +5098,10 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     const live = (st.list || []).filter(k => !k.revoked_at);
     const showToken = (token, prefix) => { st.token = token; st.tokenPrefix = prefix || ''; renderApp(); };
     const view = async (k) => {
-      const pw = prompt('Enter YOUR account password to show this key. Every view is recorded.');
-      if (!pw) return;
+      // One click (David 2026-11-25, plan §6.2): the session is the only check; the view is audited.
       st.busy = true;
       try {
-        const r = await API.post('/api-keys/' + k.id + '/reveal', { password: pw });
+        const r = await API.post('/api-keys/' + k.id + '/reveal', {});
         showToken(r.token, r.key_prefix || k.key_prefix);
       } catch (e) { alert('Could not show the key: ' + (e.message || 'unknown error')); }
       st.busy = false; renderApp();
@@ -5139,7 +5139,7 @@ const PaymentProviderModal = ({ st, closeForm, save, test }) => {
     const cell = { fontSize: '12px', color: 'var(--muted)' };
     return html`<div>
       <h2 class="text-xl font-bold mb-1">API Keys</h2>
-      <p class="text-sm text-gray-500 mb-4">This workspace's key for the MissedCall Respondr API and MCP server. It is created with your account, it never expires, and you can view it again at any time — each view asks for your password and is recorded.</p>
+      <p class="text-sm text-gray-500 mb-4">This workspace's key for the MissedCall Respondr API and MCP server. It is created with your account, it never expires, and you can view it again at any time — one click, no password, and every view is recorded.</p>
       ${st.err ? html`<div class="text-sm mb-3" style="color:var(--danger)">${st.err}</div>` : null}
       ${st.list === null ? html`<div class="text-sm text-gray-400 py-4">Loading…</div>` : null}
       ${st.list && !st.list.length ? html`<div class="card p-4">
