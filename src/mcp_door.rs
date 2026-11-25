@@ -110,8 +110,8 @@ impl CredentialResolver for KeyAuth {
         // own `resolve_api_key` uses, plus `closed_at`: a closed account's key stops working the
         // moment the account is closed, not at the next restart.
         let row = sqlx::query(
-            "SELECT k.tenant_id, k.name AS key_name, u.role AS owner_role, t.slug AS tenant_slug, \
-                    t.is_active \
+            "SELECT k.id AS key_id, k.tenant_id, k.name AS key_name, u.role AS owner_role, \
+                    t.slug AS tenant_slug, t.is_active \
                FROM api_keys k \
                JOIN users u ON u.id = k.created_by \
                JOIN tenants t ON t.id = k.tenant_id \
@@ -150,11 +150,17 @@ impl CredentialResolver for KeyAuth {
             // A suspended workspace is a liveness refusal, not an unknown token.
             return Err(AuthError::Revoked);
         }
+        let key_id: Uuid = row
+            .try_get("key_id")
+            .map_err(|e| AuthError::Unavailable(format!("api_keys.id: {e}")))?;
         let label: String = key_name.chars().take(40).collect();
+        // The key ROW id is the stable actor id (kanban t_bb4d4d33): a label can repeat and a key's
+        // value can be rotated, but the row id identifies the credential throughout. It is not
+        // part of the secret.
         let subject = if label.trim().is_empty() {
-            format!("{tenant_slug} (key)")
+            format!("{tenant_slug} (key #{key_id})")
         } else {
-            format!("{tenant_slug} (key {})", label.trim())
+            format!("{tenant_slug} (key {} #{key_id})", label.trim())
         };
         // A read-only key reads and nothing else; a workspace key may also write inside its own
         // workspace. The tenant is the credential's own, never an argument.
