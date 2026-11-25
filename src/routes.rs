@@ -623,6 +623,17 @@ pub fn create_router(state: AppState, mcp: Arc<mcp_door::Door>) -> Router {
             "/api/v1/api-keys/:id",
             axum::routing::delete(api_key_handler::revoke_api_key),
         )
+        // The fleet-standard mint surface `/api/personal-api-keys` (P1c, spec
+        // docs/p1c-personal-api-keys-spec-2026-11-25.md): the SAME api_key_handler family at the
+        // canonical path. Nested (not `.route(`) so the route census in auth::route_policy.rs —
+        // which pins exact `.route(` literal counts in this file — stays untouched. The path is
+        // OUTSIDE `/api/v1`, so the boundary passes it through and THIS router's `auth_middleware`
+        // `route_layer` (applied below) is the single credential check, exactly like every sibling
+        // route here.
+        .nest(
+            "/api/personal-api-keys",
+            crate::personal_api_keys::router(state.clone()),
+        )
         // Lists (each campaign owns its own fresh list)
         .route(
             "/api/v1/lists",

@@ -33,6 +33,7 @@ mod probe_sweep;
 // The workspace model and the multi-address private inbox, ported from ADASwift/CoreSwift
 // (kanban t_44028656).
 mod module_registry;
+mod personal_api_keys;
 mod private_email;
 mod routes;
 mod secret_box;

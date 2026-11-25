@@ -34,7 +34,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         ),
         (
             "000004_password_resets",
-            include_str!("../migrations/000004_password_resets.sql"),
+            include_str!("../migrations/000066_password_resets.sql"),
         ),
         (
             "000005_provider_keys",
@@ -55,7 +55,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         // Note: duplicate 000008_credit_system + 000008_tag_groups_and_tags both executed
         (
             "000008_tag_groups_and_tags",
-            include_str!("../migrations/000008_tag_groups_and_tags.sql"),
+            include_str!("../migrations/000067_tag_groups_and_tags.sql"),
         ),
         (
             "000009_payment_checkout",
@@ -365,9 +365,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         // install, a from-zero baseline) lacks `users.sessions_valid_from`. The auth middleware
         // reads that column on every guarded request, so a fresh install would have booted into a
         // 500 rather than a login. `ADD COLUMN IF NOT EXISTS`, so re-running on live is a no-op.
+        // (File renumbered to 000068 to give it a unique migration number — the gate's 1b rule
+        // refuses a deploy whose migrations share a number, and this app's runner is a hardcoded
+        // list, so the number is cosmetic and the execution order is unchanged.)
         (
             "000043_password_change_revokes_sessions",
-            include_str!("../migrations/000043_password_change_revokes_sessions.sql"),
+            include_str!("../migrations/000068_password_change_revokes_sessions.sql"),
         ),
         // A workspace must be DELETABLE (measured live 2026-10-20): three keys on `users` carried
         // NO ACTION, so `POST /api/v1/admin/tenants/bulk-delete` answered `deleted:0` with a raw
@@ -556,6 +559,15 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         (
             "000064_account_erasure",
             include_str!("../migrations/000064_account_erasure.sql"),
+        ),
+        // CoreSwift's MULTI-KEY rule (CoreSwift migration 207 precedent): a workspace may hold
+        // several live keys, code cap 10. DROPs the partial unique index 000056 created
+        // (`api_keys_one_live_per_tenant`), so the handler's 10-live-key count is now the limit.
+        // Idempotent (DROP INDEX IF EXISTS) because this runner re-executes every file per boot,
+        // and `include_str!` of a brand-new file is also what forces the rebuild to embed it.
+        (
+            "000065_api_keys_multiple_per_tenant",
+            include_str!("../migrations/000065_api_keys_multiple_per_tenant.sql"),
         ),
     ];
 

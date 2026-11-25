@@ -21,7 +21,8 @@
 //! Routes (tenant-scoped — every signed-in user manages THEIR workspace's keys, no admin gate):
 //!   GET    /api/v1/api-keys             list this tenant's keys (never the plaintext)
 //!   POST   /api/v1/api-keys             mint one — returns the plaintext (still viewable later);
-//!                                       409 when a live key already exists (one per workspace)
+//!                                       409 at the 10-live-key cap (CoreSwift multi-key,
+//!                                       migration 000065)
 //!   POST   /api/v1/api-keys/:id/reveal  show a key again — requires the caller's CURRENT password
 //!   DELETE /api/v1/api-keys/:id         revoke one (soft: sets `revoked_at`)
 //!   POST   /api/v1/api-keys/:id/regenerate  one atomic retire-then-mint; the old key 401s at once
@@ -227,9 +228,10 @@ pub async fn list_api_keys(
 /// `POST /api/v1/api-keys` — mint a key. The plaintext is returned here AND stays viewable via
 /// `reveal`, so "shown once" is never the customer's only chance.
 ///
-/// One live key per workspace: a second mint is refused with 409 up front (the customer is told
-/// to Regenerate instead), and the partial unique index `api_keys_one_live_per_tenant` is the
-/// store-level backstop that makes the same rule hold under concurrency.
+/// Multi-key (CoreSwift's rule, migration 000065): a workspace may hold up to 10 live keys, so a
+/// second consumer can hold its own labelled key without rotating the account's working one. An
+/// eleventh mint is refused with 409 up front; the code cap is now the limit, where the dropped
+/// partial unique index `api_keys_one_live_per_tenant` used to be the store-level backstop.
 pub async fn create_api_key(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -244,15 +246,16 @@ pub async fn create_api_key(
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "API key".to_string());
 
-    let already: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM api_keys WHERE tenant_id = $1 AND revoked_at IS NULL)",
+    let live_keys: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM api_keys WHERE tenant_id = $1 AND revoked_at IS NULL",
     )
     .bind(tenant_id)
     .fetch_one(&state.pool)
     .await?;
-    if already {
+    if live_keys >= 10 {
         return Err(AppError::Conflict(
-            "you already have a key — use Regenerate".to_string(),
+            "This account already has 10 active API keys. Revoke one before minting another."
+                .to_string(),
         ));
     }
 
