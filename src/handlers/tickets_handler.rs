@@ -26,6 +26,9 @@ pub struct ListQuery {
     /// Requests queue, which asks for the two sources a plan change is filed under. Omitted, every
     /// source comes back, so no existing caller changes shape.
     pub source: Option<String>,
+    /// `?plan_only=1` narrows the operator's list to plan-change requests only
+    /// (`source IN ('plan_request','billing')`). Omitted or `0`, the list is unchanged.
+    pub plan_only: Option<i64>,
 }
 
 /// Is the caller a PLATFORM OPERATOR — the team that answers plan requests?
@@ -55,6 +58,22 @@ fn caller_is_operator(claims: &Claims) -> bool {
 /// waiting on us"), so the guard and the queue can never disagree about what "handled" means.
 fn closes_request(status: &str) -> bool {
     matches!(status.trim().to_lowercase().as_str(), "resolved" | "closed")
+}
+
+/// Map a STORED status to the canonical three-state queue vocabulary.
+///
+/// The operator's plan-request queue speaks exactly `open` -> `contacted` -> `closed` (contract
+/// 2026-11-27). The app's own stored vocabulary is free text (`open`, `in_progress`, `resolved`,
+/// `closed`, …), so the read maps it one-directionally and totally: `open` stays `open`; anything
+/// meaning "we reached the customer" reads `contacted`; anything meaning "finished" reads `closed`;
+/// and anything unrecognised reads `open` so no row can hide from the queue.
+fn queue_status(status: &str) -> &'static str {
+    match status.trim().to_lowercase().as_str() {
+        "open" => "open",
+        "in_progress" | "pending" | "contacted" => "contacted",
+        "resolved" | "closed" | "done" | "solved" | "declined" | "withdrawn" => "closed",
+        _ => "open",
+    }
 }
 
 /// A CUSTOMER MAY NOT CLOSE THEIR OWN REQUEST (kanban t_d23f1330, mirrored 2026-11-18).
@@ -151,6 +170,7 @@ pub async fn list(
     // THEIR workspace, and scoping the read to the operator's own workspace made the one screen built
     // to work those requests permanently empty. The customer arm below keeps the strict scope.
     if caller_is_operator(&claims) {
+        let plan_only = q.plan_only.unwrap_or(0) != 0;
         let rows = sqlx::query_as::<_, OperatorTicket>(
             r#"SELECT t.id, t.tenant_id, t.subject, t.status, t.priority, t.assigned_to,
                       t.contact_id, t.source, t.created_at, t.updated_at,
@@ -170,15 +190,33 @@ pub async fn list(
                    LIMIT 1
                ) u ON TRUE
                WHERE ($1::text IS NULL OR t.source = $1)
+                 AND (NOT $4::bool OR t.source IN ('plan_request','billing'))
                ORDER BY t.created_at DESC
                LIMIT $2 OFFSET $3"#,
         )
         .bind(&q.source)
         .bind(limit)
         .bind(offset)
+        .bind(plan_only)
         .fetch_all(&state.pool)
         .await?;
-        return Ok(Json(serde_json::json!(rows)));
+        // Keep the raw `status` and add the canonical `queue_status` beside it, so the operator's
+        // three-state queue reads `open`/`contacted`/`closed` without changing what any existing
+        // caller of this route already sees.
+        let out: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|r| {
+                let mut v = serde_json::to_value(&r).unwrap_or_else(|_| serde_json::json!({}));
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert(
+                        "queue_status".to_string(),
+                        serde_json::json!(queue_status(&r.status)),
+                    );
+                }
+                v
+            })
+            .collect();
+        return Ok(Json(serde_json::json!(out)));
     }
     let items = match (&q.status, &q.priority) {
         (Some(s), Some(p)) => sqlx::query_as::<_, Ticket>(
@@ -898,7 +936,20 @@ pub async fn update(
     // BEFORE the UPDATE, so a refusal leaves the row untouched and queues no mail.
     refuse_customer_close(&claims, req.status.as_deref())?;
     let now = chrono::Utc::now();
-    let next_status = req.status.as_ref().unwrap_or(&existing.status).clone();
+    // Canonical write (contract 2026-11-27): the operator queue's `contacted` stores as the app's
+    // own `in_progress`; `open` and `closed` already match the stored vocabulary; every other value
+    // keeps its free-text behaviour.
+    let next_status = req
+        .status
+        .as_ref()
+        .map(|s| {
+            if s.trim().eq_ignore_ascii_case("contacted") {
+                "in_progress".to_string()
+            } else {
+                s.clone()
+            }
+        })
+        .unwrap_or_else(|| existing.status.clone());
     sqlx::query(
         "UPDATE tickets SET subject=$1, status=$2, priority=$3, assigned_to=$4, contact_id=$5, updated_at=$6 WHERE id=$7",
     )
